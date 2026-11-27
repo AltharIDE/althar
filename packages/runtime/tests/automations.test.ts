@@ -481,6 +481,99 @@ describe('automations', () => {
     },
   )
 
+  it.live('are proposed and run monthly: on a day of the month or the nth weekday, a short month on its last day', () => {
+    const clock = clockAt('1998-10-21T10:00:00Z')
+    return Effect.gen(function* () {
+      const automations = yield* Automations
+      const instance = yield* Instance
+      const queries = yield* Queries
+      const projectId = yield* opened
+      const threadId = yield* (yield* Coordinator).thread(projectId)
+      const coordinator: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const cards = Effect.map(queries.coordinator(projectId), (snapshot) =>
+        snapshot.items.flatMap((item): ReadonlyArray<AutomationCard> => (item.kind === 'automation' ? [item.content] : [])),
+      )
+      const propose = (name: string, when: object) =>
+        callTool(coordinator, 'propose_automation', { name, prompt: 'Tidy up.', when, lead: { agent: 'codex' }, ends_in: 'nothing' })
+
+      assert.match(
+        yield* propose('Dependencies', { nth_weekday: { nth: 'first', weekday: 'monday' }, at: '9:00' }),
+        /^Proposed the automation “Dependencies”, monthly, on the first Monday at 9:00\./,
+      )
+      assert.match(
+        yield* propose('Changelog', { day_of_month: 1, at: '09:00' }),
+        /^Proposed the automation “Changelog”, monthly, on the 1st at 9:00\./,
+      )
+      assert.match(
+        yield* propose('Month end', { day_of_month: -1, at: '17:00' }),
+        /^Proposed the automation “Month end”, monthly, on the last day at 17:00\./,
+      )
+      assert.match(
+        yield* propose('Branches', { nth_weekday: { nth: 'last', weekday: 'friday' }, at: '16:00' }),
+        /monthly, on the last Friday at 16:00\./,
+      )
+      const [first, , , last] = yield* cards
+      assert.deepStrictEqual(first?.definition.schedule, { every: 'month', on: { weekday: 1, nth: 1 }, at: '09:00' })
+      assert.deepStrictEqual(last?.definition.schedule, { every: 'month', on: { weekday: 5, nth: -1 }, at: '16:00' })
+      // The first Monday of November is the 2nd, at 9:00 in London, once its clocks are back.
+      assert.strictEqual(first?.nextAt, '1998-11-02T09:00:00.000Z')
+      // The last Friday of October is the 30th, at 16:00 in London, whose clocks went back on the 25th.
+      assert.strictEqual(last?.nextAt, '1998-10-30T16:00:00.000Z')
+
+      // It is one way of saying it: a day of the month with days of the week, or two kinds at once, says nothing.
+      for (const when of [
+        { day_of_month: 1, days: ['monday'], at: '09:00' },
+        { day_of_month: 1, nth_weekday: { nth: 'first', weekday: 'monday' }, at: '09:00' },
+        { day_of_month: 32, at: '09:00' },
+        { day_of_month: 0, at: '09:00' },
+        { nth_weekday: { nth: 'first', weekday: 'monday' }, at: '9am' },
+      ])
+        assert.match(yield* propose('Bad', when), /Say when as days and a time/)
+
+      // Turned on, the first Monday's run comes then, and once.
+      const automationId = (yield* automations.list(projectId)).find((one) => one.name === 'Dependencies')?.id ?? ''
+      yield* automations.turnOn(automationId, instance.personId)
+      clock.set('1998-11-02T09:00:05Z')
+      const [ran] = yield* until(occurrencesOf(automationId), (rows) => rows.length === 1)
+      assert.deepInclude(ran, { cause: 'schedule', slot: '1998-11-02T09:00' })
+      assert.strictEqual((yield* automations.read(automationId)).nextAt, '1998-12-07T09:00:00.000Z')
+
+      // Changed to another day of the month, it waits for the person, its card saying what it was.
+      assert.match(
+        yield* callTool(coordinator, 'change_automation', { automation: automationId, when: { day_of_month: 31, at: '09:00' } }),
+        /waits for the person to turn it on again/,
+      )
+      const changed = (yield* cards).at(-1)
+      assert.deepStrictEqual(changed?.was?.schedule, { every: 'month', on: { weekday: 1, nth: 1 }, at: '09:00' })
+      assert.deepStrictEqual(changed?.definition.schedule, { every: 'month', on: { day: 31 }, at: '09:00' })
+    }).pipe(Effect.provide(clock.on(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { automations: clock.options }))))))
+  })
+
+  it.live('count a new schedule from the change: no run for a slot it has from before, then the first future one', () => {
+    // Thursday 30 April 2026, 8:00 in London: a Monday-only automation has nothing due today.
+    const clock = clockAt('2026-04-30T07:00:00Z')
+    return Effect.gen(function* () {
+      const automations = yield* Automations
+      const instance = yield* Instance
+      const projectId = yield* opened
+      const mondays: AutomationDefinition = { ...NOTES, schedule: { every: 'week', days: [1], at: '09:00' } }
+      const automationId = yield* automations.make({ projectId, definition: mondays, on: true, actorId: instance.personId })
+      // At noon, its page changes it to the 31st at 9:00: April has 30 days, so its slot would be this morning's 9:00.
+      clock.set('2026-04-30T11:00:00Z')
+      yield* Effect.sleep('300 millis')
+      yield* automations.change(automationId, { ...mondays, schedule: { every: 'month', on: { day: 31 }, at: '09:00' } }, instance.personId)
+      clock.set('2026-04-30T11:05:00Z')
+      yield* Effect.sleep('400 millis')
+      assert.deepStrictEqual(yield* occurrencesOf(automationId), [])
+      assert.strictEqual((yield* automations.read(automationId)).nextAt, '2026-05-31T08:00:00.000Z')
+      // The first slot after the change runs.
+      clock.set('2026-05-31T08:00:05Z')
+      const [ran, ...rest] = yield* until(occurrencesOf(automationId), (rows) => rows.length >= 1)
+      assert.deepInclude(ran, { cause: 'schedule', slot: '2026-05-31T09:00' })
+      assert.lengthOf(rest, 0)
+    }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options }))))
+  })
+
   it.live('run on an agent that pays per use, as on any other', () => {
     const clock = clockAt('2026-10-21T07:59:00Z')
     return Effect.gen(function* () {

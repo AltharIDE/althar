@@ -14,6 +14,7 @@ import {
   AutomationAsk,
   AutomationCard,
   type AutomationCardProps,
+  type AutomationMonth,
   AutomationNote,
   type AutomationPick,
   type AutomationTime,
@@ -76,9 +77,19 @@ function Card(props: Partial<AutomationCardProps>) {
   const [reviewOn, setReviewOn] = useState(props.review?.on ?? false)
   const [prompt, setPrompt] = useState(props.prompt ?? PROMPT)
   const [time, setTime] = useState<AutomationTime>({ days: [1, 2, 3, 4, 5], at: '09:00' })
+  const [month, setMonth] = useState<AutomationMonth>({ on: { weekday: 1, nth: 1 }, at: '09:00' })
   const own = WHEN.some((option) => option.value === when)
     ? WHEN
-    : [...WHEN, { value: when, label: `Every ${time.days.length} days at ${time.at}` }]
+    : [
+        ...WHEN,
+        {
+          value: when,
+          label:
+            when === 'month'
+              ? `Monthly, on ${'day' in month.on ? `day ${month.on.day}` : `weekday ${month.on.nth}`} at ${month.at}`
+              : `Every ${time.days.length} days at ${time.at}`,
+        },
+      ]
   return (
     <AutomationCard
       name="Nightly bump"
@@ -90,6 +101,11 @@ function Card(props: Partial<AutomationCardProps>) {
       onTimeChange={(chosen) => {
         setTime(chosen)
         setWhen('own')
+      }}
+      month={month}
+      onMonthChange={(chosen) => {
+        setMonth(chosen)
+        setWhen('month')
       }}
       ends={ENDS}
       limits={LIMITS}
@@ -213,6 +229,98 @@ export const AnotherTime: Story = {
   },
 }
 
+/** Monthly…: a day of the month, or the nth weekday of it, and a time, in place under When. A day some months lack says so. */
+export const Monthly: Story = {
+  render: () => <Card />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: /Every night at 2:00/ }))
+    await userEvent.click(await within(document.body).findByRole('menuitem', { name: 'Monthly…' }))
+    const by = await c.findByRole('radiogroup', { name: 'Which day of the month' })
+    // It starts as the schedule is: the first Monday, its choice in focus.
+    await waitFor(() => expect(within(by).getByRole('radio', { name: 'Weekday' })).toHaveFocus())
+    await expect(c.getByRole('combobox', { name: 'Which weekday of the month' })).toHaveTextContent('First')
+    // A day of the month: the 31st, which some months lack.
+    await userEvent.click(within(by).getByRole('radio', { name: 'Day of the month' }))
+    await userEvent.click(c.getByRole('combobox', { name: 'Day of the month' }))
+    await userEvent.click(await within(document.body).findByRole('option', { name: '31st' }))
+    await expect(c.getByText('A month without a 31st runs on its last day.')).toBeInTheDocument()
+    // Or a weekday: the last Friday.
+    await userEvent.click(within(by).getByRole('radio', { name: 'Weekday' }))
+    await expect(c.queryByText('A month without a 31st runs on its last day.')).toBeNull()
+    await userEvent.click(c.getByRole('combobox', { name: 'Which weekday of the month' }))
+    await userEvent.click(await within(document.body).findByRole('option', { name: 'Last' }))
+    await userEvent.click(c.getByRole('combobox', { name: 'Weekday' }))
+    await userEvent.click(await within(document.body).findByRole('option', { name: 'Friday' }))
+    await userEvent.click(c.getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(c.queryByRole('radiogroup', { name: 'Which day of the month' })).toBeNull())
+    // An empty time keeps it open, saying so at the time.
+    await userEvent.click(c.getByRole('button', { name: /Monthly/ }))
+    await userEvent.click(await within(document.body).findByRole('menuitem', { name: 'Monthly…' }))
+    await userEvent.clear(await c.findByLabelText('Time'))
+    await userEvent.click(c.getByRole('button', { name: 'Done' }))
+    await expect(c.getByText('Set a time first')).toBeInTheDocument()
+    await expect(c.getByLabelText('Time')).toHaveFocus()
+    await userEvent.type(c.getByLabelText('Time'), '10:00')
+    await expect(c.queryByText('Set a time first')).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(c.queryByRole('radiogroup', { name: 'Which day of the month' })).toBeNull())
+    // Escape leaves it as it was.
+    await userEvent.click(c.getByRole('button', { name: /Monthly/ }))
+    await userEvent.click(await within(document.body).findByRole('menuitem', { name: 'Monthly…' }))
+    await c.findByRole('radiogroup', { name: 'Which day of the month' })
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(c.queryByRole('radiogroup', { name: 'Which day of the month' })).toBeNull())
+  },
+}
+
+/** A monthly schedule on a day some months lack, as the coordinator set it: the card says so once, under When. */
+export const MonthlyShortMonths: Story = {
+  render: (args) => (
+    <AutomationCard
+      {...args}
+      when={[...WHEN, { value: 'month', label: 'Monthly, on the 31st at 9:00' }]}
+      whenValue="month"
+      next="on 30 Apr at 9:00"
+      whenNote="A month without a 31st runs on its last day."
+      picker={() => 'Claude Opus 5'}
+      review={{ on: false }}
+      limits={LIMITS}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('A month without a 31st runs on its last day.')).toBeInTheDocument()
+    await expect(c.getByText('next on 30 Apr')).toBeInTheDocument()
+  },
+}
+
+/** The coordinator changed it to a monthly schedule: the old one struck through, and the date the new one first runs, for deciding whether to turn it on. */
+export const ChangedToMonthly: Story = {
+  args: { onUndo: fn(), onTurnOn: fn() },
+  render: (args) => (
+    <AutomationCard
+      {...args}
+      stage="changed"
+      next="on 30 Apr at 9:00"
+      when={[...WHEN, { value: 'month', label: 'Monthly, on the 31st at 9:00' }]}
+      whenValue="month"
+      whenWas="Every night at 2:00"
+      whenNote="A month without a 31st runs on its last day."
+      picker={() => 'Claude Opus 5'}
+      review={{ on: false }}
+      limits={LIMITS}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Monthly, on the 31st at 9:00')).toBeInTheDocument()
+    await expect(c.getByText('Every night at 2:00').closest('s')).not.toBeNull()
+    await expect(c.getByText(/· next on 30 Apr$/)).toBeInTheDocument()
+    await expect(c.getByText('A month without a 31st runs on its last day.')).toBeInTheDocument()
+  },
+}
+
 /** What the coordinator changed, while it is on: the old values struck through; it holds from its next run, or is undone. */
 export const Changed: Story = {
   args: { onUndo: fn(), onOpen: fn() },
@@ -237,6 +345,8 @@ export const Changed: Story = {
     await expect(c.getByText('Automation, changed · Meridian')).toBeInTheDocument()
     await expect(c.getByText('Every Sunday at 3:00')).toBeInTheDocument()
     await expect(c.getByText('Every night at 2:00').closest('s')).not.toBeNull()
+    // What it was, struck through, and when it runs next, side by side.
+    await expect(c.getByText(/· next Sunday$/)).toBeInTheDocument()
     await expect(c.getByText('Holds from its next run, Sunday at 3:00.')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Undo' }))
     await expect(args.onUndo).toHaveBeenCalled()

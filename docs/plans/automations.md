@@ -244,6 +244,22 @@ If the computer is asleep at 2:00, it runs when it wakes, until 14:00."
   the person's words into the rule. At least an hour apart: Claude's
   routines hold an hour, and an agent-made automation every ten minutes is
   how Codex users spent a month's allowance in a day.
+- **Three shapes, no cron:** `FREQ=WEEKLY` (some days of the week at a time),
+  `FREQ=HOURLY` (a minute past every hour) and `FREQ=MONTHLY`. A monthly
+  one is `{ every: 'month', on, at }`, where `on` is a day of the month
+  (`{ day: 1..31 }`, or `{ day: -1 }` for the last day) or the nth weekday of
+  it (`{ weekday, nth }`, `nth` 1 to 4 or -1 for the last: `BYMONTHDAY` or
+  `BYDAY` with a position). "The 1st at 9:00", "the second Tuesday", "the last
+  Friday", "the last day of the month". The card says it as "Monthly, on the
+  first Monday at 9:00", with the next run's date. Schedules kept before it
+  decode as they did. Raw cron and every-other-week stay out.
+- **Short months:** a day the month doesn't have (the 31st in April, the 30th
+  or 29th in February) runs on that month's last day. The card says so once,
+  when the schedule is set (a day from the 29th on), not on every showing.
+  The nth weekday always exists: the fifth isn't offered, and "last" counts
+  from the month's end. The slots step by month, not by day: the month's
+  slot is worked out from its year and month, so a leap February, a 31-day
+  month and the year's end need no special case.
 - **9:00 where the person is.** Keep the zone, but read the time in the
   computer's zone of the moment, as Calendar's floating times do, so travelling
   doesn't move the morning review to 3:00. The zone is still kept, for a
@@ -263,8 +279,9 @@ If the computer is asleep at 2:00, it runs when it wakes, until 14:00."
 - **Missed:** once, if still within a window (half the time to its next
   slot, at most 12 hours, from when it was due rather than from its
   staggered start: a nightly 2:00 still runs at 8:52, a weekday 9:00 review
-  still runs at 14:00, even on a Friday, and an hourly one only within half
-  an hour), otherwise "missed", said in its history. Never every slot it
+  still runs at 14:00, even on a Friday, a monthly one gets the whole 12 hours
+  (a Mac opened late on the 1st still runs it), and an hourly one only within
+  half an hour), otherwise "missed", said in its history. Never every slot it
   missed: launchd and systemd coalesce to one, Claude's desktop tasks run
   "exactly one catch-up run for the most recently missed time", and Codex's
   replayed eight runs in 21 minutes.

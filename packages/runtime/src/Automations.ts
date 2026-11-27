@@ -186,6 +186,14 @@ export const widens = (before: AutomationDefinition, after: AutomationDefinition
   return now > was || JSON.stringify(rest) !== JSON.stringify(next)
 }
 
+/**
+ * Whether a change moves an automation that is on to another schedule: the new
+ * schedule counts from the moment of the change, so a slot its new rule has
+ * before then, which the old rule didn't have, doesn't run late.
+ */
+const rescheduled = (before: AutomationDefinition, after: AutomationDefinition) =>
+  JSON.stringify(before.schedule) !== JSON.stringify(after.schedule)
+
 /** Where a run's outcome leaves its slot, of the occurrences that slot has: made something where any did, failed only where all did. */
 const slotOutcome = (states: ReadonlyArray<AutomationRun['state']>): 'made' | 'nothing' | 'failed' | null => {
   const ended = states.filter((state) => state === 'made' || state === 'nothing' || state === 'failed')
@@ -1481,7 +1489,14 @@ export class Automations extends Context.Service<
           provide(
             Effect.gen(function* () {
               const row = yield* load(automationId)
-              yield* define(row, definition, actorId, 'automation.changed')
+              const was = yield* definitionIn(row)
+              yield* define(
+                row,
+                definition,
+                actorId,
+                'automation.changed',
+                row.state === 'on' && rescheduled(was, definition) ? { since: yield* timestamp } : {},
+              )
             }),
           ),
         changeFor: (input) =>
@@ -1496,7 +1511,11 @@ export class Automations extends Context.Service<
                 input.definition,
                 input.actorId,
                 'automation.changed',
-                again ? { state: 'proposed', since: null, pausedBy: null, pauseReason: null } : {},
+                again
+                  ? { state: 'proposed', since: null, pausedBy: null, pauseReason: null }
+                  : row.state === 'on' && rescheduled(was, input.definition)
+                    ? { since: yield* timestamp }
+                    : {},
               )
               yield* cardIn({
                 projectId: row.projectId,

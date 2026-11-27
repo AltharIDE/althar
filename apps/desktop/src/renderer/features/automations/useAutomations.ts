@@ -15,7 +15,7 @@ import { canCall, messageOf } from '../../data/client'
 import { useGoneAtOnce } from '../../data/goneAtOnce'
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { FIRST_SCHEDULE, needsYou, type Starter } from './words'
+import { FIRST_SCHEDULE, needsYou, nextAtAfter, type Starter } from './words'
 
 /*
  * A project's automations, as its Automations tab shows them, and one, as
@@ -114,6 +114,25 @@ export interface AutomationModel {
   readonly setPostsReviews: (on: boolean) => void
 }
 
+/** What a definition is, whatever order its keys came in: how a read tells it has what was sent. */
+const canonical = (value: unknown): string =>
+  JSON.stringify(value, (_key, inner: unknown) =>
+    typeof inner === 'object' && inner !== null && !Array.isArray(inner)
+      ? Object.fromEntries(Object.entries(inner).sort(([a], [b]) => (a < b ? -1 : 1)))
+      : inner,
+  )
+
+/** An automation as a change to its definition leaves it: its words, and its next run with its schedule, so the label and the date never disagree. */
+const editedBy = (was: AutomationView, definition: AutomationDefinition): AutomationView => ({
+  ...was,
+  definition,
+  name: definition.name,
+  prompt: definition.prompt,
+  schedule: definition.schedule,
+  nextAt: nextAtAfter(was.nextAt, was.definition.schedule, definition.schedule),
+  work: definition.work.kind,
+})
+
 export const useAutomation = (automationId: string): AutomationModel => {
   const { client, cache } = useServices()
   const read = useQuery({ ...reads(client).automation(automationId), enabled: canCall(client, 'GetAutomation') })
@@ -121,7 +140,14 @@ export const useAutomation = (automationId: string): AutomationModel => {
   const [pending, setPending] = useState(false)
   // Changes in the order they were made: only the latest failing reads again.
   const made = useRef(0)
-  const view = read.data?.automation ?? null
+  // The definition last sent, kept over what is read until a read has it: a read already on its way when Done was pressed answers with
+  // what the automation was, and mustn't take the page back to it, or the label and the date apart, while the save is pending.
+  const [sent, setSent] = useState<AutomationDefinition | null>(null)
+  const fresh = read.data?.automation ?? null
+  const confirmed = fresh !== null && sent !== null && canonical(fresh.definition) === canonical(sent)
+  const view = fresh !== null && sent !== null && !confirmed ? editedBy(fresh, sent) : fresh
+  // A read has it: what it says is the page's again.
+  if (confirmed) setSent(null)
 
   /** Shows a change at once, as the window keeps the automation. */
   const shown = useCallback(
@@ -148,6 +174,7 @@ export const useAutomation = (automationId: string): AutomationModel => {
         return true
       } catch (failure) {
         if (at !== made.current) return false
+        setSent(null)
         setError(failed(failure))
         const projectId = cache.getQueryData<AutomationSnapshot>(keys.automation(automationId))?.automation.projectId
         void cache.invalidateQueries({ queryKey: keys.automation(automationId) })
@@ -165,14 +192,8 @@ export const useAutomation = (automationId: string): AutomationModel => {
     error: error ?? (read.error === null ? null : failed(read.error)),
     pending,
     change: (definition) => {
-      shown((was) => ({
-        ...was,
-        definition,
-        name: definition.name,
-        prompt: definition.prompt,
-        schedule: definition.schedule,
-        work: definition.work.kind,
-      }))
+      // Not written into the cache, which a read in flight would write over: kept beside it, until a read has it.
+      setSent(definition)
       void send(() => client.changeAutomation(automationId, definition))
     },
     turnOn: () => {

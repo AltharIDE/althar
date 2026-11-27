@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import type { Nth, Weekday } from '@althar/contracts'
 import { AutomationRunState } from '@althar/ui'
 
 import { usualLead } from '../src/renderer/features/automations/lead'
@@ -12,6 +13,9 @@ import {
   limitWords,
   markOf,
   minuteChoices,
+  monthlyOf,
+  monthOf,
+  nextAtAfter,
   needsYou,
   nextShort,
   nextSlot,
@@ -27,6 +31,7 @@ import {
   timeOf,
   weeklyOf,
   whenChoices,
+  whenNoteOf,
   whenValueOf,
   whenWords,
   workOf,
@@ -64,6 +69,64 @@ describe('when an automation runs, in words', () => {
     expect(scheduleOf('friday', own)).toEqual({ every: 'week', days: [5], at: '16:00' })
   })
 
+  it('says a monthly schedule, and offers it as the schedule it is on', () => {
+    const first = { every: 'month' as const, on: { weekday: 1 as const, nth: 1 as const }, at: '09:00' }
+    expect(whenWords(first)).toBe('Monthly, on the first Monday at 9:00')
+    expect(whenValueOf(first)).toBe('own')
+    expect(whenChoices(first).at(-1)).toEqual({ value: 'own', label: 'Monthly, on the first Monday at 9:00' })
+    expect(whenWords({ every: 'month', on: { day: -1 }, at: '17:00' })).toBe('Monthly, on the last day at 17:00')
+  })
+
+  it('tells monthly schedules apart by their day and time', () => {
+    const first = { every: 'month' as const, on: { day: 1 }, at: '09:00' }
+    expect(sameSchedule(first, { every: 'month', on: { day: 1 }, at: '09:00' })).toBe(true)
+    expect(sameSchedule(first, { every: 'month', on: { day: 2 }, at: '09:00' })).toBe(false)
+    expect(sameSchedule(first, { every: 'month', on: { day: 1 }, at: '10:00' })).toBe(false)
+    expect(sameSchedule(first, { every: 'month', on: { weekday: 1, nth: 1 }, at: '09:00' })).toBe(false)
+    expect(sameSchedule(first, { every: 'week', days: [1], at: '09:00' })).toBe(false)
+    expect(sameSchedule({ every: 'week', days: [1], at: '09:00' }, first)).toBe(false)
+    expect(sameSchedule(first, { every: 'hour', minute: 0 })).toBe(false)
+  })
+
+  it('starts Monthly from the schedule’s own day, or the first Monday at its time (9:00 for an hourly one), and makes a monthly one', () => {
+    expect(monthOf({ every: 'month', on: { day: 15 }, at: '07:30' })).toEqual({ on: { day: 15 }, at: '07:30' })
+    expect(monthOf({ every: 'week', days: [3], at: '07:30' })).toEqual({ on: { weekday: 1, nth: 1 }, at: '07:30' })
+    expect(monthOf({ every: 'hour', minute: 0 })).toEqual({ on: { weekday: 1, nth: 1 }, at: '09:00' })
+    const was = { every: 'hour' as const, minute: 0 }
+    expect(monthlyOf({ on: { day: 31 }, at: '08:00' }, was)).toEqual({ every: 'month', on: { day: 31 }, at: '08:00' })
+    expect(monthlyOf({ on: { day: -1 }, at: '08:00' }, was)).toEqual({ every: 'month', on: { day: -1 }, at: '08:00' })
+    expect(monthlyOf({ on: { weekday: 5, nth: -1 }, at: '16:00' }, was)).toEqual({
+      every: 'month',
+      on: { weekday: 5, nth: -1 },
+      at: '16:00',
+    })
+    // What no schedule says leaves it as it was.
+    expect(monthlyOf({ on: { day: 32 }, at: '08:00' }, was)).toBe(was)
+    expect(monthlyOf({ on: { weekday: 8, nth: 1 }, at: '08:00' }, was)).toBe(was)
+    expect(monthlyOf({ on: { weekday: 1, nth: 5 }, at: '08:00' }, was)).toBe(was)
+  })
+
+  it('moves the next run with the schedule, and leaves one that has none, or the same schedule, as it is', () => {
+    const weekdays = { every: 'week' as const, days: [1, 2, 3, 4, 5] as const, at: '09:00' }
+    const tomorrow = local(30, 9).toISOString()
+    // The last Friday of September has gone: October's, not tomorrow's.
+    expect(nextAtAfter(tomorrow, weekdays, { every: 'month', on: { weekday: 5, nth: -1 }, at: '09:00' }, NOON)).toBe(
+      local(60, 9).toISOString(),
+    )
+    expect(nextAtAfter(tomorrow, weekdays, { every: 'week', days: [1, 2, 3, 4, 5], at: '09:00' }, NOON)).toBe(tomorrow)
+    expect(nextAtAfter(null, weekdays, { every: 'month', on: { day: 1 }, at: '09:00' }, NOON)).toBeNull()
+  })
+
+  it('says the short-month rule only for a day some months lack', () => {
+    expect(whenNoteOf({ every: 'month', on: { day: 31 }, at: '09:00' })).toBe('A month without a 31st runs on its last day.')
+    expect(whenNoteOf({ every: 'month', on: { day: 30 }, at: '09:00' })).toBe('A month without a 30th runs on its last day.')
+    expect(whenNoteOf({ every: 'month', on: { day: 29 }, at: '09:00' })).toBe('A month without a 29th runs on its last day.')
+    expect(whenNoteOf({ every: 'month', on: { day: 28 }, at: '09:00' })).toBeUndefined()
+    expect(whenNoteOf({ every: 'month', on: { day: -1 }, at: '09:00' })).toBeUndefined()
+    expect(whenNoteOf({ every: 'month', on: { weekday: 5, nth: -1 }, at: '09:00' })).toBeUndefined()
+    expect(whenNoteOf({ every: 'week', days: [1], at: '09:00' })).toBeUndefined()
+  })
+
   it('tells schedules apart by their days and time, or their minute', () => {
     expect(sameSchedule({ every: 'hour', minute: 0 }, { every: 'hour', minute: 0 })).toBe(true)
     expect(sameSchedule({ every: 'hour', minute: 0 }, { every: 'hour', minute: 5 })).toBe(false)
@@ -87,6 +150,29 @@ describe('when an automation runs, in words', () => {
     expect(nextSlot({ every: 'hour', minute: 0 }, NOON)).toEqual(local(29, 13))
     // A schedule with no day it could run on stays where it is.
     expect(nextSlot({ every: 'week', days: [], at: '09:00' }, NOON)).toEqual(NOON)
+  })
+
+  it('works out when a monthly schedule comes next: a short month on its last day, the nth weekday, the last one counted from the end', () => {
+    // NOON is Tuesday 29 September 2026; September has 30 days, and 1 October is a Thursday.
+    const monthly = (on: { day: number } | { weekday: Weekday; nth: Nth }, at = '09:00') => ({ every: 'month' as const, on, at })
+    expect(nextSlot(monthly({ day: 1 }), NOON)).toEqual(local(31, 9))
+    expect(nextSlot(monthly({ day: 29 }, '14:00'), NOON)).toEqual(local(29, 14))
+    expect(nextSlot(monthly({ day: 29 }), NOON)).toEqual(local(59, 9))
+    // The 31st and the last day are the 30th in September.
+    expect(nextSlot(monthly({ day: 31 }), NOON)).toEqual(local(30, 9))
+    expect(nextSlot(monthly({ day: -1 }), NOON)).toEqual(local(30, 9))
+    expect(nextSlot(monthly({ weekday: 1, nth: 1 }), NOON)).toEqual(local(35, 9))
+    expect(nextSlot(monthly({ weekday: 2, nth: 2 }), NOON)).toEqual(local(43, 9))
+    expect(nextSlot(monthly({ weekday: 5, nth: -1 }), NOON)).toEqual(local(60, 9))
+    expect(nextSlot(monthly({ weekday: 2, nth: -1 }, '14:00'), NOON)).toEqual(local(29, 14))
+    expect(nextSlot(monthly({ weekday: 2, nth: -1 }), NOON)).toEqual(local(57, 9))
+    // A leap February has a 29th, and its last Friday is the 25th; across the year's end.
+    const february = new Date(2028, 1, 10, 12)
+    expect(nextSlot(monthly({ day: 31 }), february)).toEqual(new Date(2028, 1, 29, 9))
+    expect(nextSlot(monthly({ weekday: 5, nth: -1 }), february)).toEqual(new Date(2028, 1, 25, 9))
+    expect(nextSlot(monthly({ day: 15 }), new Date(2026, 11, 20, 12))).toEqual(new Date(2027, 0, 15, 9))
+    // Words give it its date: "on 13 Oct at 9:00".
+    expect(nextWords(local(43, 9), NOON)).toBe(`on ${date(local(43, 9))} at 9:00`)
   })
 
   it('says when it runs next as a sentence reads it: today, tonight, tomorrow, on a weekday, or on the date', () => {

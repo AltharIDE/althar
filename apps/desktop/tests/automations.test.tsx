@@ -394,6 +394,88 @@ describe('an automation’s page', () => {
     expect(await screen.findByRole('button', { name: /Every Friday at 7:30/ })).toBeTruthy()
   })
 
+  it('sets a day of every month, or the nth weekday of it, and says what a short month does', async () => {
+    const { client } = fakeClient()
+    withServices(<Room opening="auto1" />, client)
+    await userEvent.click(await screen.findByRole('button', { name: /Every weekday at 9:00/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Monthly…' }))
+    // The 31st: some months lack it.
+    await userEvent.click(await screen.findByRole('radio', { name: 'Day of the month' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Day of the month' }))
+    await userEvent.click(await screen.findByRole('option', { name: '31st' }))
+    expect(screen.getByText('A month without a 31st runs on its last day.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(client.changeAutomation).toHaveBeenLastCalledWith(
+      'auto1',
+      expect.objectContaining({ schedule: { every: 'month', on: { day: 31 }, at: '09:00' } }),
+    )
+    expect(await screen.findByRole('button', { name: /Monthly, on the 31st at 9:00/ })).toBeTruthy()
+    // The page says it once, where it is set, and not again under When.
+    expect(screen.queryByText('A month without a 31st runs on its last day.')).toBeNull()
+
+    // The last Friday at 16:00.
+    await userEvent.click(screen.getByRole('button', { name: /Monthly, on the 31st at 9:00/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Monthly…' }))
+    await userEvent.click(await screen.findByRole('radio', { name: 'Weekday' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Which weekday of the month' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Last' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Weekday' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Friday' }))
+    await userEvent.clear(screen.getByLabelText('Time'))
+    await userEvent.type(screen.getByLabelText('Time'), '16:00')
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(client.changeAutomation).toHaveBeenLastCalledWith(
+      'auto1',
+      expect.objectContaining({ schedule: { every: 'month', on: { weekday: 5, nth: -1 }, at: '16:00' } }),
+    )
+    expect(await screen.findByRole('button', { name: /Monthly, on the last Friday at 16:00/ })).toBeTruthy()
+  })
+
+  it('keeps its next run with its schedule while the save is on its way, over a read that began before Done and answers with what it was', async () => {
+    // Read once as it was; then a read already on its way when Done is pressed, answered only after.
+    let answer: ((snapshot: { cursor: number; automation: ReturnType<typeof automationView> }) => void) | null = null
+    let reads = 0
+    const getAutomation = vi.fn(async () => {
+      reads += 1
+      const was = { cursor: 6, automation: automationView({ nextAt: local(30, 9) }) }
+      return reads === 2 ? new Promise<typeof was>((resolve) => (answer = resolve)) : was
+    })
+    const { client, emit } = fakeClient({
+      getAutomation,
+      // Never answered: the runtime hasn't said yet.
+      changeAutomation: vi.fn(() => new Promise<never>(() => {})),
+    })
+    withServices(<Room opening="auto1" />, client)
+    expect(await screen.findByText('Runs next tomorrow at 9:00')).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: /Every weekday at 9:00/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Monthly…' }))
+    await userEvent.click(await screen.findByRole('radio', { name: 'Weekday' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Which weekday of the month' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Last' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Weekday' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Friday' }))
+    // The feed says it changed: a read goes out, as it was.
+    act(() => emit(changed('automation', 'auto1', null)))
+    await waitFor(() => expect(reads).toBe(2))
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    // The last Friday of September has gone: October's, the 30th at 9:00, and not tomorrow's.
+    const date = new Date(2026, 9, 30, 9).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+    expect(await screen.findByRole('button', { name: /Monthly, on the last Friday at 9:00/ })).toBeTruthy()
+    expect(screen.getByText(`Runs next on ${date} at 9:00`)).toBeTruthy()
+    expect(screen.queryByText('Runs next tomorrow at 9:00')).toBeNull()
+    // The read lands, with the schedule and the date it was: the page keeps what was set, the label and the date together.
+    await act(async () => {
+      expect(answer).not.toBeNull()
+      answer?.({ cursor: 6, automation: automationView({ nextAt: local(30, 9) }) })
+      // The cache takes the read, and the page its render, a tick later.
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+    expect(screen.getByRole('button', { name: /Monthly, on the last Friday at 9:00/ })).toBeTruthy()
+    expect(screen.getByText(`Runs next on ${date} at 9:00`)).toBeTruthy()
+    expect(screen.queryByText('Runs next tomorrow at 9:00')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Every weekday at 9:00/ })).toBeNull()
+  })
+
   it('says what it can’t do, keeping what the runtime kept', async () => {
     const getAutomation = vi.fn(async () => ({ cursor: 6, automation: automationView() }))
     const { client } = fakeClient({

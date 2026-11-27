@@ -4,11 +4,13 @@ import {
   type AutomationStep,
   type AutomationSummary,
   type AutomationWork,
+  type Nth,
   type Schedule,
   scheduleWords,
+  shortMonthsApply,
   type Weekday,
 } from '@althar/contracts'
-import { AutomationRunState } from '@althar/ui'
+import { type AutomationMonth, automationCardText, AutomationRunState } from '@althar/ui'
 import type { AutomationTone } from '@althar/ui/screens'
 
 import { device } from '../../shared/device'
@@ -82,10 +84,12 @@ export const PRESETS: ReadonlyArray<{ readonly value: string; readonly label: st
 /** A schedule a new automation starts on: every weekday at 9:00. */
 export const FIRST_SCHEDULE: Schedule = { every: 'week', days: WEEKDAYS, at: '09:00' }
 
-/** One schedule is the other: the same days, in any order, at the same time, or the same minute of every hour. */
+/** One schedule is the other: the same days, in any order, at the same time, the same day of every month, or the same minute of every hour. */
 export const sameSchedule = (a: Schedule, b: Schedule): boolean => {
   if (a.every === 'hour') return b.every === 'hour' && a.minute === b.minute
   if (b.every === 'hour') return false
+  if (a.every === 'month') return b.every === 'month' && a.at === b.at && JSON.stringify(a.on) === JSON.stringify(b.on)
+  if (b.every === 'month') return false
   const days = (days: ReadonlyArray<Weekday>) => [...new Set(days)].toSorted((x, y) => x - y).join()
   return a.at === b.at && days(a.days) === days(b.days)
 }
@@ -107,9 +111,35 @@ export const whenChoices = (schedule: Schedule): ReadonlyArray<{ readonly value:
 export const scheduleOf = (value: string, current: Schedule): Schedule =>
   PRESETS.find((preset) => preset.value === value)?.schedule ?? current
 
-/** Days and a time to start "Another time…" from: the schedule's own, or every weekday at 9:00 for one that runs every hour. */
+/** Days and a time to start "Another time…" from: the schedule's own, or every weekday at 9:00 (at its time, for a monthly one) for one that isn't weekly. */
 export const timeOf = (schedule: Schedule): { readonly days: ReadonlyArray<number>; readonly at: string } =>
-  schedule.every === 'week' ? { days: schedule.days, at: schedule.at } : { days: WEEKDAYS, at: '09:00' }
+  schedule.every === 'week'
+    ? { days: schedule.days, at: schedule.at }
+    : { days: WEEKDAYS, at: schedule.every === 'month' ? schedule.at : '09:00' }
+
+/** A day of the month and a time to start "Monthly…" from: the schedule's own, or the first Monday at 9:00 (at its time, for a weekly one). */
+export const monthOf = (schedule: Schedule): AutomationMonth =>
+  schedule.every === 'month'
+    ? { on: schedule.on, at: schedule.at }
+    : { on: { weekday: 1, nth: 1 }, at: schedule.every === 'week' ? schedule.at : '09:00' }
+
+const isNth = (nth: number): nth is Nth => nth === 1 || nth === 2 || nth === 3 || nth === 4 || nth === -1
+
+/** A schedule from a day of the month, or the nth weekday of it, and a time of the person's own. */
+export const monthlyOf = (month: AutomationMonth, current: Schedule): Schedule => {
+  const { on } = month
+  if ('day' in on)
+    return on.day === -1 || (Number.isInteger(on.day) && on.day >= 1 && on.day <= 31)
+      ? { every: 'month', on: { day: on.day }, at: month.at }
+      : current
+  return isWeekday(on.weekday) && isNth(on.nth) ? { every: 'month', on: { weekday: on.weekday, nth: on.nth }, at: month.at } : current
+}
+
+/** What a monthly day some months lack says where the schedule is set: "A month without a 31st runs on its last day." */
+export const whenNoteOf = (schedule: Schedule): string | undefined =>
+  shortMonthsApply(schedule) && schedule.every === 'month' && 'day' in schedule.on
+    ? automationCardText.shortMonth(schedule.on.day)
+    : undefined
 
 const isWeekday = (day: number): day is Weekday => Number.isInteger(day) && day >= 1 && day <= 7
 
@@ -138,6 +168,24 @@ export const nextSlot = (schedule: Schedule, now: Date = new Date()): Date => {
     return at
   }
   const [hours = 0, minutes = 0] = schedule.at.split(':').map(Number)
+  if (schedule.every === 'month') {
+    const { on } = schedule
+    for (let ahead = 0; ahead <= 1; ahead++) {
+      const first = new Date(now.getFullYear(), now.getMonth() + ahead, 1, hours, minutes)
+      const last = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()
+      const day =
+        'day' in on
+          ? on.day === -1
+            ? last
+            : Math.min(on.day, last)
+          : on.nth === -1
+            ? last - ((isoDay(new Date(first.getFullYear(), first.getMonth(), last)) - on.weekday + 7) % 7)
+            : 1 + ((on.weekday - isoDay(first) + 7) % 7) + (on.nth - 1) * 7
+      const at = new Date(first.getFullYear(), first.getMonth(), day, hours, minutes)
+      if (at > now) return at
+    }
+    return now
+  }
   for (let ahead = 0; ahead <= 7; ahead++) {
     const at = new Date(now)
     at.setDate(at.getDate() + ahead)
@@ -146,6 +194,14 @@ export const nextSlot = (schedule: Schedule, now: Date = new Date()): Date => {
   }
   return now
 }
+
+/**
+ * The next run once the schedule changes, shown before the runtime says it: the
+ * date the new schedule gives, where the old one gave a date and the schedule
+ * is another. Where nothing was due (paused), nothing is.
+ */
+export const nextAtAfter = (nextAt: string | null, before: Schedule, after: Schedule, now: Date = new Date()): string | null =>
+  nextAt === null || sameSchedule(before, after) ? nextAt : nextSlot(after, now).toISOString()
 
 /* ---- times, as a clock says them --------------------------------------------------------- */
 

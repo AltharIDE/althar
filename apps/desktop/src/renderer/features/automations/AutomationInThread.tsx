@@ -7,7 +7,7 @@ import { messageOf } from '../../data/client'
 import type { AutomationCardContent } from '../../shared/thread'
 import { AutomationCardOf } from './AutomationCardOf'
 import { type AutomationActions, shownAs } from './useAutomations'
-import { nextWords, whenWords } from './words'
+import { nextAtAfter, nextWords, whenWords } from './words'
 import s from './Automations.module.css'
 
 /*
@@ -150,7 +150,7 @@ export function AutomationInThread({
           onChange={(changed) =>
             act(
               () => actions.change(id, changed),
-              (was) => ({ ...was, definition: changed }),
+              (was) => ({ ...was, definition: changed, nextAt: nextAtAfter(was.nextAt, was.definition.schedule, changed.schedule) }),
             )
           }
           onTryOnce={() => act(() => actions.runNow(id, itemId))}

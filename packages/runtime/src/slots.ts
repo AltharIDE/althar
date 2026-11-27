@@ -57,11 +57,46 @@ const timeOf = (at: string) => {
   return { hour, minute }
 }
 
+/** How many days a month has: 28 to 31, February's 29 in a leap year. */
+const daysIn = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate()
+
+/** A month some months on from one, as a year and month. */
+const monthsOn = (year: number, month: number, by: number) => {
+  const index = year * 12 + (month - 1) + by
+  return { year: Math.floor(index / 12), month: (index % 12) + 1 }
+}
+
+/**
+ * The monthly schedule's slot in a month: its day, or the last of the month
+ * where it doesn't have it (the 31st in April, the 30th in February), or the
+ * nth weekday, the last of them counted from the month's end.
+ */
+const slotInMonth = (schedule: Extract<Schedule, { every: 'month' }>, year: number, month: number): Slot => {
+  const { hour, minute } = timeOf(schedule.at)
+  const last = daysIn(year, month)
+  const { on } = schedule
+  if ('day' in on) return slotOf(year, month, on.day === -1 ? last : Math.min(on.day, last), hour, minute)
+  const weekday = (day: number) => weekdayOf(slotOf(year, month, day, 0, 0))
+  const day = on.nth === -1 ? last - ((weekday(last) - on.weekday + 7) % 7) : 1 + ((on.weekday - weekday(1) + 7) % 7) + (on.nth - 1) * 7
+  return slotOf(year, month, day, hour, minute)
+}
+
 /** The schedule's first slot after a local time. */
 export const slotAfter = (schedule: Schedule, local: Slot): Slot => {
   if (schedule.every === 'hour') {
     const here = atTime(local, partsOf(local).hour, schedule.minute)
     return here > local ? here : moved(here, 0, 60)
+  }
+  if (schedule.every === 'month') {
+    const { year, month } = partsOf(local)
+    // This month's slot may be past already; next month's never is.
+    for (let ahead = 0; ahead <= 1; ahead++) {
+      const on = monthsOn(year, month, ahead)
+      const candidate = slotInMonth(schedule, on.year, on.month)
+      if (candidate > local) return candidate
+    }
+    // Unreachable: next month's slot is always after.
+    return moved(local, 31)
   }
   const { hour, minute } = timeOf(schedule.at)
   for (let days = 0; days <= 7; days++) {
@@ -77,6 +112,17 @@ export const slotAtOrBefore = (schedule: Schedule, local: Slot): Slot => {
   if (schedule.every === 'hour') {
     const here = atTime(local, partsOf(local).hour, schedule.minute)
     return here <= local ? here : moved(here, 0, -60)
+  }
+  if (schedule.every === 'month') {
+    const { year, month } = partsOf(local)
+    // This month's slot may not have come yet; last month's always has.
+    for (let back = 0; back <= 1; back++) {
+      const on = monthsOn(year, month, -back)
+      const candidate = slotInMonth(schedule, on.year, on.month)
+      if (candidate <= local) return candidate
+    }
+    // Unreachable: last month's slot is always before.
+    return moved(local, -31)
   }
   const { hour, minute } = timeOf(schedule.at)
   for (let days = 0; days <= 7; days++) {
@@ -132,7 +178,11 @@ export const lastCome = (schedule: Schedule, now: number, zone: string, stagger 
 
 /** The first slot whose time, and the stagger after it, is still to come. */
 export const nextToCome = (schedule: Schedule, now: number, zone: string, stagger = 0): Slot => {
-  let slot = slotAfter(schedule, localOf(now - stagger, zone))
+  const local = localOf(now - stagger, zone)
+  // A slot a daylight-saving change moved later, 1:30 that comes at 2:30, may still be to come while the clock reads past 1:30.
+  const nominal = slotAtOrBefore(schedule, local)
+  if (instantOf(nominal, zone) + stagger > now) return nominal
+  let slot = slotAfter(schedule, local)
   // A local time the zone repeats came the first time already.
   while (instantOf(slot, zone) + stagger <= now) slot = slotAfter(schedule, slot)
   return slot

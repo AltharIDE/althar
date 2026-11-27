@@ -170,6 +170,21 @@ describe('an automation’s card in the coordinator’s thread', () => {
     expect(await screen.findByRole('heading', { name: 'Morning review' })).toBeTruthy()
   })
 
+  it('changed by the coordinator to a monthly schedule: what it was, struck through, beside the date it first runs, and the short-month rule once', async () => {
+    const was = definition({ schedule: { every: 'week', days: [1, 2, 3, 4, 5, 6, 7], at: '02:00' } })
+    const now = definition({ schedule: { every: 'month', on: { day: 31 }, at: '09:00' } })
+    // Tuesday 29 September: September's 31st is its 30th.
+    const { client } = fakeClient({
+      getCoordinator: talking(items.automation({ state: 'proposed', nextAt: local(30, 9), was, definition: now }, 'ia3')),
+    })
+    withServices(<Project />, client)
+    await screen.findByText('Automation, changed · meridian')
+    expect(screen.getByText('Monthly, on the 31st at 9:00')).toBeTruthy()
+    expect(screen.getByText('Every night at 2:00').closest('s')).not.toBeNull()
+    expect(screen.getByText(/· next tomorrow$/)).toBeTruthy()
+    expect(screen.getAllByText('A month without a 31st runs on its last day.')).toHaveLength(1)
+  })
+
   it('says who led it and who reviewed it before, as it was, and its lead as it is now', async () => {
     const was = definition({ lead: { agentId: 'codex', model: null, effort: null }, work: { kind: 'task', review: null, end: null } })
     const now = definition({ work: { kind: 'task', review: { agentId: 'codex', model: null, effort: null }, end: null } })

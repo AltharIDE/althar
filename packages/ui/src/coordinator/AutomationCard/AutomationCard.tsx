@@ -11,6 +11,8 @@ import { Field, FieldArea, FieldError } from '../../primitives/Field/Field'
 import { KeyValues } from '../../primitives/KeyValues/KeyValues'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Menu, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
+import { Segmented } from '../../primitives/Segmented/Segmented'
+import { Select } from '../../primitives/Select/Select'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import l from '../TaskLaunch/TaskLaunch.module.css'
 import s from './AutomationCard.module.css'
@@ -44,6 +46,16 @@ export interface AutomationTime {
   at: string
 }
 
+/**
+ * A day of every month and a time, as "Monthly…" sets them: a day of the month
+ * (1 to 31, or -1 for the last day), or the nth weekday of it (nth 1 to 4, or
+ * -1 for the last; weekday as ISO numbers it, 1 for Monday).
+ */
+export interface AutomationMonth {
+  on: { day: number } | { weekday: number; nth: number }
+  at: string
+}
+
 /** Who a picker is for: the lead of each run, or its reviewer. */
 export interface AutomationPick {
   role: 'lead' | 'review'
@@ -70,6 +82,21 @@ export interface AutomationCardText {
   endsMenu: string
   /** The When menu's last item: days and a time of the person's own. */
   another: string
+  /** The When menu's other last item: a day of the month, or the nth weekday of it, and a time. */
+  monthly: string
+  /** Monthly's two ways to say the day, its pickers' names, and "at" between them and the time. */
+  byDay: string
+  byWeekday: string
+  monthBy: string
+  monthDay: string
+  monthNth: string
+  monthWeekday: string
+  /** Day 1 to 31 as a month's day picker says it ("1st", "22nd"), and -1 as "Last day". */
+  dayOfMonth: (day: number) => string
+  /** The nth weekday's choices, in order: first to fourth, then last. */
+  nths: readonly string[]
+  /** A day some months don't have, said where it is chosen and on the card that sets it. */
+  shortMonth: (day: number) => string
   days: string
   /** Each day's toggle, from Monday, and its whole name. */
   dayShort: readonly string[]
@@ -79,6 +106,8 @@ export interface AutomationCardText {
   set: string
   cancel: string
   noDays: string
+  /** Under the time, where Done is pressed with none. */
+  noTime: string
   /** When's note: when it runs next. */
   next: (next: string) => string
   /** Said before an old value, struck through, to a screen reader. */
@@ -118,6 +147,21 @@ export const automationCardText: AutomationCardText = {
   whenMenu: 'When it runs',
   endsMenu: 'What each run ends in',
   another: 'Another time…',
+  monthly: 'Monthly…',
+  byDay: 'Day of the month',
+  byWeekday: 'Weekday',
+  monthBy: 'Which day of the month',
+  monthDay: 'Day of the month',
+  monthNth: 'Which weekday of the month',
+  monthWeekday: 'Weekday',
+  dayOfMonth: (day) => {
+    if (day === -1) return 'Last day'
+    const tail = day % 100
+    const suffix = tail >= 11 && tail <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][day % 10] ?? 'th')
+    return `${day}${suffix}`
+  },
+  nths: ['First', 'Second', 'Third', 'Fourth', 'Last'],
+  shortMonth: (day) => `A month without a ${day}${day === 31 ? 'st' : 'th'} runs on its last day.`,
   days: 'Days',
   dayShort: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
   dayNames: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
@@ -126,6 +170,7 @@ export const automationCardText: AutomationCardText = {
   set: 'Done',
   cancel: 'Cancel',
   noDays: 'Pick a day first',
+  noTime: 'Set a time first',
   next: (next) => `next ${next}`,
   was: 'was',
   none: 'None',
@@ -185,6 +230,11 @@ export type AutomationCardProps = RootProps<
     /** Days and a time of the person's own, from "Another time…", starting from these. Without it, the menu doesn't offer one. */
     time?: AutomationTime
     onTimeChange?: (time: AutomationTime) => void
+    /** A day of the month or the nth weekday of it and a time, from "Monthly…", starting from these. Without it, the menu doesn't offer one. */
+    month?: AutomationMonth
+    onMonthChange?: (month: AutomationMonth) => void
+    /** A note under When, said where the schedule is set: a monthly day some months lack. */
+    whenNote?: string
     /** Who leads each run, and reviews it: the consumer's model picker. */
     picker: (pick: AutomationPick) => ReactNode
     leadWas?: string
@@ -247,16 +297,14 @@ function Pick({
   value,
   options,
   onChange,
-  another,
-  onAnother,
+  others = [],
 }: {
   label: string
   value: string
   options: readonly AutomationChoice[]
   onChange?: (value: string) => void
-  /** A last item that opens something of its own. */
-  another?: string
-  onAnother?: () => void
+  /** Last items that each open something of their own. */
+  others?: readonly { readonly label: string; readonly onOpen: () => void }[]
 }) {
   const shown = options.find((option) => option.value === value)?.label ?? value
   // Picking "Another time…" takes focus on to what it opens, not back to the button.
@@ -284,17 +332,20 @@ function Pick({
           </MenuRadioItem>
         ))}
       </MenuRadioGroup>
-      {another !== undefined && onAnother !== undefined && (
+      {others.length > 0 && (
         <>
           <MenuSeparator />
-          <MenuItem
-            onSelect={() => {
-              away.current = true
-              onAnother()
-            }}
-          >
-            {another}
-          </MenuItem>
+          {others.map((other) => (
+            <MenuItem
+              key={other.label}
+              onSelect={() => {
+                away.current = true
+                other.onOpen()
+              }}
+            >
+              {other.label}
+            </MenuItem>
+          ))}
         </>
       )}
     </Menu>
@@ -316,6 +367,9 @@ function AnotherTime({
   const [days, setDays] = useState<readonly number[]>(start.days)
   const [at, setAt] = useState(start.at)
   const [missing, setMissing] = useState(false)
+  const [noTime, setNoTime] = useState(false)
+  const time = useRef<HTMLInputElement>(null)
+  const timeErrorId = useId()
   const first = useRef<HTMLButtonElement>(null)
   const errorId = useId()
   useEffect(() => {
@@ -356,7 +410,20 @@ function AnotherTime({
       <span className={s.at} aria-hidden="true">
         {t.at}
       </span>
-      <Field type="time" aria-label={t.time} className={s.time} value={at} onChange={(event) => setAt(event.target.value)} required />
+      <Field
+        ref={time}
+        type="time"
+        aria-label={t.time}
+        className={s.time}
+        value={at}
+        invalid={noTime}
+        aria-describedby={noTime ? timeErrorId : undefined}
+        onChange={(event) => {
+          setAt(event.target.value)
+          if (event.target.value !== '') setNoTime(false)
+        }}
+        required
+      />
       <span className={s.anotherEnd}>
         <LinkButton onClick={onCancel}>{t.cancel}</LinkButton>
         <Button
@@ -367,7 +434,12 @@ function AnotherTime({
               first.current?.focus()
               return
             }
-            if (at !== '') onSet({ days, at })
+            if (at === '') {
+              setNoTime(true)
+              time.current?.focus()
+              return
+            }
+            onSet({ days, at })
           }}
         >
           {t.set}
@@ -378,6 +450,135 @@ function AnotherTime({
           <FieldError id={errorId}>{t.noDays}</FieldError>
         </span>
       )}
+      {noTime && (
+        <span className={s.anotherError}>
+          <FieldError id={timeErrorId}>{t.noTime}</FieldError>
+        </span>
+      )}
+    </li>
+  )
+}
+
+/** A day of every month and a time of the person's own, set in place under When: which day, its weekday or number, the time, and Done. */
+function AnotherMonth({
+  start,
+  onSet,
+  onCancel,
+  t,
+}: {
+  start: AutomationMonth
+  onSet: (month: AutomationMonth) => void
+  onCancel: () => void
+  t: AutomationCardText
+}) {
+  const [by, setBy] = useState<'day' | 'weekday'>('day' in start.on ? 'day' : 'weekday')
+  const [day, setDay] = useState('day' in start.on ? start.on.day : 1)
+  const [nth, setNth] = useState('weekday' in start.on ? start.on.nth : 1)
+  const [weekday, setWeekday] = useState('weekday' in start.on ? start.on.weekday : 1)
+  const [at, setAt] = useState(start.at)
+  // Done on an empty time keeps the editor open, saying why.
+  const [missing, setMissing] = useState(false)
+  const time = useRef<HTMLInputElement>(null)
+  const errorId = useId()
+  const first = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    first.current?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus()
+  }, [])
+  const days = [...Array.from({ length: 31 }, (_, i) => i + 1), -1].map((one) => ({ value: String(one), label: t.dayOfMonth(one) }))
+  const nths = [1, 2, 3, 4, -1].map((one, i) => ({ value: String(one), label: t.nths[i] ?? '' }))
+  const weekdays = t.dayNames.map((label, i) => ({ value: String(i + 1), label }))
+  return (
+    <li
+      className={s.another}
+      /* its Escape, not a panel's round it */
+      data-own-escape=""
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return
+        event.preventDefault()
+        event.stopPropagation()
+        onCancel()
+      }}
+    >
+      <div ref={first} className={s.monthBy}>
+        <Segmented
+          className={s.monthSegment}
+          label={t.monthBy}
+          value={by}
+          onChange={setBy}
+          options={[
+            { value: 'day', label: t.byDay },
+            { value: 'weekday', label: t.byWeekday },
+          ]}
+        />
+      </div>
+      {by === 'day' ? (
+        <Select
+          label={t.monthDay}
+          variant="filled"
+          width={110}
+          options={days}
+          value={String(day)}
+          onChange={(value) => setDay(Number(value))}
+        />
+      ) : (
+        <>
+          <Select
+            label={t.monthNth}
+            variant="filled"
+            width={96}
+            options={nths}
+            value={String(nth)}
+            onChange={(value) => setNth(Number(value))}
+          />
+          <Select
+            label={t.monthWeekday}
+            variant="filled"
+            width={128}
+            options={weekdays}
+            value={String(weekday)}
+            onChange={(value) => setWeekday(Number(value))}
+          />
+        </>
+      )}
+      <span className={s.at} aria-hidden="true">
+        {t.at}
+      </span>
+      <Field
+        ref={time}
+        type="time"
+        aria-label={t.time}
+        className={s.time}
+        value={at}
+        invalid={missing}
+        aria-describedby={missing ? errorId : undefined}
+        onChange={(event) => {
+          setAt(event.target.value)
+          if (event.target.value !== '') setMissing(false)
+        }}
+        required
+      />
+      <span className={s.anotherEnd}>
+        <LinkButton onClick={onCancel}>{t.cancel}</LinkButton>
+        <Button
+          size="small"
+          onClick={() => {
+            if (at === '') {
+              setMissing(true)
+              time.current?.focus()
+              return
+            }
+            onSet({ on: by === 'day' ? { day } : { weekday, nth }, at })
+          }}
+        >
+          {t.set}
+        </Button>
+      </span>
+      {missing && (
+        <span className={s.anotherError}>
+          <FieldError id={errorId}>{t.noTime}</FieldError>
+        </span>
+      )}
+      {by === 'day' && day >= 29 && <span className={s.anotherNote}>{t.shortMonth(day)}</span>}
     </li>
   )
 }
@@ -510,6 +711,9 @@ export function AutomationCard({
   whenWas,
   time,
   onTimeChange,
+  month,
+  onMonthChange,
+  whenNote,
   picker,
   leadWas,
   review,
@@ -529,7 +733,7 @@ export function AutomationCard({
 }: AutomationCardProps) {
   const t = { ...automationCardText, ...text }
   const [limitsShown, setLimitsShown] = useState(false)
-  const [another, setAnother] = useState(false)
+  const [another, setAnother] = useState<'time' | 'month' | null>(null)
   const kept = stage === 'kept'
   return (
     <div className={cx(l.launch, s.card, className)} data-rhythm={Rhythm.Card} {...rest}>
@@ -562,28 +766,51 @@ export function AutomationCard({
               value={whenValue}
               options={when}
               {...(onWhenChange === undefined ? {} : { onChange: onWhenChange })}
-              {...(onTimeChange === undefined || time === undefined ? {} : { another: t.another, onAnother: () => setAnother(true) })}
+              others={[
+                ...(onTimeChange === undefined || time === undefined ? [] : [{ label: t.another, onOpen: () => setAnother('time') }]),
+                ...(onMonthChange === undefined || month === undefined ? [] : [{ label: t.monthly, onOpen: () => setAnother('month') }]),
+              ]}
             />
           }
           why={
             whenWas !== undefined ? (
-              <Was value={whenWas} t={t} />
+              <>
+                <Was value={whenWas} t={t} />
+                {next !== undefined && (
+                  <>
+                    {' · '}
+                    {t.next(nextWithout(next, when.find((option) => option.value === whenValue)?.label ?? whenValue))}
+                  </>
+                )}
+              </>
             ) : next !== undefined ? (
               t.next(nextWithout(next, when.find((option) => option.value === whenValue)?.label ?? whenValue))
             ) : undefined
           }
         />
-        {another && time !== undefined && onTimeChange !== undefined && (
+        {another === 'time' && time !== undefined && onTimeChange !== undefined && (
           <AnotherTime
             start={time}
             t={t}
-            onCancel={() => setAnother(false)}
+            onCancel={() => setAnother(null)}
             onSet={(chosen) => {
-              setAnother(false)
+              setAnother(null)
               onTimeChange(chosen)
             }}
           />
         )}
+        {another === 'month' && month !== undefined && onMonthChange !== undefined && (
+          <AnotherMonth
+            start={month}
+            t={t}
+            onCancel={() => setAnother(null)}
+            onSet={(chosen) => {
+              setAnother(null)
+              onMonthChange(chosen)
+            }}
+          />
+        )}
+        {whenNote !== undefined && another === null && <li className={s.whenNote}>{whenNote}</li>}
         <Row
           icon="agents"
           label={t.lead}
