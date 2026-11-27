@@ -4,6 +4,7 @@ import { cx } from '../../lib/cx'
 import { useReducedMotion } from '../../lib/motion'
 import { useOnScreen } from '../../lib/onScreen'
 import type { RootProps } from '../../lib/props'
+import { IconButton } from '../../primitives/IconButton/IconButton'
 import w from './YourWorkers.module.css'
 
 /*
@@ -116,23 +117,25 @@ const goes = (dx: number, a: number, b: number) => ({ '--dx': `${dx}px`, '--ma':
 /**
  * The story's time, where the host says, or played on its own loop while on
  * screen: the loop writes `--t` on the drawing itself each frame, and only the
- * count of agents at work goes through React, as it changes.
+ * count of agents at work goes through React, as it changes. Paused, the loop
+ * holds where it is, and plays on from there.
  */
-function useStory(ref: RefObject<SVGSVGElement | null>, at: number | undefined) {
+function useStory(ref: RefObject<SVGSVGElement | null>, at: number | undefined, paused: boolean) {
   const onScreen = useOnScreen(ref)
   const still = useReducedMotion()
   const [looped, setLooped] = useState(atWork(REST))
-  const looping = at === undefined && onScreen && !still
+  // Where its own loop has got to; none until it has first played, so it starts from the beginning.
+  const clock = useRef<number | null>(null)
+  const looping = at === undefined && onScreen && !still && !paused
   const t = at === undefined ? REST : at * WHOLE
 
   useEffect(() => {
     const el = ref.current
     if (!looping || !el) return
-    // Wake where it was: from the start, unless it was already part way round.
-    const was = Number(el.style.getPropertyValue('--t') || 0)
-    const since = performance.now() - (was >= REST ? 0 : was * LOOP)
+    const since = performance.now() - (clock.current ?? 0) * LOOP
     let frame = requestAnimationFrame(function tick(now) {
       const t = ((now - since) % LOOP) / LOOP
+      clock.current = t
       el.style.setProperty('--t', t.toFixed(4))
       const n = atWork(t)
       setLooped((was) => (was === n ? was : n))
@@ -144,7 +147,10 @@ function useStory(ref: RefObject<SVGSVGElement | null>, at: number | undefined) 
   return {
     t,
     count: at !== undefined ? atWork(t) : still ? atWork(REST) : looped,
-    playing: (at !== undefined || looping) && onScreen && !still,
+    /** Whether anything in it moves of itself: the loop, or the work along the wires and the workers' lights. */
+    moving: onScreen && !still && !paused,
+    /** Whether it moves at all, so whether a way to pause it is wanted. */
+    still,
   }
 }
 
@@ -170,11 +176,16 @@ function Worker({ node }: { node: Node }) {
 export interface YourWorkersText {
   /** What the picture shows, for whoever can't see it. */
   label: string
+  /** The button that stops it moving, and starts it again. */
+  pause: string
+  play: string
 }
 
 export const yourWorkersText: YourWorkersText = {
   label:
     'This Mac hands a task to runner-1, a Linux worker of yours, which runs the task’s agent, its setup and its tests, and sends two commits back. Then the view pulls back: dozens of workers on rings round This Mac, each wired to it and at work on a task of its own.',
+  pause: 'Pause the animation',
+  play: 'Play the animation',
 }
 
 export type YourWorkersProps = RootProps<
@@ -192,7 +203,8 @@ export function YourWorkers({ text, at, className, ...rest }: YourWorkersProps) 
   const ref = useRef<SVGSVGElement>(null)
   const id = useId().replace(/[^\w-]/g, '')
   const [glow, shade, metal, top] = ['glow', 'shade', 'metal', 'top'].map((part) => `yw-${part}-${id}`) as [string, string, string, string]
-  const { t: story, count, playing } = useStory(ref, at)
+  const [paused, setPaused] = useState(false)
+  const { t: story, count, moving, still } = useStory(ref, at, paused)
   return (
     <figure className={cx(w.figure, className)} aria-label={t.label} {...rest}>
       <svg
@@ -200,7 +212,7 @@ export function YourWorkers({ text, at, className, ...rest }: YourWorkersProps) 
         className={w.scene}
         viewBox={`${VIEW.x} ${VIEW.y} ${VIEW.w} ${VIEW.h}`}
         style={{ '--t': story } as CSSProperties}
-        data-playing={playing || undefined}
+        data-playing={moving || undefined}
         data-looping={at === undefined || undefined}
         aria-hidden="true"
       >
@@ -391,6 +403,18 @@ export function YourWorkers({ text, at, className, ...rest }: YourWorkersProps) 
           </g>
         </g>
       </svg>
+      {/* Moving of itself for longer than a few seconds beside words to read, it can be stopped (WCAG 2.2.2). */}
+      {still ? null : (
+        <IconButton
+          className={w.pause}
+          size="small"
+          icon={paused ? 'play' : 'pause'}
+          label={paused ? t.play : t.pause}
+          tooltip="above"
+          tooltipAlign="end"
+          onClick={() => setPaused((was) => !was)}
+        />
+      )}
     </figure>
   )
 }

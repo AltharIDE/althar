@@ -45,7 +45,7 @@ const WRITTEN: readonly Release[] = [
       },
       {
         kind: 'new',
-        text: 'Add one from Settings › Computers, over SSH or with a one-time code: Althar installs it, signs its agents in, and checks it’s ready for your projects. Settings › Computers then shows what each worker is running and what it has free.',
+        text: 'Add one from Settings › Computers, over SSH or with a one-time code: Althar installs it, signs its agents in, and checks it’s ready for your projects. Settings › Computers then shows what each worker is running and what it has free, and Remove uninstalls it from its machine.',
       },
       {
         kind: 'new',

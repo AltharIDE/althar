@@ -179,6 +179,44 @@ describe('the lead drawn', () => {
     expect(Number(count(container))).toBeGreaterThan(30)
   })
 
+  it('can be paused, holding where it is and moving no more, and played on from there', async () => {
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] })
+    const { container } = render(<YourWorkers />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(17_000 * 0.2)
+    })
+    const svg = container.querySelector('svg') as SVGElement
+    expect(svg).toHaveAttribute('data-playing')
+    fireEvent.click(screen.getByRole('button', { name: 'Pause the animation' }))
+    const held = story(container)
+    expect(svg).not.toHaveAttribute('data-playing')
+    await act(async () => {
+      vi.advanceTimersByTime(17_000 * 0.3)
+    })
+    expect(story(container)).toBe(held)
+    fireEvent.click(screen.getByRole('button', { name: 'Play the animation' }))
+    await act(async () => {
+      vi.advanceTimersByTime(17_000 * 0.1)
+    })
+    expect(story(container)).toBeGreaterThan(held + 0.08)
+    expect(story(container)).toBeLessThan(held + 0.12)
+  })
+
+  it('pauses the work along its wires where the host plays its story', async () => {
+    const { container } = render(<YourWorkers at={1} />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const svg = container.querySelector('svg') as SVGElement
+    expect(svg).toHaveAttribute('data-playing')
+    fireEvent.click(screen.getByRole('button', { name: 'Pause the animation' }))
+    expect(svg).not.toHaveAttribute('data-playing')
+    expect(count(container)).toBe('44')
+  })
+
   it('rests on the fleet with motion reduced', () => {
     vi.stubGlobal(
       'matchMedia',
@@ -194,6 +232,8 @@ describe('the lead drawn', () => {
     expect(story(container)).toBeCloseTo(0.88, 3)
     expect(count(container)).toBe('44')
     expect(screen.getByRole('figure')).toHaveAccessibleName(/dozens of workers/)
+    // Nothing moves, so there is nothing to pause.
+    expect(screen.queryByRole('button', { name: /animation/ })).toBeNull()
   })
 })
 

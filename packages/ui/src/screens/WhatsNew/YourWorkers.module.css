@@ -10,6 +10,7 @@
  */
 
 .figure {
+  position: relative;
   --yw-ground: var(--n-2);
   --yw-ink: var(--t-1);
   --yw-ink-2: var(--t-2);
@@ -41,6 +42,9 @@
   container-type: inline-size;
 }
 .scene {
+  /* how close the view starts, and on what (.world) */
+  --near: 2.2;
+  --near-x: 634;
   display: block;
   width: 100%;
   height: auto;
@@ -50,9 +54,16 @@
 .scene[data-looping] {
   opacity: min(clamp(0, var(--t) / 0.012, 1), clamp(0, (0.99 - var(--t)) / 0.04, 1));
 }
-/* Narrow, the drawing reads larger, its sides cropped, as the home page's orrery is on a phone. */
+/*
+ * Narrow, the drawing reads larger, its sides cropped, as the home page's
+ * orrery is on a phone: the fleet runs off the sides, but close up, the
+ * view stands back far enough that this computer and runner-1 are whole in
+ * the middle two-thirds that show.
+ */
 @container (width < 560px) {
   .scene {
+    --near: 1.45;
+    --near-x: 631;
     width: 150%;
     margin-left: -25%;
   }
@@ -72,14 +83,17 @@
 }
 
 /*
- * The view: close on this computer and runner-1 at first, then pulled back to
- * the whole orrery, eased (smoothstep) as the story goes from 0.4 to 0.6.
+ * The view: close on this computer and runner-1 at first (`--near` times as
+ * large, centred on `--near-x`, both machines whole in what shows), then
+ * pulled back to the whole orrery, eased (smoothstep) as the story goes from
+ * 0.4 to 0.6.
  */
 .world {
   --z: clamp(0, (var(--t) - 0.4) / 0.2, 1);
   --e: calc(var(--z) * var(--z) * (3 - 2 * var(--z)));
   transform-origin: 0 0;
-  transform: translate(500px, 284px) scale(calc(2.2 - 1.2 * var(--e))) translate(calc(-634px + 134px * var(--e)), -284px);
+  transform: translate(500px, 284px) scale(calc(var(--near) - (var(--near) - 1) * var(--e)))
+    translate(calc(-1px * var(--near-x) + (var(--near-x) - 500) * 1px * var(--e)), -284px);
 }
 
 /* ---- the rings, drawing round as they come ---- */
@@ -123,8 +137,13 @@
   /* only once the fleet is coming: close up, the task's own pill is what travels */
   opacity: clamp(0, (var(--t) - 0.5) / 0.06, 1);
 }
-.scene[data-playing] .packet {
-  animation: run 2.4s linear infinite;
+.packet {
+  animation: run 2.4s linear infinite paused;
+}
+/* Its own motion runs only while it's on screen and not paused; paused, it holds where it was. */
+.scene[data-playing] .packet,
+.scene[data-playing] .ping {
+  animation-play-state: running;
 }
 .packet[data-back] {
   animation-direction: reverse;
@@ -161,8 +180,8 @@
   transform-box: fill-box;
   transform-origin: center;
 }
-.scene[data-playing] .ping {
-  animation: ping 2.4s var(--ease-out) infinite;
+.ping {
+  animation: ping 2.4s var(--ease-out) infinite paused;
 }
 @keyframes ping {
   from {
@@ -328,9 +347,16 @@
   fill: var(--yw-ink-3);
 }
 
+/* The pause, in the drawing's corner, quiet until pointed at. */
+.pause {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .scene[data-playing] .packet,
-  .scene[data-playing] .ping {
+  .packet,
+  .ping {
     animation: none;
   }
   .packet {

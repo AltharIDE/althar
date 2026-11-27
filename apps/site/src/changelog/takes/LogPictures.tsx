@@ -1,5 +1,5 @@
 import { Brand, BrandMark, Icon, Logo, planPeekText, reportProblemText, undoTurnText } from '@althar/ui'
-import { YourWorkers, yourWorkersText } from '@althar/ui/screens'
+import { YourWorkers } from '@althar/ui/screens'
 import { sealSvg } from '@althar/ui/seal'
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 
@@ -1176,10 +1176,13 @@ function Undo() {
  * in its colours (LogPictures.module.css .fleet).
  */
 function Home() {
+  // Not a Frame: the drawing is a figure with its own label, and its pause must be reachable, so nothing around it is hidden.
   return (
-    <Frame label={yourWorkersText.label} w={64} n={32}>
-      <YourWorkers className={p.fleet} />
-    </Frame>
+    <div className={p.frame} data-nosnippet>
+      <div className={p.art} style={{ '--w': 64, '--n': 32 } as CSSProperties}>
+        <YourWorkers className={p.fleet} />
+      </div>
+    </div>
   )
 }
 
