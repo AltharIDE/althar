@@ -1,9 +1,9 @@
 name: harness
 
-# On a pull request, and for its entry in the merge queue: the checks and unit tests its change reaches
-# (packages/testing/src/select.ts). A change that reaches the runtime also reports and gates its whole coverage,
-# on the pull request and again in the merge queue. Its tests and its measured coverage have separate verdicts. Every test on
-# Linux and Windows, and the other packages' coverage, run after merge, in post-merge.yml.
+# On a pull request: the checks and unit tests its change reaches (packages/testing/src/select.ts). A ready one that
+# reaches the runtime also reports and gates its whole coverage. Its tests and its measured coverage have separate
+# verdicts. In the merge queue, only the checks and unit tests that both an entry and what landed beneath it reach
+# (queue.yml). Every test on Linux and Windows, and every coverage gate, run after merge, in post-merge.yml.
 on:
   # From queue.yml, for a pull request in the merge queue.
   workflow_call:
@@ -55,7 +55,7 @@ jobs:
     outputs:
       jobs: ${{ steps.plan.outputs.jobs }}
       any: ${{ steps.plan.outputs.any }}
-      # Whether the change reaches the runtime, whose coverage is measured on the PR and in the queue.
+      # Whether the change reaches the runtime, whose coverage is measured on a ready PR, and again after merge.
       runtime: ${{ steps.plan.outputs.runtime == 'true' || steps.coverage.outputs.changed == 'true' }}
     steps:
       - uses: actions/checkout@v5
@@ -77,9 +77,17 @@ jobs:
           if rg -q '^\.github/scripts/(runtime-coverage|test_runtime_coverage)\.py$' "$RUNNER_TEMP/changed"; then
             echo 'changed=true' >> "$GITHUB_OUTPUT"
           fi
+      # In the merge queue, each entry's own change and what landed beneath it (queue.yml), when it could say.
+      - if: github.event_name == 'merge_group'
+        continue-on-error: true
+        uses: actions/download-artifact@v6
+        with:
+          name: queue-entries
+          path: ${{ runner.temp }}/queue
       - id: plan
         env:
-          RUNTIME_COVERAGE: ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.draft != true) }}
+          RUNTIME_COVERAGE: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true }}
+          QUEUE_ENTRIES: ${{ github.event_name == 'merge_group' && format('{0}/queue/entries.json', runner.temp) || '' }}
         run: bun packages/testing/src/select.ts plan harness "$RUNNER_TEMP/changed"
 
   # Each job's packages one after another, every one run even when one before it fails, so a run says all that broke:
@@ -116,8 +124,11 @@ jobs:
       - if: always()
         uses: ./.github/actions/flaky
 
+  # Coverage gates on the pull request, and after merge (post-merge.yml), not in the queue: two changes that each
+  # hold their coverage don't make a measurement worth sending one of them back for.
   client-coverage:
     name: client coverage (${{ matrix.package }})
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
@@ -146,7 +157,7 @@ jobs:
   coverage-parts:
     name: runtime tests with coverage (${{ matrix.shard }})
     needs: plan
-    if: needs.plan.outputs.runtime == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft != true)
+    if: needs.plan.outputs.runtime == 'true' && github.event_name == 'pull_request' && github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     # A few times a part's usual run, so a hang fails here, not at the limit.
     timeout-minutes: 15
@@ -199,7 +210,7 @@ jobs:
   coverage:
     name: coverage (packages/runtime)
     needs: [plan, coverage-parts]
-    if: ${{ !cancelled() && needs.plan.outputs.runtime == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft != true) }}
+    if: ${{ !cancelled() && needs.plan.outputs.runtime == 'true' && github.event_name == 'pull_request' && github.event.pull_request.draft != true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     defaults:

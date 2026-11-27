@@ -1,6 +1,7 @@
 /*
- * What a change needs from CI, so a pull request and its entry in the merge queue run only what it reaches
- * (.github/workflows/harness.yml, desktop.yml and ui.yml):
+ * What a change needs from CI, so a pull request runs only what it reaches (.github/workflows/harness.yml, desktop.yml
+ * and ui.yml), and its entry in the merge queue only what it and what landed beneath it could break together
+ * (queuePlan):
  *
  * - The unit tests whose imports reach a changed file, in whichever package they are, and the checks of the packages
  *   it changes and of those that build on them. A file no test or the app reaches (a script run by its path, a file
@@ -10,7 +11,8 @@
  *   those specs over.
  * - Windows' smoke test when what reaches the app is code that behaves differently there: the runtime and the packages
  *   it runs, the desktop app's main process, preload and scripts. Not the renderer, the UI kit, copy or docs.
- * - On a draft, nothing heavy: the end-to-end runs wait for ready for review. The merge queue has no drafts.
+ * - On a draft, nothing heavy: the end-to-end runs wait for ready for review. The merge queue has no drafts, and no
+ *   end-to-end runs.
  *
  * Reaching is read from the source: imports, re-exports, `require`, Vitest's mocks, `import.meta.glob`, CSS's
  * `@import`, `url()` and `composes`, `new URL('./…', import.meta.url)`, and a path joined to `import.meta.dirname`;
@@ -19,7 +21,8 @@
  * its path, or reads the UI kit's sources to check them.
  *
  * `bun select.ts plan <workflow> <changed>` writes the plan for the file of changed paths to GITHUB_OUTPUT (a line `*`
- * means what changed isn't known: everything runs); `bun select.ts run` runs the jobs in PLAN.
+ * means what changed isn't known: everything runs), or with QUEUE_ENTRIES, the merge group's entries; `bun select.ts
+ * run` runs the jobs in PLAN.
  */
 import { spawnSync } from 'node:child_process'
 import { appendFileSync, readFileSync } from 'node:fs'
@@ -386,15 +389,17 @@ const jobsOf = (group: Group, parts: ReadonlyArray<Part>, total: (dir: string) =
   }))
 }
 
-export const plan = (changed: ReadonlyArray<string>, repo: Repository, workflow: Workflow, { draft = false } = {}): Plan => {
-  const layout = LAYOUT[workflow]
-  const known = graph(repo)
-  const tests = repo.files.filter(isTest)
-  const testsOf = (dir: string) => tests.filter((file) => file.startsWith(`${dir}/`))
-  const why: Array<string> = []
+/** What a change reaches: the files it starts from, every file that reaches one of them, and the packages to check. */
+interface Reach {
+  /** The file it changes that any test may rest on, or none. */
+  readonly everything: string | undefined
+  readonly from: ReadonlySet<string>
+  readonly reached: ReadonlySet<string>
+  readonly checked: ReadonlySet<string>
+}
+
+const reach = (changed: ReadonlyArray<string>, repo: Repository, known: Graph, why: Array<string>): Reach => {
   const everything = changed.find((file) => EVERYTHING.test(file))
-  if (workflow === 'windows' && everything === undefined && !changed.some((file) => BY_OS.test(file) && !INERT.test(file)))
-    return { why: [], jobs: [], e2e: false, windowsE2e: false }
   if (everything !== undefined)
     why.push(everything === '*' ? 'What changed is unknown: everything runs.' : `${everything} changed: everything runs.`)
 
@@ -426,36 +431,120 @@ export const plan = (changed: ReadonlyArray<string>, repo: Repository, workflow:
     wide.add(home.dir)
   }
   for (const dir of wide) for (const file of repo.files.filter((one) => one.startsWith(`${dir}/`))) from.add(file)
-  const reached = reaching(known, from)
+  return { everything, from, reached: reaching(known, from), checked }
+}
 
-  const total = (dir: string) => testsOf(dir).length
-  const jobs = layout.jobs.flatMap((group) =>
+/** The workflow's jobs, each package checked or not, and with the tests `runs` picks of its own. */
+const jobsFor = (
+  workflow: Workflow,
+  repo: Repository,
+  known: Graph,
+  check: (dir: string) => boolean,
+  runs: (file: string) => boolean,
+): ReadonlyArray<Job> => {
+  const tests = repo.files.filter(isTest)
+  const testsOf = (dir: string) => tests.filter((file) => file.startsWith(`${dir}/`))
+  return LAYOUT[workflow].jobs.flatMap((group) =>
     jobsOf(
       group,
       group.dirs
         .filter((dir) => known.packages.some((one) => one.dir === dir))
         .map((dir): Part => {
           const all = testsOf(dir)
-          const some = everything === undefined ? all.filter((file) => reached.has(file)) : all
-          const check = workflow !== 'windows' && (everything !== undefined || checked.has(dir))
+          const some = all.filter(runs)
           return {
             dir,
-            check,
+            check: workflow !== 'windows' && check(dir),
             tests: some.length === all.length && all.length > 0 ? 'all' : some.map((file) => file.slice(dir.length + 1)),
           }
         }),
-      total,
+      (dir) => testsOf(dir).length,
     ),
   )
+}
+
+export const plan = (changed: ReadonlyArray<string>, repo: Repository, workflow: Workflow, { draft = false } = {}): Plan => {
+  const layout = LAYOUT[workflow]
+  const known = graph(repo)
+  const why: Array<string> = []
+  if (
+    workflow === 'windows' &&
+    !changed.some((file) => EVERYTHING.test(file)) &&
+    !changed.some((file) => BY_OS.test(file) && !INERT.test(file))
+  )
+    return { why: [], jobs: [], e2e: false, windowsE2e: false }
+  const { everything, from, reached, checked } = reach(changed, repo, known, why)
+  const all = everything !== undefined
+  const jobs = jobsFor(
+    workflow,
+    repo,
+    known,
+    (dir) => all || checked.has(dir),
+    (file) => all || reached.has(file),
+  )
   const byOs = [...from].filter((file) => BY_OS.test(file) && !TESTLIKE.test(file))
-  let e2e = layout.e2e && (everything !== undefined || [...reached].some((file) => APP.test(file)))
-  let windowsE2e = layout.e2e && (everything !== undefined || [...reaching(known, byOs)].some((file) => APP.test(file)) || from.has(SMOKE))
+  let e2e = layout.e2e && (all || [...reached].some((file) => APP.test(file)))
+  let windowsE2e = layout.e2e && (all || [...reaching(known, byOs)].some((file) => APP.test(file)) || from.has(SMOKE))
   if (draft && (e2e || windowsE2e)) {
     why.push('A draft: the end-to-end runs wait until it is ready for review.')
     e2e = false
     windowsE2e = false
   }
   return { why, jobs, e2e, windowsE2e }
+}
+
+/** One entry of a merge group: what its pull request changes, and what landed beneath it since it branched from main. */
+export interface Entry {
+  readonly pr: number
+  readonly changes: ReadonlyArray<string>
+  readonly since: ReadonlyArray<string>
+}
+
+/**
+ * The merge queue's share of a group: what its entries could break together, not what each does alone, which its own
+ * pull request's checks passed on its head before it could be queued (.github/scripts/queue-gate.py). For each entry,
+ * the tests that both what it changes and what landed beneath it since it branched reach, and the checks of the
+ * packages both could change. A test only one of them reaches ran on that one's pull request with nothing of the other
+ * in its way. The end-to-end runs are the pull request's and post-merge.yml's, not the queue's.
+ */
+export const queuePlan = (entries: ReadonlyArray<Entry>, repo: Repository, workflow: Workflow): Plan => {
+  const known = graph(repo)
+  const why: Array<string> = []
+  const tests = new Set<string>()
+  const checks = new Set<string>()
+  // This workflow's packages, which its summary speaks of.
+  const dirs = LAYOUT[workflow].jobs.flatMap((group) => group.dirs).filter((dir) => known.packages.some((one) => one.dir === dir))
+  const ours = (file: string) => dirs.some((dir) => file.startsWith(`${dir}/`))
+  for (const entry of entries) {
+    if (entry.since.length === 0) {
+      why.push(`#${entry.pr}: nothing landed beneath it since it branched.`)
+      continue
+    }
+    const mine = reach(entry.changes, repo, known, [])
+    const beneath = reach(entry.since, repo, known, [])
+    const reachedBy = (one: Reach, file: string) => one.everything !== undefined || one.reached.has(file)
+    const checkedBy = (one: Reach, dir: string) => one.everything !== undefined || one.checked.has(dir)
+    const shared = repo.files.filter((file) => ours(file) && isTest(file) && reachedBy(mine, file) && reachedBy(beneath, file))
+    const checked = dirs.filter((dir) => checkedBy(mine, dir) && checkedBy(beneath, dir))
+    for (const file of shared) tests.add(file)
+    for (const dir of checked) checks.add(dir)
+    why.push(
+      `#${entry.pr}, and the ${entry.since.length} files that landed beneath it since it branched, both reach ${shared.length} tests here` +
+        (checked.length === 0 ? ', and no package’s checks.' : `, and the checks of ${checked.join(', ')}.`),
+    )
+  }
+  return {
+    why,
+    jobs: jobsFor(
+      workflow,
+      repo,
+      known,
+      (dir) => checks.has(dir),
+      (file) => tests.has(file),
+    ),
+    e2e: false,
+    windowsE2e: false,
+  }
 }
 
 /** The repository at `root`: the files git tracks. */
@@ -513,6 +602,21 @@ const run = (jobs: ReadonlyArray<Job>) => {
   }
 }
 
+/** The entries queue-entries.py wrote, or none when it wrote nothing that reads as them. */
+export const queueEntries = (path: string): ReadonlyArray<Entry> | undefined => {
+  try {
+    const entries: unknown = JSON.parse(readFileSync(path, 'utf8'))
+    const strings = (value: unknown) => Array.isArray(value) && value.every((one) => typeof one === 'string')
+    return Array.isArray(entries) &&
+      entries.length > 0 &&
+      entries.every((entry: Record<string, unknown>) => typeof entry?.pr === 'number' && strings(entry.changes) && strings(entry.since))
+      ? (entries as ReadonlyArray<Entry>)
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const [mode, workflow, list] = process.argv.slice(2)
 const output = process.env.GITHUB_OUTPUT
 if (
@@ -524,7 +628,14 @@ if (
   const changed = readFileSync(list, 'utf8')
     .split('\n')
     .filter((line) => line.trim() !== '')
-  const planned = plan(changed, repository(), workflow, { draft: process.env.DRAFT === 'true' })
+  // In the merge queue, each entry's own share (queuePlan), when .github/scripts/queue-entries.py could say what it is;
+  // when it couldn't, everything the group changes against main, as a pull request's.
+  const at = process.env.QUEUE_ENTRIES
+  const entries = at === undefined || at === '' ? undefined : queueEntries(at)
+  const planned =
+    entries === undefined
+      ? plan(changed, repository(), workflow, { draft: process.env.DRAFT === 'true' })
+      : queuePlan(entries, repository(), workflow)
   const runtime = planned.jobs.some((job) => job.parts.some((part) => part.dir === 'packages/runtime'))
   const covered = workflow === 'harness' && process.env.RUNTIME_COVERAGE === 'true' && runtime
   const jobs = covered ? coveredRuntime(planned.jobs) : planned.jobs

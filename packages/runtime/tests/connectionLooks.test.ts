@@ -583,6 +583,68 @@ describe('a browser sign-in over a token that reaches only some of the repositor
   })
 })
 
+describe('a browser sign-in that GitHub shows fewer of the repositories than the token', () => {
+  it.live('keeps the token and names what it would lose, with no install page where the App is installed', () => {
+    const names = ['api', 'web', 'docs', 'site', 'app']
+    // What GitHub shows the App's token; the token it replaces sees them all.
+    let shown: ReadonlyArray<string> = ['api']
+    const { fetch } = stub([
+      device,
+      ['POST', TOKEN, { json: { access_token: 'ghu_first', refresh_token: 'ghr_1', expires_in: 28_800 } }],
+      ['GET', USER, you],
+      ['GET', INSTALLATIONS, everywhere],
+      ...names.map((name): Route => [
+        'GET',
+        `https://api.github.com/repos/northwind/${name}`,
+        (_, authorization) =>
+          authorization?.includes('ghu_first') === true && !shown.includes(name)
+            ? { status: 404, json: { message: 'Not Found' } }
+            : {
+                json: { id: name.length, full_name: `northwind/${name}`, default_branch: 'main', html_url: `${GITHUB}/northwind/${name}` },
+              },
+      ]),
+    ])
+    const map = new Map<string, string>()
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const projects = yield* Projects
+      const instance = yield* Instance
+      for (const name of names) {
+        const path = repository()
+        execFileSync('git', ['remote', 'add', 'origin', `https://github.com/northwind/${name}.git`], { cwd: path })
+        yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+      }
+      const token = yield* connections.connectToken({ product: 'github', token: 'github_pat_working', actorId: instance.personId })
+      const attempt = Effect.gen(function* () {
+        const started = yield* connections.startSignIn({ product: 'github', actorId: instance.personId })
+        const [ended] = yield* until(
+          Effect.map(
+            Effect.suspend(() => connections.signIn(started.flowId)),
+            (state) => [state],
+          ),
+          (states) => states[0]?.state !== 'waiting',
+        )
+        return ended
+      })
+
+      // Each time it would lose some, it ends naming them, a few by name and the rest by count, and offers no install.
+      for (const [now, said] of [
+        [['api'], 'northwind/web, northwind/docs and 2 more'],
+        [['api', 'web', 'docs'], 'northwind/site and northwind/app'],
+        [['api', 'web', 'docs', 'site'], 'can’t reach northwind/app, which'],
+      ] as const) {
+        shown = now
+        const ended = yield* attempt
+        assert.deepInclude(ended, { state: 'ended', reason: 'failed' })
+        assert.include(ended?.state === 'ended' ? ended.message : '', said)
+        assert.notProperty(ended, 'install')
+        assert.deepInclude((yield* connections.list)[0], { id: token.id, auth: 'token', state: 'ready' })
+      }
+      assert.include(map.get(token.id) ?? '', 'github_pat_working')
+    }).pipe(Effect.provide(withGitHub(fetch, { appSlug: 'althar', secrets: kept(map) })))
+  })
+})
+
 describe('whether a connection can push where a project’s work goes', () => {
   it.live('asks a fork’s own repository, never the one it came from, which is only read', () => {
     const repo = (path: string) =>

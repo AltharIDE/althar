@@ -1,4 +1,10 @@
-"""Gate a merge group on its PR-head stress and Windows smoke checks."""
+"""Gate a pull request, and each entry of a merge group, on its own checks on its head.
+
+A pull request is queued only once every check that applies to it has passed on its head: its workflows (WORKFLOWS),
+the stress run of its changed tests, and Windows' smoke test where its desktop plan asks for one. The queue then
+tests only what its entries could break together (queue-entries.py), so it reads them all again for each entry.
+A workflow may have no run only where its own path filters exclude the pull request's files.
+"""
 import json
 import os
 import re
@@ -7,6 +13,9 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+
+# Stress first: it is the one a ready pull request most often still waits for.
+WORKFLOWS = ('stress', 'desktop', 'harness', 'ui', 'windows', 'host', 'worker', 'site', 'brand', 'report')
 
 
 class Gate:
@@ -37,10 +46,15 @@ class Gate:
                 return
             page += 1
 
-    def workflow(self, pr, head, name, needs_smoke=False):
+    def workflow(self, pr, head, name, needs_smoke=False, ready=None):
         newest = None
         skipped = None
         runs = self.pages(f'actions/workflows/{name}.yml/runs?head_sha={head}&event=pull_request', 'workflow_runs')
+        # A workflow that runs again when its pull request is ready for
+        # review does more then (coverage, end-to-end runs): its draft runs on
+        # the same head are not evidence. Until the ready run exists, wait.
+        if ready is not None:
+            runs = [run for run in runs if run['created_at'] >= ready]
         # A push and a ready-for-review event can have the same creation time.
         # In that case GitHub can return the cancelled predecessor first.
         for run in sorted(runs, key=lambda run: (run['created_at'], run['id']), reverse=True):
@@ -93,6 +107,21 @@ class Gate:
             raise RuntimeError(f'Could not determine whether {name} applies: {result.stderr.strip()}')
         return result.stdout.strip() == 'true'
 
+    def reruns_when_ready(self, name):
+        result = subprocess.run(['bun', '-e', '''
+            const types = Bun.YAML.parse(await Bun.file(`.github/workflows/${process.argv[1]}.yml`).text()).on.pull_request.types
+            console.log((types ?? []).includes("ready_for_review"))
+        ''', name], capture_output=True, text=True, timeout=min(60, max(1, self.deadline - time.monotonic())))
+        if result.returncode or result.stdout.strip() not in ('true', 'false'):
+            raise RuntimeError(f'Could not read whether {name} runs again when ready: {result.stderr.strip()}')
+        return result.stdout.strip() == 'true'
+
+    def ready(self, pr):
+        # When the pull request last became ready for review, or none if it was never a draft.
+        events = [event['created_at'] for event in self.pages(f'issues/{pr}/timeline', None)
+                  if event.get('event') == 'ready_for_review']
+        return max(events, default=None)
+
     def wait(self, pr, name):
         if time.monotonic() + 30 >= self.deadline:
             raise RuntimeError(f'#{pr}: {name} deadline exceeded')
@@ -132,31 +161,28 @@ class Gate:
                 raise RuntimeError(f'#{pr}: a draft cannot pass the merge queue')
             return
         files = [file['filename'] for file in self.pages(f'pulls/{pr}/files', None)]
-        for name in ('stress', 'desktop'):
+        ready = self.ready(pr)
+        for name in WORKFLOWS:
             if not self.applies(name, files):
                 print(f'#{pr} at {head}: {name} not applicable to these paths', flush=True)
                 continue
             needs_smoke = name == 'desktop' and self.smoke_applies(head, files)
-            if name == 'desktop' and not needs_smoke:
-                print(f'#{pr} at {head}: Windows smoke excluded by its head’s plan', flush=True)
-                continue
             while True:
-                run, jobs = self.workflow(pr, head, name, needs_smoke=needs_smoke)
-                if name == 'stress':
-                    if run is not None and run['status'] == 'completed':
-                        if run['conclusion'] != 'success' or not jobs:
-                            raise RuntimeError(f'#{pr}: stress failed to complete successfully: {run["conclusion"]}')
-                        break
-                else:
+                since = ready if ready is not None and self.reruns_when_ready(name) else None
+                run, jobs = self.workflow(pr, head, name, needs_smoke=needs_smoke, ready=since)
+                if run is not None and run['status'] == 'completed':
+                    # A run whose jobs all skipped ran nothing that failed, except stress's, which a draft's skips.
+                    nothing = name != 'stress' and run['conclusion'] == 'skipped'
+                    if (run['conclusion'] != 'success' and not nothing) or not jobs:
+                        raise RuntimeError(f'#{pr}: {name} failed to complete successfully: {run["conclusion"]}')
                     # The desktop plan explicitly skips the smoke job for work
-                    # that does not need it. A missing/pending job is not a skip.
+                    # that does not need it. A missing job is not a skip.
                     smoke = [job for job in jobs if job['name'] == 'windows-e2e']
-                    if smoke and all(job['status'] == 'completed' for job in smoke):
-                        if any(job['conclusion'] != 'success' for job in smoke):
-                            raise RuntimeError(f'#{pr}: Windows smoke failed to complete successfully')
-                        break
-                    if run is not None and run['status'] == 'completed':
+                    if needs_smoke and not smoke:
                         raise RuntimeError(f'#{pr}: desktop completed without a completed Windows smoke decision')
+                    if needs_smoke and any(job['conclusion'] != 'success' for job in smoke):
+                        raise RuntimeError(f'#{pr}: Windows smoke failed to complete successfully')
+                    break
                 self.wait(pr, name)
         # PR files and check results must all describe the head first read,
         # including when a push arrives while this gate is waiting.

@@ -38,6 +38,16 @@ describe('an errand step leaves one short line', () => {
     assert.deepStrictEqual(note.links, [{ label: '#698', url: PR }])
   })
 
+  it('says why the host refused it from the first of its errors, as GitLab and Bitbucket give them', () => {
+    const refused = (body: unknown) => stepNote('request_pull_request_reviewers', PR, { reviewers: ['x'] }, hostAnswer(422, body)).title
+    assert.include(refused({ errors: ['Reviewer is not a member'] }), 'failed: Reviewer is not a member (HTTP 422)')
+    assert.include(refused({ errors: [{ message: 'x is not a collaborator' }] }), 'failed: x is not a collaborator (HTTP 422)')
+    // Errors it can't read say only that the host refused it.
+    assert.include(refused({ errors: [{ code: 'invalid' }] }), 'failed: the host refused it (HTTP 422)')
+    assert.include(refused({ errors: [7] }), 'failed: the host refused it (HTTP 422)')
+    assert.include(refused({ errors: 'not a list' }), 'failed: the host refused it (HTTP 422)')
+  })
+
   it('names several reviewers and says how many more', () => {
     assert.strictEqual(
       stepNote('request_pull_request_reviewers', PR, { reviewers: ['a', 'b'] }, hostAnswer()).title,
