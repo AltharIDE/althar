@@ -26,14 +26,14 @@
     },
     "runtime-agent-ids": {
       "what": "Comparisons of an agent's id in packages/runtime/src, as for runtime-code-host-names: the agent registry's ids (claude-code, codex, opencode, copilot, junie, grok, kimi, mistral-vibe, qwen-code, antigravity) and claude, the runtime's name for Claude Code.",
-      "baseline": 58
+      "baseline": 63
     },
     "runtime-live-sleeps": {
       "what": "Runtime tests on the real clock that sleep: an `it.live` in packages/runtime/tests whose body, up to the next `it.live` or `it.effect`, calls Effect.sleep, sleep( or setTimeout(. What waits for time to pass belongs on the test's clock (`it.effect` with onTestClock). Not every `it.live`: a test of real processes and git needs the real clock, and a new one would raise it. detail counts each kind of test.",
       "baseline": 166,
       "detail": {
-        "it.live": 2671,
-        "it.effect": 466
+        "it.live": 2693,
+        "it.effect": 470
       }
     },
     "runtime-node-attempt-writers": {
