@@ -147,15 +147,6 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
     : []),
   // Its rules, which an answer can change too (Allow always, Deny always), only while they show.
   ...(event.projectId !== null && event.aggregateType === 'policy' ? [{ key: keys.rules(event.projectId), offScreen: false }] : []),
-  // Each model's room where work would start, which its project's rules (the accounts allowed, moving work through them) say, only while it shows.
-  ...(event.projectId !== null && event.aggregateType === 'policy' ? [{ key: keys.modelRooms(event.projectId), offScreen: false }] : []),
-  // Every model's room that shows, as an agent's accounts or their holds change: which account work starts on.
-  ...(event.aggregateType === 'agent_account' || event.aggregateType === 'account_status'
-    ? cache
-        .getQueryCache()
-        .findAll({ queryKey: ['modelRooms'] })
-        .map((query) => ({ key: query.queryKey, offScreen: false }))
-    : []),
   // Its notes, which the coordinator keeps as the person decides, only while they show.
   ...(event.projectId !== null && event.aggregateType === 'project_note' ? [{ key: keys.notes(event.projectId), offScreen: false }] : []),
   // Its automations, and the page of the one that changed or ran, only while they show: what doesn't is read as it next opens.
@@ -184,6 +175,17 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
     ? [
         { key: keys.canvases(event.projectId), offScreen: false },
         { key: keys.canvas(event.aggregateId), offScreen: false },
+        // A chat drawing a new artifact takes the first canvas it publishes.
+        { key: keys.artifactsDrawing(event.projectId), offScreen: false },
+        // A first save makes the project's place for artifacts.
+        { key: keys.artifactsPlace(event.projectId), offScreen: false },
+      ]
+    : []),
+  // An artifact's own chat starts or settles as a task does: one drawing a new artifact shows among the project's artifacts.
+  ...(event.projectId !== null && event.aggregateType === 'task'
+    ? [
+        { key: keys.artifactsDrawing(event.projectId), offScreen: false },
+        { key: keys.canvases(event.projectId), offScreen: false },
       ]
     : []),
   // Finished tasks' folders, which go and come back with their worktrees and with tasks settling, only while they show (ADR-056).
@@ -287,10 +289,11 @@ export const follow = (client: Client, cache: QueryClient, since?: number | Feed
   })
 
   const heard = (event: WatchEvent) => {
-    if (event._tag === 'Changed') {
+    if (event._tag === 'Changed' || event._tag === 'Launches') {
       heardSoFar += 1
-      if (event.renamedTo !== undefined) heardRename(event.aggregateId, event.renamedTo, event.renamedByAgent === true)
-      for (const read of wholeReads(cache, event)) {
+      // A run starting or ending changes whether a finished task's folder can be cleaned up.
+      const reads = event._tag === 'Changed' ? wholeReads(cache, event) : [{ key: keys.folders, offScreen: false }]
+      for (const read of reads) {
         const hash = hashKey(read.key)
         // Only a read the cache holds can be under way, and needs its change remembered.
         if (cache.getQueryCache().get(hash) !== undefined) {
@@ -301,6 +304,9 @@ export const follow = (client: Client, cache: QueryClient, since?: number | Feed
         due.set(hash, { key: read.key, offScreen: read.offScreen || (due.get(hash)?.offScreen ?? false) })
       }
       if (due.size > 0) timer ??= setTimeout(readDue, GATHER)
+    }
+    if (event._tag === 'Changed') {
+      if (event.renamedTo !== undefined) heardRename(event.aggregateId, event.renamedTo, event.renamedByAgent === true)
       // A thread on screen reads its own changes item by item, and its head as its project's rules change; a project's new name it reads again whole, at once.
       const renamed = event.aggregateType === 'project'
       for (const queryKey of threadReads(cache, event)) {
@@ -309,11 +315,8 @@ export const follow = (client: Client, cache: QueryClient, since?: number | Feed
         void cache.invalidateQueries({ queryKey, exact: true, refetchType: renamed ? 'active' : 'none' })
       }
     }
-    // Plan usage comes whole each time, so it is the cache's as it is, not read again; each model's room follows from it.
-    if (event._tag === 'PlanUsage') {
-      cache.setQueryData(keys.planUsage, event.usage)
-      void cache.invalidateQueries({ queryKey: ['modelRooms'] })
-    }
+    // Plan usage comes whole each time, so it is the cache's as it is, not read again.
+    if (event._tag === 'PlanUsage') cache.setQueryData(keys.planUsage, event.usage)
     for (const listener of listeners) listener(event)
   }
 
@@ -325,7 +328,7 @@ export const follow = (client: Client, cache: QueryClient, since?: number | Feed
       // A watch that broke may have missed a plan usage, which only the feed says changed: read again if it shows.
       if (watched) {
         void cache.invalidateQueries({ queryKey: keys.planUsage, exact: true })
-        void cache.invalidateQueries({ queryKey: ['modelRooms'] })
+        void cache.invalidateQueries({ queryKey: keys.folders, exact: true })
       }
       watched = true
       for (const listener of rewatching) listener()

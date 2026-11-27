@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test, type TestContext } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { setInterval } from 'node:timers/promises'
+import { setInterval, setTimeout as delay } from 'node:timers/promises'
 import { createHash, X509Certificate } from 'node:crypto'
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { Client, credentials, status } from '@grpc/grpc-js'
@@ -46,13 +46,14 @@ const journalId = 'wjn_' + '5'.repeat(32)
 const providerId = 'codex'
 const placement = { projectId, workspaceId, providerId }
 
-const fixture = async (t: TestContext, id = homeId) => {
+const fixture = async (t: TestContext, id = homeId, { removed = false } = {}) => {
   const root = mkdtempSync(join(tmpdir(), 'althar-agent-worker-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const path = workerCertificates(root, true)
   const read = (name: string) => readFileSync(path(name))
   const fingerprint = workerCertificateFingerprint(new X509Certificate(read('enrolled.pem')).raw)
-  const enrolled = new Map([[fingerprint, workerId]])
+  // Removed by the person: not enrolled, and told so when it connects.
+  const enrolled = new Map(removed ? [] : [[fingerprint, workerId]])
   const outstanding = new Map<string, AgentRunAssignment>()
   const withdrawn = new Set<string>()
   const journals = new Map<string, string>()
@@ -78,6 +79,7 @@ const fixture = async (t: TestContext, id = homeId) => {
     certificatePem: read('home.pem'),
     privateKeyPem: read('home.key'),
     workerForCertificate: (value) => enrolled.get(value),
+    workerRemoved: (value) => removed && value === fingerprint,
     agentWorkers: pool,
   })
   t.after(home.close)
@@ -155,6 +157,10 @@ const hello = (
   case: 'hello',
   value: {
     $typeName: 'althar.worker.v1.AgentWorkerHello',
+    anyProject: false,
+    reportsSignIn: false,
+    signedIn: [],
+    release: '',
     reserveBeforeTransfer: false,
     workerId: id,
     version: 1,
@@ -246,6 +252,39 @@ void test('the enrolled stream owns one project-scoped agent run and confirms st
   equal((await stopping).outcome, AgentRunOutcome.STOPPED)
   equal(await worker.read(), undefined)
   deepEqual(pool.list(projectId), [])
+})
+
+void test('confirms agent stop while provider output is backpressured', { timeout: 12_000 }, async (t) => {
+  const { pool, connect } = await fixture(t)
+  const worker = connect()
+  worker.send(hello())
+  equal((await worker.read())?.case, 'hello')
+  const opening = pool.start(workerId, placement)
+  const start = await worker.read()
+  ok(start?.case === 'start')
+  const { runId } = start.value
+  worker.send({
+    case: 'ready',
+    value: {
+      $typeName: 'althar.worker.v1.AgentRunReady',
+      runId,
+      workspacePath: '/private/worker/workspace',
+      toolsPort: 0,
+      skillsPath: '',
+      mcpCommands: [],
+    },
+  })
+  const agent = await opening
+  for (let chunk = 0; chunk < 128; chunk++) {
+    worker.send({ case: 'output', value: create(AgentRunBytesSchema, { runId, data: Buffer.alloc(2048) }) })
+  }
+  for (let check = 0; !agent.output.writableNeedDrain && check < 100; check++) await delay(10)
+  ok(agent.output.writableNeedDrain)
+
+  const stopping = agent.stop()
+  equal((await worker.read())?.case, 'stop')
+  worker.send({ case: 'exit', value: create(AgentRunExitSchema, { runId, outcome: AgentRunOutcome.STOPPED }) })
+  equal((await stopping).outcome, AgentRunOutcome.STOPPED)
 })
 
 void test('receives only verified files for the exact active checkout', { timeout: 15_000 }, async (t) => {
@@ -590,10 +629,10 @@ void test('managed output and stop stay attached to the selected task lease', { 
       received.push(Buffer.from(bytes).toString())
     },
   }
-  await rejects(agent.startHelper({ ...options, providerId: 'different' }), /cannot start the selected helper/i)
+  await rejects(agent.startHelper({ ...options, providerId: 'different' }), /doesn’t have the helper’s agent/i)
   await rejects(
     agent.startHelper({ ...options, providerId, skills: [{ path: 'SKILL.md', data: Buffer.from('Helper'), executable: false }] }),
-    /cannot start the selected helper/i,
+    /Update this worker to start this helper/i,
   )
   const waitingHelper = agent.startHelper({ ...options, providerId })
   const helperStart = await worker.read()
@@ -628,7 +667,10 @@ void test('managed output and stop stay attached to the selected task lease', { 
     agent.startCommand({ id: 'proc_' + '7'.repeat(32), directory: '', command: 'true', output: () => undefined }),
     /no longer owns/i,
   )
-  worker.send({ case: 'heartbeat', value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', sequence: 1 } })
+  worker.send({
+    case: 'heartbeat',
+    value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', reportsSignIn: false, signedIn: [], sequence: 1 },
+  })
   equal((await worker.read())?.case, 'stop')
   worker.send({
     case: 'exit',
@@ -674,7 +716,10 @@ void test('revocation withdraws the lease and leaves the in-flight stop unconfir
   await rejects(agent.write(Buffer.from('new input')), /no longer owns/)
   await rejects(agent.readPatch('a'.repeat(40), 'b'.repeat(40)), /cannot check/)
   const unconfirmed = rejects(agent.exit, /not enrolled/)
-  worker.send({ case: 'heartbeat', value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', sequence: 1 } })
+  worker.send({
+    case: 'heartbeat',
+    value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', reportsSignIn: false, signedIn: [], sequence: 1 },
+  })
   await rejects(worker.read(), { code: status.UNAUTHENTICATED })
   await unconfirmed
   deepEqual(pool.list(projectId), [])
@@ -727,7 +772,10 @@ void test('withdrawing one project grant rejects new work and lets the enrolled 
   tunnel.send({ case: 'data', value: Buffer.from('withdrawn') })
   await rejects(tunnel.read(), { code: status.PERMISSION_DENIED })
   deepEqual(received, ['granted'])
-  worker.send({ case: 'heartbeat', value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', sequence: 1 } })
+  worker.send({
+    case: 'heartbeat',
+    value: { $typeName: 'althar.worker.v1.AgentWorkerHeartbeat', reportsSignIn: false, signedIn: [], sequence: 1 },
+  })
   equal((await worker.read())?.case, 'stop')
   worker.send({
     case: 'exit',
@@ -818,6 +866,48 @@ void test(
     deepEqual((await output.next()).value, Buffer.from('hello'))
     child.stdin.end()
     deepEqual(await stopped, [243, null])
+  },
+)
+
+void test(
+  'the native worker sweeps what a crash left, and a worker set up by hand stops once its home says it was removed',
+  { timeout: 15_000, skip: process.platform !== 'linux' },
+  async (t) => {
+    const { root, path, home } = await fixture(t, homeId, { removed: true })
+    const project = join(root, 'workspaces', projectId)
+    mkdirSync(project, { recursive: true, mode: 0o700 })
+    const run = 'war_' + '6'.repeat(32)
+    // A crash's leftovers: a checkout whose run the journal has no record of, and its import.
+    const leftovers = [join(project, `${workspaceId}-${run}`), join(project, `.${run}.import`)]
+    for (const folder of leftovers) mkdirSync(folder)
+    // Set up by its operator: never the worker's to remove.
+    const kept = join(project, workspaceId)
+    mkdirSync(kept)
+    const config = join(root, 'agent-config')
+    writeFileSync(config, [join(root, 'workspaces'), [projectId, providerId, '/usr/bin/cat'].join('\t'), ''].join('\n'), { mode: 0o600 })
+    const child = spawn(
+      native,
+      [
+        'https://localhost:' + home.port,
+        homeId,
+        workerId,
+        path('home-ca.pem'),
+        path('enrolled.pem'),
+        path('enrolled.key'),
+        join(root, 'journal'),
+        '--agent-config',
+        config,
+        '--watch',
+      ],
+      { env: { ...process.env, HOME: root }, stdio: ['ignore', 'ignore', 'pipe'] },
+    )
+    t.after(() => child.kill())
+    let stderr = ''
+    child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()))
+    deepEqual(await once(child, 'exit'), [0, null])
+    ok(stderr.includes('The home removed this worker.'), stderr)
+    for (const folder of leftovers) equal(existsSync(folder), false, folder)
+    ok(existsSync(kept))
   },
 )
 
@@ -1087,6 +1177,10 @@ void test(
       equal(await response.text(), 'home tools')
       equal((await agent.stop()).outcome, AgentRunOutcome.STOPPED)
       equal(existsSync(agent.skillsPath), false)
+      // Its end recorded, nothing asks for the run again: the worker takes its checkout away.
+      for await (const _ of setInterval(25, undefined, { signal: AbortSignal.timeout(5_000) })) {
+        if (!existsSync(agent.workspacePath)) break
+      }
     }
   },
 )

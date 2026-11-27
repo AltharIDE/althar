@@ -53,7 +53,7 @@ export const setAppMenu = ({
       : {
           role: 'fileMenu',
           submenu: [
-            { id: 'homes', label: 'Homes…', accelerator: 'CommandOrControl+Shift+H', click: homes },
+            { id: 'homes', label: 'Computers…', accelerator: 'CommandOrControl+Shift+H', click: homes },
             { type: 'separator' },
             { role: 'close' },
           ],

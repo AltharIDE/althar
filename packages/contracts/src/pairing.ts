@@ -63,3 +63,58 @@ export const NetworkHomeInfo = Schema.Struct({
   version: Schema.String.check(Schema.isMaxLength(128)),
 })
 export const PairingResult = Schema.Struct({ homeId: HomeId, apiVersion: Schema.Int, device: RegisteredClient })
+
+const CODE_PREFIX = 'althar-pairing'
+/** Where a pairing link points: a page that opens Althar on the phone, or sends a phone without it to its store. */
+export const PAIRING_PAGE = 'https://althar.ai/pair'
+/** The phone app's own address for the same, which the page's Open in Althar uses once Althar is installed. */
+export const PAIRING_APP_LINK = 'althar://pair'
+
+/**
+ * A pairing code as a link a phone's own camera opens: the code after the #,
+ * so the page's server never sees it (`https://althar.ai/pair#1.<base64url>`).
+ */
+export const pairingLinkOf = (code: string, base: string = PAIRING_PAGE): string =>
+  code.startsWith(CODE_PREFIX) ? `${base}#${code.slice(CODE_PREFIX.length)}` : code
+
+/** The pairing code in what was pasted or scanned: the code itself, or a pairing link (the page's or the app's). */
+export const pairingCodeIn = (given: string): string => {
+  const text = given.trim()
+  for (const base of [PAIRING_PAGE, PAIRING_APP_LINK]) {
+    if (!text.startsWith(`${base}#`) && !text.startsWith(`${base}/#`)) continue
+    const fragment = text.slice(text.indexOf('#') + 1)
+    return /^\d+\./.test(fragment) ? `${CODE_PREFIX}${fragment}` : text
+  }
+  return text
+}
+
+/** A pairing code made by the home for a window to show: the code to paste, the link its QR carries, and what to ask after. */
+export const PairingCodeMade = Schema.Struct({
+  code: Schema.String,
+  link: Schema.String,
+  tokenHash: PairingTokenHash,
+  expiresAt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** How long it has, in ms, by the home's clock as it made it: a window counts down from this, never from its own clock against expiresAt. */
+  left: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+})
+export type PairingCodeMade = typeof PairingCodeMade.Type
+
+/** How a code made by the home stands: waiting for a phone, run out (or unknown), or used by the device it paired. */
+export const PairingStatus = Schema.Union([
+  Schema.Struct({ state: Schema.Literal('waiting'), expiresAt: Schema.Int }),
+  Schema.Struct({ state: Schema.Literal('expired') }),
+  Schema.Struct({ state: Schema.Literal('paired'), device: RegisteredClient }),
+])
+export type PairingStatus = typeof PairingStatus.Type
+
+/**
+ * Whether phones can reach the home: where it answers them, or null. A
+ * desktop's own home can switch its listener from the window (switchable);
+ * a host's is configured on the host.
+ */
+export const PhoneAccess = Schema.Struct({
+  origin: Schema.NullOr(Schema.String),
+  switchable: Schema.Boolean,
+  on: Schema.Boolean,
+})
+export type PhoneAccess = typeof PhoneAccess.Type

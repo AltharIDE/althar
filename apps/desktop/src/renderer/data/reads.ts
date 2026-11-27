@@ -3,7 +3,7 @@ import { type EnsureQueryDataOptions, QueryClient, queryOptions } from '@tanstac
 import type { CoordinatorSnapshot, ThreadSnapshot } from '@althar/contracts'
 
 import { mergeItems, settled } from '../shared/items'
-import type { Client } from './client'
+import { canCall, type Client } from './client'
 import { readModelsAgain } from './models'
 
 /*
@@ -19,6 +19,10 @@ export const keys = {
   /** The agents on this Mac, as the runtime last checked them. */
   status: ['status'] as const,
   home: ['home'] as const,
+  /** The agents this computer runs at once, as they stand (`usePlaces`). */
+  places: ['places'] as const,
+  /** The home's workers, as they stand (`useWorkers`). */
+  workers: ['workers'] as const,
   board: (projectId: string) => ['board', projectId] as const,
   coordinator: (projectId: string) => ['coordinator', projectId] as const,
   thread: (threadId: string) => ['thread', threadId] as const,
@@ -37,6 +41,7 @@ export const keys = {
   containers: (connectionId: string) => ['containers', connectionId] as const,
   /** A code host connection's repositories, to clone one. */
   hostRepositories: (connectionId: string) => ['host-repositories', connectionId] as const,
+  hostReach: (connectionId: string) => ['host-reach', connectionId] as const,
   /** Where a code host connection can make a repository. */
   repositoryOwners: (connectionId: string) => ['repository-owners', connectionId] as const,
   settings: ['settings'] as const,
@@ -45,8 +50,6 @@ export const keys = {
   settingChanges: (projectId: string | null) => ['settingChanges', projectId] as const,
   /** Every account's plan usage: kept whole as the runtime sends it. */
   planUsage: ['planUsage'] as const,
-  /** Each model's room where work on it would start, in a project or (null) anywhere: read again as plan usage changes. */
-  modelRooms: (projectId: string | null) => ['modelRooms', projectId] as const,
   /** A project's automations, for its Automations tab and the dot on it. */
   automations: (projectId: string) => ['automations', projectId] as const,
   /** One automation, for its own page. */
@@ -67,10 +70,16 @@ export const keys = {
   document: (threadId: string, path: string, version: string) => ['document', threadId, path, version] as const,
   /** A project's canvases (ADR-104), each with its latest version. */
   canvases: (projectId: string) => ['canvases', projectId] as const,
+  /** A project's artifacts still drawing their first version, in their own chats. */
+  artifactsDrawing: (projectId: string) => ['artifactsDrawing', projectId] as const,
   /** One canvas whole: its versions and comments, read again as it changes. */
   canvas: (canvasId: string) => ['canvas', canvasId] as const,
   /** A version's words, which never change. */
   canvasText: (canvasId: string, version: number) => ['canvasText', canvasId, version] as const,
+  /** Where the project's artifacts go when saved to a repository. */
+  artifactsPlace: (projectId: string) => ['artifactsPlace', projectId] as const,
+  /** A repository's folders, where an artifact could be saved. */
+  repositoryFolders: (projectId: string, repositoryId: string) => ['repositoryFolders', projectId, repositoryId] as const,
 }
 
 /**
@@ -122,6 +131,8 @@ export const homeSince = (client: Client) => {
 }
 
 export const reads = (client: Client) => ({
+  /** Whether the window's home lets it make a call: every one, in this computer's own window. */
+  allows: (tag: string) => canCall(client, tag),
   projects: () => queryOptions({ queryKey: keys.projects, queryFn: () => client.listProjects() }),
   status: () => queryOptions({ queryKey: keys.status, queryFn: () => client.status() }),
   home: () =>
@@ -165,6 +176,14 @@ export const reads = (client: Client) => ({
       staleTime: 60_000,
       retry: false,
     }),
+  // Asked beside its list, and kept as long: what a connection was let reach changes only as it is changed on its host.
+  hostReach: (connectionId: string) =>
+    queryOptions({
+      queryKey: keys.hostReach(connectionId),
+      queryFn: () => client.readHostReach(connectionId),
+      staleTime: 60_000,
+      retry: false,
+    }),
   repositoryOwners: (connectionId: string) =>
     queryOptions({
       queryKey: keys.repositoryOwners(connectionId),
@@ -177,13 +196,6 @@ export const reads = (client: Client) => ({
     queryOptions({ queryKey: keys.settingChanges(projectId), queryFn: () => client.getSettingChanges(projectId) }),
   // The runtime sends it whole on the feed whenever it changes, so it is read once a window, and again only by asking.
   planUsage: () => queryOptions({ queryKey: keys.planUsage, queryFn: () => client.getPlanUsage() }),
-  // Shared by every picker in the window, and read again as the feed says plan usage changed.
-  modelRooms: (projectId: string | null) =>
-    queryOptions({
-      queryKey: keys.modelRooms(projectId),
-      queryFn: () => client.getModelRooms(projectId),
-      staleTime: 30_000,
-    }),
   automations: (projectId: string) =>
     queryOptions({ queryKey: keys.automations(projectId), queryFn: () => client.getAutomations(projectId) }),
   automation: (automationId: string) =>
@@ -223,7 +235,18 @@ export const reads = (client: Client) => ({
       gcTime: 5 * 60_000,
     }),
   canvases: (projectId: string) => queryOptions({ queryKey: keys.canvases(projectId), queryFn: () => client.listCanvases(projectId) }),
+  artifactsDrawing: (projectId: string) =>
+    queryOptions({ queryKey: keys.artifactsDrawing(projectId), queryFn: () => client.listArtifactsDrawing(projectId) }),
   canvas: (canvasId: string) => queryOptions({ queryKey: keys.canvas(canvasId), queryFn: () => client.getCanvas(canvasId) }),
+  artifactsPlace: (projectId: string) =>
+    queryOptions({ queryKey: keys.artifactsPlace(projectId), queryFn: () => client.getArtifactsPlace(projectId) }),
+  repositoryFolders: (projectId: string, repositoryId: string) =>
+    queryOptions({
+      queryKey: keys.repositoryFolders(projectId, repositoryId),
+      queryFn: () => client.listRepositoryFolders(projectId, repositoryId),
+      // Read when Save to repo opens; a folder made since shows the next time it opens.
+      staleTime: 60_000,
+    }),
   canvasText: (canvasId: string, version: number) =>
     queryOptions({
       queryKey: keys.canvasText(canvasId, version),
@@ -267,9 +290,10 @@ export const projectReads = (read: Reads, projectId: string): ReadonlyArray<Read
   read.projects(),
   read.coordinator(projectId),
   read.board(projectId),
-  read.rules(projectId),
+  // What the window's home keeps from it isn't asked: the screens that would show it say so instead.
+  ...(read.allows('GetProjectRules') ? [read.rules(projectId)] : []),
   read.connections(),
-  read.automations(projectId),
+  ...(read.allows('GetAutomations') ? [read.automations(projectId)] : []),
 ]
 
 /** The home reads its local projects, work and calls before opening. Agent checks run afterwards. */

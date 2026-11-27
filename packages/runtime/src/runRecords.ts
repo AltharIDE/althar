@@ -521,6 +521,8 @@ export type StuckWhy =
   | 'not_installed'
   /** The lead stopped to wait for the person's answer, which starts it again. */
   | 'waiting_on_person'
+  /** The code host refused the push that opens the pull request, for its sign-in: changing that sign-in, then trying again. */
+  | 'push_refused'
 
 /** What a stuck step's call says: the step, why, what went wrong in words, who was on it, the round, and the findings still open. */
 export interface StuckInfo {
@@ -550,7 +552,8 @@ export interface StuckInfo {
  * the reset, where it is known.
  */
 export type StuckAnswer =
-  | { readonly kind: 'tell'; readonly note: string }
+  /** `quiet` where Althar tells it, not the person, as an external wait resolving: the agent reads it, the thread shows its own line. */
+  | { readonly kind: 'tell'; readonly note: string; readonly quiet?: boolean }
   | {
       readonly kind: 'retry'
       readonly agentId: string

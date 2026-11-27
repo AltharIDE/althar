@@ -170,6 +170,27 @@ async fn reserve_in<F: Future<Output = io::Result<bool>>>(
     Ok(lock)
 }
 
+/// For sweeping what runs left (cleanup.rs): this login's reservation held, so no run of any worker process here starts
+/// meanwhile, and the run it last reserved where its unit may still be going. None where a run holds the reservation
+/// now, or it can't be told: then nothing is swept.
+pub(crate) async fn quiet_for_sweep() -> Option<(Option<File>, Option<String>)> {
+    let directory = runtime();
+    let held = match own_lock(&directory) {
+        Ok(lock) => lock,
+        // No user runtime directory: no run can be going on this login.
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Some((None, None)),
+        Err(_) => return None,
+    };
+    let live = match previous(&directory).ok()? {
+        Some(run) => match previous_stopped(&run).await {
+            Ok(true) => None,
+            _ => Some(run),
+        },
+        None => None,
+    };
+    Some((Some(held), live))
+}
+
 /// Used in capacity reports. The start itself still takes the authoritative lock.
 pub(crate) fn account_reserved() -> bool {
     own_lock(&runtime()).is_err()

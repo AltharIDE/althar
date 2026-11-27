@@ -58,11 +58,20 @@ function Window({
   withSettings = false,
   offline = false,
   notices = false,
+  withAlthar = false,
   ...props
-}: Partial<ProjectTabsProps> & { initial?: readonly ProjectTab[]; withSettings?: boolean; offline?: boolean; notices?: boolean }) {
+}: Partial<ProjectTabsProps> & {
+  initial?: readonly ProjectTab[]
+  withSettings?: boolean
+  offline?: boolean
+  notices?: boolean
+  /** Althar's own tab, with its dot for an update not yet looked at. */
+  withAlthar?: boolean
+}) {
   const [open, setOpen] = useState<readonly ProjectTab[]>(initial ?? ALL.slice(0, 3))
   const [current, setCurrent] = useState<string | null>(start)
   const [settings, setSettings] = useState<'none' | 'open' | 'current'>(withSettings ? 'current' : 'none')
+  const [althar, setAlthar] = useState<'none' | 'news' | 'open' | 'current'>(withAlthar ? 'news' : 'none')
   const others = ALL.filter((p) => !open.some((tab) => tab.id === p.id))
   return (
     <div>
@@ -81,9 +90,20 @@ function Window({
                 onClose: () => setSettings('none'),
               },
             })}
+        {...(althar === 'none'
+          ? {}
+          : {
+              althar: {
+                current: althar === 'current',
+                news: althar === 'news',
+                onSelect: () => setAlthar('current'),
+                onClose: () => setAlthar('none'),
+              },
+            })}
         onSelect={(id) => {
           setCurrent(id)
           if (settings === 'current') setSettings('open')
+          if (althar === 'current') setAlthar('open')
         }}
         onClose={(id) => {
           const at = open.findIndex((tab) => tab.id === id)
@@ -267,6 +287,22 @@ export const WithSettings: Story = {
     await expect(nav.queryByRole('button', { name: 'Settings' })).toBeNull()
   },
 }
+
+/** After an update, Althar's own tab, its quiet dot saying there's something new; opened, the dot goes; its × closes it. */
+export const WithAltharsTab: Story = {
+  args: { withAlthar: true },
+  play: async ({ canvasElement }) => {
+    const nav = within(within(canvasElement).getByRole('navigation', { name: 'Projects' }))
+    const tab = nav.getByRole('button', { name: /^Althar/ })
+    await expect(tab).toHaveAccessibleName('Althar, what’s new in this version')
+    await userEvent.click(tab)
+    await expect(nav.getByRole('button', { name: 'Althar' })).toHaveAttribute('aria-current', 'page')
+    await expect(nav.getByRole('button', { name: /^Halyard/ })).not.toHaveAttribute('aria-current')
+    await userEvent.click(nav.getByRole('button', { name: 'Close Althar' }))
+    await expect(nav.queryByRole('button', { name: /^Althar/ })).toBeNull()
+  },
+}
+export const WithAltharsTabDark: Story = { ...WithAltharsTab, globals: { theme: 'dark' } }
 
 /** A page in a tab of its own, after the projects': named by its title, with the window while it is pressed; its × closes it. */
 export const WithAPage: Story = {

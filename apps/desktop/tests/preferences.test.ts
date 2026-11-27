@@ -35,6 +35,7 @@ describe('the app’s preferences kept in the profile', () => {
       keepWorkingOnClose: false,
       browserLinks: 'beside',
       browserCookies: 'task',
+      homesExperimentalSaid: false,
     })
   })
 

@@ -22,6 +22,7 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Segmented } from '../../primitives/Segmented/Segmented'
 import { Select } from '../../primitives/Select/Select'
 import { Switch } from '../../primitives/Switch/Switch'
+import { type AgentsWhy, fewerWords } from '../../chrome/LoadMeter/load'
 import { EmptyState } from '../EmptyState/EmptyState'
 import s from './Preferences.module.css'
 
@@ -205,6 +206,8 @@ export interface AgentsAtOnceText {
   note: (count: number, machine: AtOnceMachine) => string
   /** Compact, one plain line whatever the number. */
   short: string
+  /** Fewer may work for now than the number says, and until when: said at the number, in its note's place. */
+  fewer: (atOnce: number, why: AgentsWhy) => string
   /** The default's mark on the scale. */
   mark: (machine: AtOnceMachine) => string
   /** The number as a screen reader says it: the default's, said to be. */
@@ -222,6 +225,7 @@ export const agentsAtOnceText: AgentsAtOnceText = {
     return 'May run hot'
   },
   short: 'The rest wait their turn',
+  fewer: fewerWords,
   mark: ({ count }) => `${count} · ${device.this}`,
   value: (n, { count }) => (n === count ? `${n}, ${device.this}’s default` : String(n)),
   reset: 'Use the default',
@@ -238,12 +242,16 @@ export interface AgentsAtOnceProps {
   most?: number
   /** A number of their own; null goes back to the default, as does the default's own number. */
   onChange: (count: number | null) => void
+  /** Fewer may work for now than the number says, while this computer is under load, and why: the note says so at the number. */
+  fewer?: { readonly atOnce: number; readonly why: AgentsWhy } | null
   /**
    * Alone on a sheet of its own, as the quick settings have it: one plain
    * line under its name, a step on the track for each number, and no scale
    * under it, the default only its mark. The sheet's padding is its own.
    */
   compact?: boolean
+  /** Shown as it stands, unchangeable: where the machine it's about doesn't take a change from here. Nothing moves or sends. */
+  disabled?: boolean
   text?: Partial<AgentsAtOnceText>
 }
 
@@ -252,10 +260,21 @@ export interface AgentsAtOnceProps {
  * track from one to the most, the default from its memory and cores marked
  * on it. The thumb clicks into the default as it passes; past it the track,
  * the number and the row's glyph warm, and the glyph breathes faster, the
- * further it goes. A drag goes out once it is let go. It says nothing of
- * what runs now: Settings stays calm.
+ * further it goes. A drag goes out once it is let go. Of what runs now it
+ * says only that fewer may work for a while, and why, while that is so: the
+ * number stays the person's, and Settings stays calm.
  */
-export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, compact = false, text }: AgentsAtOnceProps) {
+export function AgentsAtOnce({
+  count,
+  own: kept,
+  machine,
+  most = 16,
+  onChange,
+  fewer,
+  compact = false,
+  disabled = false,
+  text,
+}: AgentsAtOnceProps) {
   const t = { ...agentsAtOnceText, ...text }
   // While the thumb is held, the number it is on; it goes out once let go.
   const [held, setHeld] = useState<number | null>(null)
@@ -264,6 +283,8 @@ export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, c
   const n = held ?? count
   const own = held === null ? (kept ?? n !== machine.count) : n !== machine.count
   const heat = Math.max(0, Math.min(1, (n - machine.count) / Math.max(1, most - machine.count)))
+  // At the number, not while the thumb is held: fewer for now, where it is fewer than this number.
+  const now = fewer != null && held === null && fewer.atOnce < count ? t.fewer(fewer.atOnce, fewer.why) : null
   const at = (v: number) => `${((v - 1) / Math.max(1, most - 1)) * 100}%`
   const clamp = (v: number) => Math.max(1, Math.min(most, v))
   const show = (next: number) => {
@@ -291,8 +312,8 @@ export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, c
       {...(compact ? { className: s.compact } : {})}
       note={
         <>
-          {compact ? t.short : t.note(n, machine)}
-          {own && held === null && (
+          {now ?? (compact ? t.short : t.note(n, machine))}
+          {own && held === null && !disabled && (
             <>
               {' '}
               <LinkButton
@@ -319,13 +340,15 @@ export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, c
             ref={track}
             className={s.track}
             role="slider"
-            tabIndex={0}
+            // Unchangeable, it takes no focus, press or key: it says what it is, and that it can't be changed.
+            {...(disabled ? { 'aria-disabled': true, 'data-disabled': '' } : { tabIndex: 0 })}
             aria-label={t.title}
             aria-valuemin={1}
             aria-valuemax={most}
             aria-valuenow={n}
             aria-valuetext={t.value(n, machine)}
             onPointerDown={(e: PointerEvent<HTMLDivElement>) => {
+              if (disabled) return
               e.currentTarget.setPointerCapture?.(e.pointerId)
               hold(from(e.clientX))
             }}
@@ -339,6 +362,7 @@ export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, c
             }}
             onPointerCancel={() => setHeld(null)}
             onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+              if (disabled) return
               const steps: Record<string, number> = {
                 ArrowRight: n + 1,
                 ArrowUp: n + 1,

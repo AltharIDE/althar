@@ -57,7 +57,7 @@ test('comes back to what runs and what waits across projects, with the projects 
     await expect(page.getByRole('heading', { name: 'Name the limits better', level: 4 })).toBeVisible()
     await page.getByRole('button', { name: /since you looked/ }).click()
     await expect(page.getByText('Implement finished')).toBeVisible()
-    await expect(projects.getByRole('button', { name: /halyard/ })).toBeVisible()
+    await expect(projects.getByRole('button', { name: /^halyard/ })).toBeVisible()
     await page.screenshot({ path: 'test-results/home.png' })
 
     // Review opens the task itself, which leaves the home.
@@ -162,13 +162,13 @@ test('comes back to what runs and what waits across projects, with the projects 
     await tabs.getByRole('button', { name: 'Close Settings' }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await tabs.getByRole('button', { name: /^Home/ }).click()
-    await expect(projects.getByRole('button', { name: /meridian/ })).toBeVisible()
+    await expect(projects.getByRole('button', { name: /^meridian/ })).toBeVisible()
 
     // ⌘2 (Ctrl+2 elsewhere) opens the first project's tab, ⌘1 the home's.
     await page.keyboard.press('ControlOrMeta+2')
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.keyboard.press('ControlOrMeta+1')
-    await expect(projects.getByRole('button', { name: /meridian/ })).toBeVisible()
+    await expect(projects.getByRole('button', { name: /^meridian/ })).toBeVisible()
   } finally {
     await electronApp.close()
   }

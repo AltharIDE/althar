@@ -385,7 +385,7 @@ describe('a task that goes back to work', () => {
   })
 
   it.live('withdraws what the reviewer asked when its review is skipped, so the task doesn’t wait on it', () => {
-    const { working, bare, github } = onGitHub()
+    const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const runs = yield* Runs
       const questions = yield* Questions
@@ -1256,7 +1256,7 @@ describe('changing the team of a task that has begun', () => {
         'codex',
       )
       // The lead it has now takes over from its next turn: the picker shows it, and the thread's lead is who runs until then.
-      assert.deepStrictEqual((yield* queries.thread(task.threadId)).session?.nextLead?.agentId, 'codex')
+      yield* until(queries.thread(task.threadId), (thread) => thread.session?.nextLead?.agentId === 'codex')
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 

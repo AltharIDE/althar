@@ -1,0 +1,259 @@
+/* Coming next: shape it. On the kit's tokens. */
+
+.page {
+  position: relative;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--n-2);
+  /* narrow by its own width, which is the window's */
+  container: news / inline-size;
+}
+.page :where(h1, h2, p) {
+  margin: 0;
+}
+
+.head {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 64px 32px 36px;
+  text-align: center;
+}
+.title {
+  font: 640 52px/1.04 var(--font-display);
+  letter-spacing: -0.045em;
+  color: var(--t-1);
+}
+.why {
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--t-2);
+  text-wrap: balance;
+}
+.why b {
+  font-weight: 600;
+  color: var(--t-1);
+}
+/* The cards: the lead of what's being built large, two beside it, three under */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 32px;
+  list-style: none;
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 18px;
+  background: var(--n-1);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--lift-card);
+}
+.top {
+  grid-row: span 2;
+  grid-column: span 2;
+}
+.picture {
+  min-height: 210px;
+}
+.top .picture {
+  flex: 1;
+  min-height: 380px;
+}
+/* the lead, drawn larger to fill its card */
+.top .picture > * {
+  zoom: 1.45;
+}
+.top .picture[data-picture='phone'] > * {
+  zoom: 2.3;
+}
+.body {
+  display: grid;
+  gap: 8px;
+  padding: 16px 10px 8px;
+}
+.top .body {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  column-gap: 24px;
+  padding: 20px 14px 10px;
+}
+.top .meta,
+.top .name,
+.top .detail {
+  grid-column: 1;
+}
+.top .say {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: end;
+}
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 11px/1.3 var(--font-label);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.stage[data-stage='now'] {
+  color: var(--live);
+}
+.name {
+  font: 620 19px/1.2 var(--font-display);
+  letter-spacing: -0.02em;
+  color: var(--t-1);
+}
+.top .name {
+  font-size: 30px;
+  letter-spacing: -0.035em;
+}
+.detail {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.top .detail {
+  max-width: 520px;
+  font-size: 15px;
+}
+
+/* Say what you'd need: out to a new issue on GitHub, its name filled in */
+.say {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  margin-top: 6px;
+  padding: 0 12px;
+  border-radius: 9px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-1);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color var(--fast) var(--ease-out);
+}
+.say:hover {
+  background: var(--hover-paper);
+}
+.say:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: 2px;
+}
+.say > svg:first-child {
+  color: var(--t-3);
+}
+.out {
+  color: var(--t-4);
+}
+
+/* What's missing: where to say it */
+.missing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  width: calc(100% - 64px);
+  max-width: 1036px;
+  margin: 28px auto 72px;
+  padding: 18px 20px;
+  border-radius: 16px;
+  background: var(--n-1);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--lift-card);
+}
+.missingIcon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  background: var(--live-dim);
+  color: var(--live);
+}
+.missingWords {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 220px;
+  font-size: 13px;
+  color: var(--t-3);
+}
+.missingTitle {
+  font: 620 17px/1.25 var(--font-display);
+  letter-spacing: -0.015em;
+  color: var(--t-1);
+}
+.way {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 9px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-1);
+  text-decoration: none;
+  transition: background-color var(--fast) var(--ease-out);
+}
+.way:hover {
+  background: var(--hover-paper);
+}
+.way:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: 2px;
+}
+
+/* ---- the narrowest window ---- */
+
+@container news (width < 960px) {
+  .title {
+    font-size: 40px;
+  }
+  .cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .top {
+    grid-row: auto;
+  }
+  .top .picture {
+    min-height: 260px;
+  }
+  .top .picture > * {
+    zoom: 1;
+  }
+  .top .picture[data-picture='phone'] > * {
+    zoom: 1.5;
+  }
+  .top .body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .top .say {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+  }
+}

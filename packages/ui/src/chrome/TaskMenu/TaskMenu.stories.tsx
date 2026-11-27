@@ -238,3 +238,21 @@ export const AllStates: Story = {
   parameters: statesParameters,
   render: (args) => <States cells={['rest', 'hover', 'focus', 'pressed'].map((state) => ({ state, node: <TaskMenu {...args} /> }))} />,
 }
+
+/** Where it runs, among the home and its workers: one ready, with what it installs first; one that can't take it, greyed with why. */
+export const RunsOn: Story = {
+  args: {
+    defaultOpen: true,
+    runsOn: {
+      value: 'home',
+      places: [
+        { value: 'home', label: 'This Mac' },
+        { value: 'wrk_a', label: 'runner-1', hint: '12 GB free' },
+        { value: 'wrk_b', label: 'runner-2', hint: 'Sandbox can’t start', disabled: true },
+      ],
+      onMove: fn(),
+    },
+  },
+}
+
+export const RunsOnDark: Story = { ...RunsOn, globals: { theme: 'dark' } }

@@ -148,6 +148,9 @@ export interface HomeProps {
   onTalk?: (id: string) => void
   /** Start a new project, in a tab of its own. Without it, no way to from here. */
   onNewProject?: () => void
+  /** From a project's menu in the list: its settings, and taking it out of Althar, which asks first. */
+  onProjectSettings?: (id: string) => void
+  onRemoveProject?: (id: string) => void
   className?: string
   text?: Partial<HomeText>
 }
@@ -180,6 +183,8 @@ export function Home({
   onOpenProject,
   onTalk,
   onNewProject,
+  onProjectSettings,
+  onRemoveProject,
   className,
   text,
 }: HomeProps) {
@@ -270,6 +275,9 @@ export function Home({
         text={t.projects}
         {...(onOpenProject ? { onOpenProject } : {})}
         {...(onNewProject ? { onNewProject } : {})}
+        {...(onTalk ? { onTalk } : {})}
+        {...(onProjectSettings ? { onProjectSettings } : {})}
+        {...(onRemoveProject ? { onRemoveProject } : {})}
       />
     </div>
   )

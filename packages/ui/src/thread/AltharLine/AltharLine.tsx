@@ -3,15 +3,18 @@ import type { ReactNode } from 'react'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Problem } from '../../primitives/Problem/Problem'
+import { type FailedLog, FailedLogs } from '../FailedLogs/FailedLogs'
 import { NoteDetails } from '../NoteDetails/NoteDetails'
 import s from './AltharLine.module.css'
 
 export interface AltharLineText {
   /** Who says it. */
   name: string
+  /** The fold that holds the logs of the failed checks it names. */
+  logs: string
 }
 
-export const altharLineText: AltharLineText = { name: 'Althar' }
+export const altharLineText: AltharLineText = { name: 'Althar', logs: 'Logs' }
 
 export type AltharLineProps = RootProps<
   'p',
@@ -22,6 +25,8 @@ export type AltharLineProps = RootProps<
     text?: Partial<AltharLineText>
     /** What the line is built on, such as a host's raw answer: folded under it as Details. */
     details?: string
+    /** The failed checks it names, such as the merge queue's: each log's end, or why it couldn't be read, folded under it as Logs. */
+    logs?: FailedLog[]
   }
 >
 
@@ -31,7 +36,7 @@ export type AltharLineProps = RootProps<
  * opened. One plain line with its name, so it reads as someone speaking;
  * what failed is said as a problem, in the danger colour with its mark.
  */
-export function AltharLine({ children, tone = 'info', text, details, className, ...rest }: AltharLineProps) {
+export function AltharLine({ children, tone = 'info', text, details, logs, className, ...rest }: AltharLineProps) {
   const t = { ...altharLineText, ...text }
   const line = (
     <p className={cx(s.line, className)} {...rest}>
@@ -45,11 +50,17 @@ export function AltharLine({ children, tone = 'info', text, details, className, 
       )}
     </p>
   )
-  if (details === undefined) return line
+  const folded = logs !== undefined && logs.length > 0
+  if (details === undefined && !folded) return line
   return (
     <div className={s.with}>
       {line}
-      <NoteDetails>{details}</NoteDetails>
+      {folded && (
+        <NoteDetails text={{ label: t.logs }} drawn>
+          <FailedLogs logs={logs} />
+        </NoteDetails>
+      )}
+      {details !== undefined && <NoteDetails>{details}</NoteDetails>}
     </div>
   )
 }

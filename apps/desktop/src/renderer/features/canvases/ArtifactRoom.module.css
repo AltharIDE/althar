@@ -1,0 +1,118 @@
+/*
+ * An artifact's room: its chat in a column of its own, the artifact's top
+ * row over it, and its canvas filling the rest, as a design tool lays out a
+ * design beside its conversation.
+ */
+.room {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+}
+/* under its row, the chat and the canvas, side by side; neither has a head of its own */
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+/* the canvas's versions and actions, at the end of the row */
+.actions {
+  display: inline-flex;
+  align-items: center;
+}
+.chat {
+  position: relative;
+  flex: none;
+  /* its width is set on it, as the person last dragged its edge; its right is kept for that edge's handle */
+  min-width: 0;
+  padding-right: 8px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--line-2);
+  background: var(--paper);
+}
+/* its edge's handle lies in the chat's own right, clear of the thread's scrollbar and of the artifact beside it, which may
+   be drawn in a view of its own over the window */
+.chat > .handle {
+  right: -1px;
+}
+.chat > .handle::after {
+  left: auto;
+  right: 0;
+}
+/* over the window while the edge is dragged: the artifact steps aside under it, and the pointer keeps its cursor */
+.dragging {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  cursor: col-resize;
+}
+.canvas {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* the canvas's panel draws its own edge, and slides in beside a conversation: here the chat's border stands for the one, and
+   it is in place from the first frame, so its view is laid where it stays */
+.canvas > * {
+  flex: 1;
+  min-height: 0;
+  border-left: 0;
+  animation: none;
+}
+.first {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+.empty {
+  flex: 1;
+}
+.drawing {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: var(--t-3);
+  background: var(--sunk);
+}
+.drawing span {
+  animation: breathe 1.8s ease-in-out infinite alternate;
+}
+@keyframes breathe {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawing span {
+    animation: none;
+  }
+}
+@media (max-width: 760px) {
+  .body {
+    flex-direction: column;
+  }
+  .chat {
+    /* over the width set on it: stacked, the window's */
+    width: auto !important;
+    padding-right: 0;
+    height: 45%;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-2);
+  }
+  /* stacked, its width is the window's */
+  .handle {
+    display: none;
+  }
+}

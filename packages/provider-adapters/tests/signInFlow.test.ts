@@ -188,7 +188,7 @@ describe('signing in inside Althar', () => {
     const said = await run(claude(), { way: 'browser' }, (events, handle) => {
       if (events.at(-1)?.kind === 'browser' && events.length === 2) handle.paste('stop')
     })
-    expect(said.at(-1)).toEqual({ kind: 'failed', message: 'Login failed: network' })
+    expect(said.at(-1)).toEqual({ kind: 'failed', message: 'No reply. Check the connection.', detail: 'Login failed: network' })
   })
 
   it('opens Codex’s page in the browser itself, and says who signed in, minding only its own sign-in', async () => {
@@ -205,7 +205,7 @@ describe('signing in inside Althar', () => {
     const said = await run(codex('failure'), { way: 'device' })
     expect(said).toEqual([
       { kind: 'device', code: 'LNBY-V0Q5J', page: 'https://auth.openai.com/codex/device', minutes: 15 },
-      { kind: 'failed', message: 'Login was not completed' },
+      { kind: 'failed', message: 'Couldn’t sign in.', detail: 'Login was not completed' },
     ])
   })
 
@@ -220,7 +220,11 @@ describe('signing in inside Althar', () => {
       },
     }
     const said = await run(deaf, { way: 'browser' })
-    expect(said.at(-1)).toEqual({ kind: 'failed', message: 'The agent stopped listening while signing in.' })
+    expect(said.at(-1)).toEqual({
+      kind: 'failed',
+      message: 'Codex stopped before signing in.',
+      detail: 'It stopped listening while signing in.',
+    })
   })
 
   it('signs Antigravity in over ACP: opens the page it prints, on either stream and however its line arrives, and ends when it answers', async () => {
@@ -239,7 +243,7 @@ describe('signing in inside Althar', () => {
     const { folder, restore } = ownTemp()
     try {
       const said = await run(antigravity('subscription'), { way: 'browser' })
-      expect(said.at(-1)).toEqual({ kind: 'failed', message: 'Google Antigravity needs an eligible subscription on this account.' })
+      expect(said.at(-1)).toMatchObject({ kind: 'failed', message: 'Google Antigravity needs an eligible subscription on this account.' })
       // Its folder goes once it has exited, which the sign-in's end doesn't wait for.
       await waitFor(
         () => readdirSync(folder),
@@ -256,20 +260,20 @@ describe('signing in inside Althar', () => {
     expect(await refused({ code: -32603, message: 'Internal error: account ineligible for Antigravity' })).toEqual({
       kind: 'failed',
       message: "This account can't use Google Antigravity. Sign in with another.",
+      detail: 'Internal error: account ineligible for Antigravity',
     })
-    expect(await refused({ code: -32603, message: 'OAuth error: access_denied' })).toEqual({
-      kind: 'failed',
-      message: 'The sign-in wasn’t approved.',
-    })
+    expect(await refused({ code: -32603, message: 'OAuth error: access_denied' })).toMatchObject({ message: 'Not approved.' })
+    // Its own words go to the log only: the person reads a short line.
     expect(await refused({ code: -32603, message: 'Internal error\nThe listener on port 8085 closed' })).toEqual({
       kind: 'failed',
-      message: 'The listener on port 8085 closed',
+      message: 'Couldn’t sign in.',
+      detail: 'Internal error\nThe listener on port 8085 closed',
     })
     // An error with no words of its own, and one at the very start, before any page.
-    expect(await refused({ code: -32603 })).toEqual({ kind: 'failed', message: 'It refused.' })
-    expect(await refused({ code: -32600, message: 'Unsupported protocol version' }, 'initialize')).toEqual({
-      kind: 'failed',
-      message: 'Unsupported protocol version',
+    expect(await refused({ code: -32603 })).toEqual({ kind: 'failed', message: 'Couldn’t sign in.', detail: 'It refused.' })
+    expect(await refused({ code: -32600, message: 'Unsupported protocol version' }, 'initialize')).toMatchObject({
+      message: 'Couldn’t sign in.',
+      detail: 'Unsupported protocol version',
     })
   })
 
@@ -292,7 +296,7 @@ describe('signing in inside Althar', () => {
 
   it('gives up after its time, and offers nothing where the agent runs no sign-in of its own or not that way', async () => {
     const said = await run(claude(`setTimeout(() => {}, 10000)`), { way: 'browser', timeout: 50 })
-    expect(said.at(-1)).toEqual({ kind: 'failed', message: 'The sign-in wasn’t finished in time.' })
+    expect(said.at(-1)).toMatchObject({ kind: 'failed', message: 'Not finished in time.' })
     expect(startSignInFlow(agents.opencode, () => {}, { way: 'browser' })).toBeNull()
     expect(startSignInFlow(claude(), () => {}, { way: 'device' })).toBeNull()
   })

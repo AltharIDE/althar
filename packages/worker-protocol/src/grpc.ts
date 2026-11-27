@@ -1,7 +1,7 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomUUID, X509Certificate } from 'node:crypto'
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { Server, ServerCredentials, status, type MethodDefinition, type ServerDuplexStream } from '@grpc/grpc-js'
-import { runAgentMethod, type AgentWorkerPool } from './agentRuns.ts'
+import { removedFrame, runAgentMethod, type AgentWorkerPool } from './agentRuns.ts'
 import { agentToolsMethod, connectAgentTools } from './agentTools.ts'
 import { agentPreviewMethod } from './agentPreviews.ts'
 import {
@@ -40,6 +40,8 @@ interface HomeWorkerTransport {
   readonly privateKeyPem: Buffer
   /** Look up a currently enrolled worker by SHA-256 of its verified certificate in DER format. */
   readonly workerForCertificate: (fingerprint: string) => string | undefined
+  /** Whether the person removed the worker of this fingerprint, and it hasn't been added again since. */
+  readonly workerRemoved?: (fingerprint: string) => boolean
   readonly agentWorkers?: AgentWorkerPool
   readonly diagnostics?: {
     readonly cancellationRequested?: (workerId: string, attemptId: string, fence: string) => boolean
@@ -64,6 +66,34 @@ const MAX_PROJECT_LOG_CHUNKS = 1024
 const frame = (payload: HomeFrame['payload']) => Buffer.from(toBinary(HomeFrameSchema, create(HomeFrameSchema, { payload })))
 
 export const workerCertificateFingerprint = (der: Uint8Array): string => createHash('sha256').update(der).digest('hex')
+/**
+ * A worker's own key, as a home that signs its workers' certificates enrolls it: its public key (SPKI DER), so the same
+ * worker keeps its identity through a certificate signed again. Its home's authority must still have signed the certificate.
+ */
+export const workerKeyFingerprint = (spki: Uint8Array): string => `key:${createHash('sha256').update(spki).digest('hex')}`
+
+/** The enrolled worker a verified peer certificate is: by the certificate itself, or by the key its home signed. */
+const enrolledBy = (home: Pick<HomeWorkerTransport, 'workerForCertificate'>, raw: Buffer): (() => string | undefined) => {
+  const certificate = workerCertificateFingerprint(raw)
+  let key: string | undefined
+  try {
+    key = workerKeyFingerprint(new X509Certificate(raw).publicKey.export({ type: 'spki', format: 'der' }))
+  } catch {
+    key = undefined
+  }
+  return () => home.workerForCertificate(certificate) ?? (key === undefined ? undefined : home.workerForCertificate(key))
+}
+
+/** Whether the person removed the worker a verified peer certificate is, by the certificate or by its key. */
+const removedBy = (home: Pick<HomeWorkerTransport, 'workerRemoved'>, raw: Buffer): boolean => {
+  if (home.workerRemoved === undefined) return false
+  if (home.workerRemoved(workerCertificateFingerprint(raw))) return true
+  try {
+    return home.workerRemoved(workerKeyFingerprint(new X509Certificate(raw).publicKey.export({ type: 'spki', format: 'der' })))
+  } catch {
+    return false
+  }
+}
 
 const fail = (call: ServerDuplexStream<Buffer, Buffer>, code: status, message: string): void => {
   call.emit('error', Object.assign(new Error(message), { code }))
@@ -92,7 +122,7 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
           fail(call, status.UNAUTHENTICATED, 'A verified worker certificate is required')
           return
         }
-        const fingerprint = workerCertificateFingerprint(peer.raw)
+        const enrolledNow = enrolledBy(home, peer.raw)
         let workerId: string | undefined
         let ownsStream = false
         let offer: Omit<DiagnosticOffer, '$typeName'> | undefined
@@ -130,7 +160,7 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
         const receive = (bytes: Buffer): void => {
           if (finished) return
           try {
-            const enrolled = home.workerForCertificate(fingerprint)
+            const enrolled = enrolledNow()
             if (!enrolled || (workerId !== undefined && workerId !== enrolled)) {
               reject(status.UNAUTHENTICATED, 'The worker certificate is not enrolled')
               return
@@ -284,21 +314,26 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
         runAgent(call: ServerDuplexStream<Buffer, Buffer>) {
           const peer = call.getAuthContext().sslPeerCertificate
           if (!peer) return fail(call, status.UNAUTHENTICATED, 'A verified worker certificate is required')
-          const fingerprint = workerCertificateFingerprint(peer.raw)
-          if (!home.workerForCertificate(fingerprint)) return fail(call, status.UNAUTHENTICATED, 'The worker certificate is not enrolled')
-          agentWorkers.connect(call, home.homeId, () => home.workerForCertificate(fingerprint))
+          const enrolledNow = enrolledBy(home, peer.raw)
+          if (!enrolledNow()) {
+            // Removed while it was away: it hears so in place of a hello, and takes itself off its computer.
+            if (removedBy(home, peer.raw)) {
+              call.write(removedFrame(), () => call.end())
+              return
+            }
+            return fail(call, status.UNAUTHENTICATED, 'The worker certificate is not enrolled')
+          }
+          agentWorkers.connect(call, home.homeId, enrolledNow)
         },
         agentTools(call: ServerDuplexStream<Buffer, Buffer>) {
           const peer = call.getAuthContext().sslPeerCertificate
           if (!peer) return fail(call, status.UNAUTHENTICATED, 'A verified worker certificate is required')
-          const fingerprint = workerCertificateFingerprint(peer.raw)
-          connectAgentTools(call, agentWorkers, () => home.workerForCertificate(fingerprint))
+          connectAgentTools(call, agentWorkers, enrolledBy(home, peer.raw))
         },
         agentPreview(call: ServerDuplexStream<Buffer, Buffer>) {
           const peer = call.getAuthContext().sslPeerCertificate
           if (!peer) return fail(call, status.UNAUTHENTICATED, 'A verified worker certificate is required')
-          const fingerprint = workerCertificateFingerprint(peer.raw)
-          agentWorkers.connectPreview(call, () => home.workerForCertificate(fingerprint))
+          agentWorkers.connectPreview(call, enrolledBy(home, peer.raw))
         },
       },
     )

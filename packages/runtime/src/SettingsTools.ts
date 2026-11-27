@@ -1,12 +1,12 @@
 import {
   AccountStrategy,
+  ArtifactsHow,
   AtOnceCount,
   CommandRule,
   FolderWait,
   AfterMergeRule,
   NewProjectDefaults,
   PlansAndReviews,
-  PROJECT_SETTINGS_SECTIONS,
   ProjectInk,
   ProjectTracker,
   RepositoryFilesSetting,
@@ -14,7 +14,6 @@ import {
   RepositorySetup,
   RuleKind,
   SealStyle,
-  SETTINGS_SECTIONS,
   ShipRoute,
   settingsSectionOf,
   type SettingChangeCard,
@@ -22,6 +21,7 @@ import {
   type SettingChanger,
   UsageLimit,
   WorksIn,
+  type HomeWorker,
 } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
@@ -31,12 +31,14 @@ import { SqlClient } from 'effect/sql'
 
 import { Automations } from './Automations'
 import { Busy } from './Busy'
+import { CanvasSaves } from './CanvasSaves'
 import { Changes } from './Changes'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections } from './Connections'
 import { BranchNotFound } from './errors'
 import { coAuthorOn, setCoAuthor } from './credit'
 import { FolderCleanup } from './FolderCleanup'
+import { homeWorkers } from './homeWorkers'
 import { Instance } from './Instance'
 import { Models } from './Models'
 import { notesOf } from './notes'
@@ -142,6 +144,7 @@ type Needs =
   | Connections
   | Agents
   | RuntimeConfig
+  | CanvasSaves
 
 const stable = (value: unknown): string =>
   JSON.stringify(value, (_key, inner: unknown) =>
@@ -471,16 +474,30 @@ export class SettingsTools extends Context.Service<
               'the connection its issues are on, by its id as althar/code-hosts lists it, and where on it ({ id, name }), or null to learn it from its issues',
               Schema.NullOr(ProjectTracker),
             ),
+            artifacts: field(
+              'Artifacts',
+              'where Save to repo puts an artifact unless someone picks somewhere else: { repository (by name), folder (in it, ending in /, or "" for its root), how (pr: a pull request of its own; main: straight to its default branch), follow (true: each new version committed as it is published) }, naming only what changes; null until the first save sets it',
+              Schema.NullOr(
+                Schema.Struct({
+                  repository: Schema.optional(Schema.String),
+                  folder: Schema.optional(Schema.String),
+                  how: Schema.optional(ArtifactsHow),
+                  follow: Schema.optional(Schema.Boolean),
+                }),
+              ),
+            ),
           },
           read: (projectId) =>
             Effect.gen(function* () {
               const repositories = yield* repositoriesOf(projectId)
               const bound = yield* projectTracker(projectId)
+              const home = yield* (yield* CanvasSaves).home(projectId)
               return {
                 repositories: Object.fromEntries(
                   repositories.map((one) => [one.name, { role: one.role, changeTarget: one.fork?.target ?? null }]),
                 ),
                 tracker: bound === null ? null : { connectionId: bound.connectionId, container: bound.container },
+                artifacts: home === null ? null : { repository: home.repository, folder: home.folder, how: home.how, follow: home.follow },
               }
             }),
           write: (projectId, change) =>
@@ -506,6 +523,27 @@ export class SettingsTools extends Context.Service<
                   projectId,
                   change['tracker'] as { connectionId: string; container: { id: string; name: string } | null } | null,
                 )
+              if (change['artifacts'] !== undefined) {
+                const saves = yield* CanvasSaves
+                const asked = change['artifacts'] as { repository?: string; folder?: string; how?: ArtifactsHow; follow?: boolean } | null
+                if (asked === null) yield* saves.setHome(projectId, null)
+                else {
+                  // What the change leaves out stays as it is; with no place yet, it starts as the first save's would.
+                  const kept = yield* saves.home(projectId)
+                  const name = asked.repository ?? kept?.repository
+                  if (name === undefined)
+                    return yield* new ToolRefused({
+                      message: 'The project has no place for artifacts yet: name the repository they go in.',
+                    })
+                  const [named] = yield* byName(projectId, { [name]: null })
+                  yield* saves.setHome(projectId, {
+                    repositoryId: named!.repository.id,
+                    folder: asked.folder ?? kept?.folder ?? 'design/',
+                    how: asked.how ?? kept?.how ?? 'pr',
+                    follow: asked.follow ?? kept?.follow ?? true,
+                  })
+                }
+              }
             }),
         },
         {
@@ -830,6 +868,32 @@ export class SettingsTools extends Context.Service<
                 connections: list.map(
                   (one) => `${one.name} as ${one.account.login} (${one.id})${one.state === 'ready' ? '' : ', signed out'}`,
                 ),
+              }
+            }),
+        },
+        {
+          id: 'althar/computers',
+          title: 'Computers',
+          scope: 'althar',
+          note: "Where the home's agents run: the home, and the workers it runs tasks on, one task at a time each. Adding a worker and removing one are the person's.",
+          fields: {},
+          read: () =>
+            Effect.gen(function* () {
+              const { enabled, workers } = yield* homeWorkers((yield* RuntimeConfig).workers)
+              const projects = (worker: HomeWorker) =>
+                worker.projects.length === 0 ? 'no projects' : worker.projects.map(({ name }) => name).join(', ')
+              const where = (worker: HomeWorker) =>
+                !worker.connected
+                  ? 'offline'
+                  : worker.task !== null
+                    ? `at work on ${worker.task.title} (${worker.task.project})`
+                    : worker.busy
+                      ? 'at work'
+                      : 'free'
+              return {
+                workers: enabled
+                  ? workers.map((worker) => `${worker.workerId}: ${where(worker)}; may work on ${projects(worker)}`)
+                  : 'This home takes no workers.',
               }
             }),
         },
@@ -1461,12 +1525,6 @@ export class SettingsTools extends Context.Service<
   )
 }
 
-/** The sections read_settings covers, by their addresses: every one the Settings screens list. */
-export const SETTINGS_ADDRESSES: ReadonlyArray<string> = [
-  ...PROJECT_SETTINGS_SECTIONS.map((id) => `project/${id}`),
-  ...SETTINGS_SECTIONS.map((id) => `althar/${id}`),
-]
-
 /**
  * Every change a Settings screen makes, by the API call or the window's preference it makes it with, and how the
  * coordinator or a lead makes it too: a section's setting (`section.key`, through change_settings), another tool
@@ -1492,6 +1550,7 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   // project/code
   setProjectTracker: 'project/code.tracker',
   setRepository: 'project/code.repositories',
+  setArtifactsHome: 'project/code.artifacts',
   addRepositories: 'person: adding a repository is the person’s (project/code says so)',
   cloneRepository: 'person: cloning a repository into the project is adding one, the person’s (project/code says so)',
   prepareFolder: 'person: gives a repository cloned into the project its first commit, as part of adding it, the person’s',
@@ -1517,6 +1576,7 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   renameAccount: 'person: an agent’s accounts and their sign-ins',
   orderAccounts: 'person: an agent’s accounts and their sign-ins',
   removeAccount: 'person: an agent’s accounts and their sign-ins',
+  signOutAccount: 'person: an agent’s accounts and their sign-ins',
   // althar/skills
   stageSkill: 'person: installing a skill is the person’s',
   approveSkill: 'person: installing a skill is the person’s',
@@ -1524,6 +1584,18 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   uninstallSkill: 'person: removing a skill is the person’s',
   // althar/code-hosts
   disconnect: 'person: connections and their sign-ins',
+  // althar/computers
+  removeWorker: "person: taking a worker out of the home revokes its certificate, the person's (althar/computers says so)",
+  addWorker: "person: adding a worker installs a service on a machine of the person's own and lets it into the home",
+  createWorkerCode: "person: a worker's one-time code lets a machine into the home, the person's to hand over",
+  setWorkerProjects: "person: which projects a worker works on grants that machine their code, the person's to give",
+  // althar/computers: phones
+  pairedDevices: 'person: only reads the phones paired with this computer; pairing and removing one are the person’s',
+  removePairedDevice: 'person: removing a phone takes its key off this computer, the person’s',
+  phoneAccess: 'person: only reads whether phones can reach this computer',
+  setPhoneAccess: 'person: letting phones reach this computer opens it on the network, the person’s',
+  createPairingCode: 'person: pairing a phone takes the phone in the person’s hand',
+  pairingStatus: 'person: only reads how a pairing the person started goes',
   // althar/this-mac
   setAgentsAtOnce: 'althar/this-mac.agentsAtOnce',
   setFolderWait: 'althar/this-mac.folderWait',

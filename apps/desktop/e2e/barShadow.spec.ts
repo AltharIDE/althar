@@ -29,9 +29,11 @@ for (const appearance of ['light', 'dark'] as const) {
       await sizeWindow(electronApp, page, 1100, 560)
       await openFirstProject(electronApp, page, repository(projects))
       for (const n of [1, 2, 3, 4]) await say(page, `Question ${n}: what does the checkout retry do?`)
+      await expect(page.getByRole('article', { name: 'Coordinator' }).filter({ hasText: 'Question 4:' })).toBeVisible()
       // The face's scroll area: its edge first, then the scroller.
       const area = page.locator('[data-floats-host] > div:first-child').filter({ visible: true }).first()
       const scroller = area.locator('> div').nth(1)
+      await expect.poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0)
       await scroller.evaluate((el) => (el.scrollTop = 0))
       await expect(area).not.toHaveAttribute('data-scrolled', '')
       await shoot(page, `${appearance}-unscrolled`)

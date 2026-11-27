@@ -554,7 +554,9 @@ export class Automations extends Context.Service<
           })
           if (stands.kind !== 'instead') return stands
           const to = yield* limits.named(stands.agentId, stands.model)
-          const line = `${reasonOf(stands.because)}, so its ${word} ran on ${to.agent}${to.model === null ? '' : ` with ${to.model}`}.`
+          const line = `${reasonOf(stands.because)}, so its ${word} ran on ${to.agent}${to.model === null ? '' : ` with ${to.model}`}${
+            stands.otherModel === true ? ', a different model: no other agent had room on its own' : ''
+          }.`
           return { ...stands, step: { agentId: stands.agentId, model: stands.model, effort: null }, line }
         })
 

@@ -18,6 +18,7 @@ import {
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import type { Machine } from './atOnce'
+import type { PortLook } from './ports'
 import type { PressureReading } from './resourcePressure'
 import { Copilot } from './Copilot'
 import { CliUnanswered, UnknownAgent } from './errors'
@@ -26,6 +27,7 @@ import type { LoadOptions } from './MachineLoad'
 import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
 import type { PageAnswer, PageCall } from './pageBridge'
+import type { ComputerAnswer, ComputerCall, ComputerOwner } from './computerBridge'
 import type { SkillsConfig } from './Skills'
 import type { WorkerExecutionPlatform } from './workerExecution'
 
@@ -110,6 +112,8 @@ export interface RuntimeOptions {
    * Without it, the page tools say this Althar can't drive pages.
    */
   readonly page?: (owner: string, call: PageCall) => Effect.Effect<PageAnswer, string>
+  readonly computer?: (owner: ComputerOwner, call: ComputerCall) => Effect.Effect<ComputerAnswer, string>
+  readonly computerEnded?: (owner: ComputerOwner) => void
   /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */
   readonly openUrl?: (url: string) => Effect.Effect<boolean>
   /** The editors on this device a task's files open in, and opening one on a folder, at a file and line where it can; without it, none. */
@@ -181,6 +185,8 @@ export interface RuntimeOptions {
    * under way rather than the person's: 30 seconds unless a test says otherwise (DEV-173).
    */
   readonly betweenAgents?: Duration.Duration
+  /** How often a start looks again for the program Althar brings for its agent, and for how long, while it isn't there yet. */
+  readonly programWait?: { readonly every: Duration.Duration; readonly within: Duration.Duration }
   /**
    * How long a board's card is kept between reads at most, until its task moves (Queries.ts): ten seconds unless a test
    * says otherwise. Zero keeps none, as for a test that writes the store by hand, which no change says.
@@ -188,6 +194,12 @@ export interface RuntimeOptions {
   readonly keptFor?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
+  /**
+   * Whether a browser sign-in can come back to this computer's loopback address, as Linear's does: not on a home, where
+   * the person's browser is on another computer. Where it can't, only sign-ins by a code typed in any browser are offered,
+   * GitHub's and GitLab's.
+   */
+  readonly loopbackSignIn?: boolean
   /** Althar's public OAuth app ID for native Copilot; falls back to its own GitHub app ID. */
   readonly copilotClientId?: string
   readonly copilotEnterpriseClientIds?: Readonly<Record<string, string>>
@@ -230,6 +242,8 @@ export interface RuntimeOptions {
   readonly zone?: () => string
   /** How Althar tells whether an agent's service answers, and how long a step waits before it tries one that failed again (`Connectivity.ts`). */
   readonly connectivity?: ConnectivityOptions
+  /** Told each look for where something an agent left running answers from its port (`ports.ts`), as a test is, to say what it saw. */
+  readonly serving?: (look: PortLook) => void
 }
 
 /** Each is the default unless a test says otherwise. */
@@ -258,6 +272,8 @@ export interface ConnectivityOptions {
 
 /** Each is the default unless a test says otherwise. */
 export interface IdleOptions {
+  /** How long to let a full session's prompt cache cool before compacting: one hour. */
+  readonly compaction?: Duration.Duration
   /** How long an idle coordinator keeps its provider session: 30 minutes. */
   readonly coordinator?: Duration.Duration
   /** Holds retirement just before provider shutdown in a race test. */
@@ -584,6 +600,48 @@ export const cliToken = (
       },
     )
   })
+
+/** The public ids of Althar's own apps, as a build bakes them in; an empty one is none. */
+export interface BakedSignIns {
+  readonly github: string
+  /** Althar's GitHub App, by its slug, for its install page. */
+  readonly githubApp: string
+  readonly gitlab: string
+  readonly linear: string
+  readonly copilot: string
+}
+
+/**
+ * The runtime's sign-in options from what the build baked, each under a value the environment gives at run time:
+ * ALTHAR_GITHUB_CLIENT_ID, ALTHAR_GITHUB_APP, ALTHAR_GITLAB_CLIENT_ID, ALTHAR_LINEAR_CLIENT_ID and
+ * ALTHAR_COPILOT_CLIENT_ID. Copilot keeps its own app: the GitHub App's tokens aren't the OAuth app's it takes.
+ */
+export const signInsOf = (
+  baked: BakedSignIns,
+  env: Readonly<Record<string, string | undefined>>,
+): Pick<RuntimeOptions, 'clientIds' | 'githubApp' | 'copilotClientId'> => {
+  const given = (name: string, built: string) => env[name] || built
+  const clientIds: Partial<Record<Product, string>> = Object.fromEntries(
+    (
+      [
+        ['github', given('ALTHAR_GITHUB_CLIENT_ID', baked.github)],
+        ['gitlab', given('ALTHAR_GITLAB_CLIENT_ID', baked.gitlab)],
+        ['linear', given('ALTHAR_LINEAR_CLIENT_ID', baked.linear)],
+      ] as const
+    ).filter(([, id]) => id !== ''),
+  )
+  const githubApp = given('ALTHAR_GITHUB_APP', baked.githubApp)
+  const copilotClientId = given('ALTHAR_COPILOT_CLIENT_ID', baked.copilot)
+  return { clientIds, ...(githubApp === '' ? {} : { githubApp }), ...(copilotClientId === '' ? {} : { copilotClientId }) }
+}
+
+/** The ids of sign-ins by a code typed in any browser alone: those whose browser comes back to the loopback address left out. */
+export const deviceSignInsOnly = (clientIds: Partial<Record<Product, string>>): Partial<Record<Product, string>> => {
+  const products = available()
+  return Object.fromEntries(
+    Object.entries(clientIds).filter(([product]) => products.find((info) => info.product === product)?.browser?.kind === 'device'),
+  )
+}
 
 /**
  * The code hosts and trackers the runtime connects to (docs/architecture/06):

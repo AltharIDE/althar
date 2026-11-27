@@ -5,8 +5,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { ApiError, type BoardTask } from '@althar/contracts'
 
 import { ServicesProvider } from '../src/renderer/data/services'
-import { useWorkActions, workText } from '../src/renderer/features/board/useWorkActions'
-import { card, fakeClient } from './fixtures'
+import { useWorkActions } from '../src/renderer/features/board/useWorkActions'
+import { unmovedText } from '../src/renderer/shared/calls'
+import { card, change, fakeClient } from './fixtures'
 import { servicesFor } from './render'
 
 /*
@@ -87,7 +88,37 @@ describe('Done and Keep for later, from a card', () => {
     })
     expect(went).toBe(false)
     expect(view.phase()).toBe('ready')
-    expect(view.result.current.failed['t1']?.message).toBe(workText.stillOpen)
+    expect(view.result.current.failed['t1']?.message).toBe(unmovedText.other)
+  })
+
+  it('brings a card back that reads under way, saying only that it stays: under way says nothing of why', async () => {
+    const view = actions(async () => [{ ...ready, phase: 'running' }])
+    await act(() => view.result.current.keep('t1'))
+    expect(view.result.current.failed['t1']?.message).toBe(unmovedText.other)
+  })
+
+  it('brings a kept card back where its pull request is open, saying so rather than that something opened', async () => {
+    const view = actions(async () => [{ ...ready, change: change() }])
+    await act(() => view.result.current.keep('t1'))
+    expect(view.phase()).toBe('ready')
+    expect(view.result.current.failed['t1']?.message).toBe(unmovedText.pullOpen)
+  })
+
+  it('brings a stale card back where its pull request opened before Keep, with the runtime’s refusal, its row as read', async () => {
+    // Pressed on a card read before its pull request opened: the runtime refuses, and the read after says it is open.
+    const view = actions(async () => [{ ...ready, change: change() }])
+    view.read([ready])
+    vi.mocked(view.client.keepTaskForLater).mockRejectedValue(
+      new ApiError({ reason: 'TaskRefused', why: 'pull_open', message: unmovedText.pullOpen }),
+    )
+    let went = true
+    await act(async () => {
+      went = await view.result.current.keep('t1')
+    })
+    expect(went).toBe(false)
+    expect(view.phase()).toBe('ready')
+    expect(view.result.current.settling.has('t1')).toBe(false)
+    expect(view.result.current.failed['t1']?.message).toBe(unmovedText.pullOpen)
   })
 
   it('brings the card back where the runtime refused, saying why on it', async () => {
@@ -98,6 +129,22 @@ describe('Done and Keep for later, from a card', () => {
     await act(() => view.result.current.keep('t1'))
     expect(view.phase()).toBe('ready')
     expect(view.result.current.failed['t1']?.message).toBe('That task isn’t there any more.')
+  })
+
+  it('settles a row abandoned from Up next at once, as abandoned, and brings it back where the runtime refused', async () => {
+    const view = actions(async () => undefined)
+    const planned = { ...ready, phase: 'planned' as const }
+    view.read([planned])
+    const answer = later()
+    vi.mocked(view.client.abandonTask).mockReturnValue(answer.promise)
+    let went: Promise<boolean> = Promise.resolve(true)
+    act(() => void (went = view.result.current.abandon('t1')))
+    expect(view.client.abandonTask).toHaveBeenCalledWith('t1')
+    expect(view.result.current.over([planned])[0]).toMatchObject({ phase: 'settled', state: 'abandoned' })
+    await act(async () => answer.reject(new ApiError({ reason: 'NotFound', message: 'Gone.' })))
+    expect(await went).toBe(false)
+    expect(view.phase()).toBe('planned')
+    expect(view.result.current.failed['t1']?.message).toBe('Gone.')
   })
 
   it('keeps each of two cards moved at once by its own press, whichever answers first', async () => {

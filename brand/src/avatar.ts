@@ -21,8 +21,6 @@ export const AVATAR_STYLES = {
   paper: { ground: PAPER, section: INK, point: COBALT },
 } as const satisfies Record<string, Ground>
 
-export type AvatarName = keyof typeof AVATAR_STYLES
-
 export const AVATAR_SIZE = 1024
 /** The section's width as a share of the square: its corners then sit well inside the circle. */
 const SPAN = 0.52

@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+
 import { type CodeHost, ConnectorFailed, fromOutside, parseRemote, type Repository } from '@althar/connectors'
 import { Effect, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -6,6 +8,9 @@ import { keepUpdate } from './branchUpdates'
 import { hostName, logForLead, readLog } from './checkLogs'
 import { Connections } from './Connections'
 import { withoutAgentCredit } from './credit'
+import { forkOf } from './forks'
+import { namedRemotes } from './git'
+import { Instance } from './Instance'
 import { checksOf, nameOf, sameDescription, signed, titleWords, withDescribed } from './pullRequestWords'
 import { type ToolAccess, ToolRefused } from './ToolServer'
 
@@ -52,20 +57,56 @@ export const viaHost = <A, R>(effect: Effect.Effect<A, ConnectorFailed, R>) => E
 
 const decodeRemotes = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))
 
-/** The project's repositories that are on a code host Althar is connected to, and all its repositories' names. */
+/**
+ * A repository's remotes in the order its pull requests are looked for (DEV-169): where it is a fork whose work goes to the
+ * repository it came from (`upstream`, `upstream_branch`), that one first, as its clone here says it, so its pull requests are
+ * read, merged and checked there rather than on the fork; else as it was added. The fork stays among them, so one still on it
+ * is found where the upstream isn't on a connected host.
+ */
+export const pullRequestRemotes = (binding: {
+  readonly remotes: string
+  readonly changeTarget: string | null
+  readonly path: string | null
+}) =>
+  Effect.gen(function* () {
+    const recorded = Option.getOrElse(decodeRemotes(binding.remotes), () => [])
+    const upstreamWork = binding.changeTarget === 'upstream' || binding.changeTarget === 'upstream_branch'
+    if (!upstreamWork || binding.path === null || !existsSync(binding.path)) return { remotes: recorded, fork: null }
+    const fork = forkOf(yield* namedRemotes(binding.path).pipe(Effect.orElseSucceed(() => [])))
+    if (fork === null) return { remotes: recorded, fork: null }
+    return { remotes: [fork.upstream.url, ...recorded.filter((url) => url !== fork.upstream.url)], fork }
+  })
+
+/**
+ * The project's repositories that are on a code host Althar is connected to, each where its pull requests are (a fork's
+ * upstream where its work goes there), and all its repositories' names. `forks` are the places of those forks themselves, so
+ * a pull request still open on one is found by its place too.
+ */
 export const hostedOf = (projectId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const connections = yield* Connections
-    const bindings = yield* sql<{ id: string; name: string; remotes: string }>`
-      SELECT id, display_name AS name, remote_fingerprints AS remotes FROM repository_bindings
-      WHERE project_id = ${projectId} AND detached_at IS NULL ORDER BY created_at, rowid`
-    const found = yield* Effect.forEach(bindings, (binding) =>
-      Effect.map(connections.hostOf(Option.getOrElse(decodeRemotes(binding.remotes), () => [])), (host) =>
-        host === null ? [] : [{ ...host, name: binding.name, bindingId: binding.id }],
-      ),
+    const instance = yield* Instance
+    const rows = yield* sql<{ id: string; name: string; remotes: string; changeTarget: string | null; path: string | null }>`
+      SELECT b.id, b.display_name AS name, b.remote_fingerprints AS remotes, b.change_target, l.path
+      FROM repository_bindings b
+      LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+      WHERE b.project_id = ${projectId} AND b.detached_at IS NULL ORDER BY b.created_at, b.rowid`
+    const found = yield* Effect.forEach(rows, (row) =>
+      Effect.gen(function* () {
+        const { remotes, fork } = yield* pullRequestRemotes(row)
+        const binding = { id: row.id, name: row.name, remotes: JSON.stringify(remotes) }
+        const host = yield* connections.hostOf(remotes)
+        const own = fork === null ? null : yield* connections.hostOf([fork.fork.url])
+        const at = (place: typeof host) => (place === null ? [] : [{ ...place, name: row.name, bindingId: row.id }])
+        return { binding, hosted: at(host), forks: own !== null && host !== null && own.remote === host.remote ? [] : at(own) }
+      }),
     )
-    return { bindings, hosted: found.flat() }
+    return {
+      bindings: found.map((one) => one.binding),
+      hosted: found.flatMap((one) => one.hosted),
+      forks: found.flatMap((one) => one.forks),
+    }
   })
 
 /**

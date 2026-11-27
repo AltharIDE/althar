@@ -1,25 +1,35 @@
-import { DesktopBody } from './bodies/desktop/DesktopBody'
+import '@fontsource-variable/instrument-sans'
+import '@fontsource/instrument-serif/400-italic.css'
+
 import { Footer } from '../shared/footer/Footer'
+import { Bar } from '../shared/Bar'
 import { Nav, NavSpace } from '../shared/Nav'
-import { RunsOn } from './bodies/RunsOn'
 import s from './Home.module.css'
 import { Hero } from './Hero'
+import { Story } from './story/Story'
 
 /*
- * The developer page: the lens for a nav, the first screen an orrery in the
- * night (Hero), the systems it runs on in the same night, the product shown
- * (bodies/desktop), and the footer (shared/footer).
+ * The developer page, in daylight: its own bar across the top (shared/Bar; on
+ * a phone, the site's nav and its menu), the first screen with the flat orrery
+ * (Hero), the product told scene by scene as you scroll (story/), and the
+ * footer (shared/footer).
  */
 
 export function Home() {
   return (
     <div className={s.page} id="top">
-      <Nav opening />
-      <Hero nav={<NavSpace />} />
-      <div className={s.night}>
-        <RunsOn />
+      <Bar />
+      <div className={s.narrow}>
+        <Nav />
       </div>
-      <DesktopBody />
+      <Hero
+        nav={
+          <div className={s.narrow}>
+            <NavSpace />
+          </div>
+        }
+      />
+      <Story />
       <Footer />
     </div>
   )

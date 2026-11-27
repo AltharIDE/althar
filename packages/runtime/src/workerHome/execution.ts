@@ -3,7 +3,7 @@ import { posix } from 'node:path'
 import { PassThrough, Readable } from 'node:stream'
 import { AgentRequestFailed, AgentStartFailed } from '@althar/provider-adapters'
 import { acceptWorkerPatch, prepareWorkerWorkspace, verifyWorkerIndex } from '../workerWorkspace'
-import type { CapturedWorkerCheckout, WorkerExecution, WorkerExecutionPlatform, WorkerSetupOutcome } from '../workerExecution'
+import type { CapturedWorkerCheckout, WorkerAdmin, WorkerExecution, WorkerExecutionPlatform, WorkerSetupOutcome } from '../workerExecution'
 import { AgentRunOutcome } from '@althar/worker-protocol'
 import {
   MAX_WORKER_BUNDLE_BYTES,
@@ -12,6 +12,10 @@ import {
   type WorkerManagedProcess,
 } from '@althar/worker-protocol/agent-runs'
 import { Effect, Scope, Semaphore } from 'effect'
+
+import { WorkerHomeError } from './errors'
+import type { WorkerEnrollment } from './network'
+import type { EnrolledWorker } from './store'
 
 const unavailable = (error: unknown): string => {
   if (error instanceof Error) return error.message
@@ -24,7 +28,29 @@ const setupOutcome = (report: { exitCode: number; timedOut: boolean; outputTail:
   output: Buffer.from(report.outputTail).toString('utf8'),
 })
 
-export const workerExecution = (active: () => AgentWorkerPool | undefined): WorkerExecutionPlatform => {
+/** The home's ledger of its workers, as its listener keeps it open: who is enrolled, and taking one out. */
+export interface WorkerLedger {
+  readonly workers: () => ReadonlyArray<EnrolledWorker>
+  readonly revoke: (workerId: string) => void
+  /**
+   * The run a worker's reservation still holds, by the workspace it holds: kept from its start until the worker says it
+   * ended, through a dropped connection, so it holds the workspace while it may still be at work there.
+   */
+  readonly outstanding?: (workerId: string) => { readonly workspaceId: string } | undefined
+  /** Where the home is its own authority for its workers: adding them, and their projects. */
+  readonly managed?: WorkerEnrollment
+}
+
+/**
+ * Where a task's work runs when it runs on a worker, from the pool of workers connected now (`active`); with the
+ * home's ledger (`ledger`), its own list of every worker it enrolled, connected or not, and taking one out.
+ */
+export const workerExecution = (
+  active: () => AgentWorkerPool | undefined,
+  ledger?: () => WorkerLedger | undefined,
+  /** Opens the home's worker port, now, where it isn't open: where given, the home adds workers itself. */
+  open?: () => Effect.Effect<WorkerLedger, string>,
+): WorkerExecutionPlatform => {
   const workspaces = new Map<
     string,
     {
@@ -41,17 +67,91 @@ export const workerExecution = (active: () => AgentWorkerPool | undefined): Work
     }
   >()
   const preparing = new Set<string>()
+  /** A worker at work, or being readied for a task: taking it out would cut its task off, so it waits. */
+  const working = (workerId: string) =>
+    preparing.has(workerId) || (active()?.connected() ?? []).some((one) => one.workerId === workerId && one.busy)
+  const named = () => new Map((ledger?.()?.workers() ?? []).flatMap(({ workerId, name }) => (name === undefined ? [] : [[workerId, name]])))
+  /** The home's managed enrollment, its worker port opened first where it isn't yet. */
+  const managed = Effect.gen(function* () {
+    const listening = ledger?.() ?? (open === undefined ? undefined : yield* open())
+    if (listening?.managed === undefined) return yield* Effect.fail('This home takes workers by its operator’s certificates.')
+    return listening.managed
+  })
+  const said = (error: unknown) =>
+    error instanceof WorkerHomeError || error instanceof Error ? error.message : 'The home couldn’t do that.'
+  const admin: WorkerAdmin | undefined =
+    open === undefined
+      ? undefined
+      : {
+          add: (input) => Effect.flatMap(managed, (enrollment) => Effect.try({ try: () => enrollment.enroll(input), catch: said })),
+          code: (name) => Effect.flatMap(managed, (enrollment) => Effect.tryPromise({ try: () => enrollment.code(name), catch: said })),
+          assign: (workerId, projectIds) =>
+            Effect.flatMap(managed, (enrollment) => Effect.try({ try: () => enrollment.assign(workerId, projectIds), catch: said })),
+        }
   return {
-    list: (projectId) =>
-      (active()?.list(projectId) ?? []).map(({ workerId, busy, capabilities, capacity }) => {
+    ...(admin === undefined ? {} : { admin }),
+    adds: () => {
+      const listening = ledger?.()
+      return admin !== undefined && (listening === undefined || listening.managed !== undefined)
+    },
+    list: (projectId) => {
+      const names = named()
+      return (active()?.list(projectId) ?? []).map(({ workerId, busy, capabilities, capacity, signedIn, readiness }) => {
         const multiRepoProviders = capabilities.filter((one) => one.workspaceSets === true).map(({ providerId }) => providerId)
+        const name = names.get(workerId)
         return {
           workerId,
+          ...(name === undefined ? {} : { name }),
           providers: capabilities.map(({ providerId }) => providerId),
           ...(multiRepoProviders.length === 0 ? {} : { multiRepoProviders }),
           busy: busy || preparing.has(workerId),
           ...(capacity === undefined ? {} : { capacity }),
+          ...(signedIn === undefined ? {} : { signedIn: [...signedIn] }),
+          ...(readiness === undefined ? {} : { readiness }),
         }
+      })
+    },
+    enrolled: () => {
+      const listing = ledger?.()
+      if (listing === undefined) return null
+      const live = new Map((active()?.connected() ?? []).map((worker) => [worker.workerId, worker]))
+      return listing.workers().map(({ workerId, projectIds, name, ssh }) => {
+        const worker = live.get(workerId)
+        // The workspace its run holds, connected or not: one that dropped mid-run still holds it until it says it stopped.
+        const workspaceId = listing.outstanding?.(workerId)?.workspaceId
+        const holding = workspaceId === undefined ? {} : { workspaceId }
+        const known = { ...(name === undefined ? {} : { name }), ...(ssh === undefined ? {} : { ssh }) }
+        if (worker === undefined)
+          return { workerId, ...known, connected: false, busy: workspaceId !== undefined, providers: [], projectIds, ...holding }
+        return {
+          workerId,
+          ...known,
+          ...(worker.signedIn === undefined ? {} : { signedIn: worker.signedIn }),
+          ...(worker.release === undefined ? {} : { release: worker.release }),
+          ...(worker.readiness === undefined ? {} : { readiness: worker.readiness }),
+          ...(worker.anyProject === undefined ? {} : { anyProject: worker.anyProject }),
+          connected: true,
+          busy: worker.busy || preparing.has(workerId) || workspaceId !== undefined,
+          ...(worker.capacity === undefined ? {} : { capacity: worker.capacity }),
+          providers: [...new Set(worker.capabilities.map(({ providerId }) => providerId))],
+          projectIds,
+          ...holding,
+        }
+      })
+    },
+    revoke: (workerId) =>
+      Effect.try({
+        try: () => {
+          const listing = ledger?.()
+          if (listing === undefined) throw new Error('This home takes no workers.')
+          if (working(workerId)) throw new Error('It runs a task. Remove it once that finishes.')
+          // Gone mid-run, it holds its task's workspace until it reconnects and says that run stopped. Taken out now, it
+          // couldn't, and the workspace would stay held for good.
+          if (listing.outstanding?.(workerId) !== undefined)
+            throw new Error('It went offline during a task. Start it again so it can stop that work, then remove it.')
+          listing.revoke(workerId)
+        },
+        catch: (error) => (error instanceof Error ? error.message : 'Could not remove the worker.'),
       }),
     startCommand: (input) =>
       Effect.gen(function* () {
@@ -247,6 +347,8 @@ export const workerExecution = (active: () => AgentWorkerPool | undefined): Work
                   { projectId, workspaceId, providerId },
                   {
                     signal,
+                    // Decided by the slot that receives it, as its own check found it there now.
+                    requireReady: true,
                     ...(repositories === undefined ? { checkout: primary.checkout } : { repositories: entries }),
                     toolPort,
                     ...(setup === undefined ? {} : { setup }),

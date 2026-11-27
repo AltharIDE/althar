@@ -1,21 +1,26 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
+import { join } from 'node:path'
 import { decodePairingCode, prepareApprovalKeyEnrollment, preparePermissionApproval, signDeviceMessage } from '@althar/transport-node'
 import { ClientIdentity, PermissionApproval } from '@althar/contracts'
 import { connectionCredentials, type ProtectCredential } from './credentials'
 import { Effect, Schema } from 'effect'
 import { app, BrowserWindow, ipcMain, MessageChannelMain, shell, utilityProcess, type IpcMainInvokeEvent, type WebContents } from 'electron'
-import { sshEnvironment } from '@althar/transport-node'
+import { sshEnvironment, sshProgram } from '@althar/transport-node'
 
 import type { WindowHome } from '../../homes'
-import { homeController } from './controller'
+import { homeController, type HomeUsageEvent } from './controller'
 import { homeGlances } from './glances'
+import { homePictures } from './pictures'
 import { connectHomeProcess, inspectHomeProcess, pairHomeProcess } from './process'
 import { homePartition } from './policy'
-import { findRelease, HOST_RELEASE_KEYS } from './release'
-import { canSetUp, homeSetups, nativeSetupSystem } from './setup'
+import { findRelease, findWorkerRelease, HOST_RELEASE_KEYS, newestHostVersion, workerRelease } from './release'
+import { canSetUp, homeSetups, nativeSetupSystem, runProgram } from './setup'
 import { homeStore, homeTarget, savedHome } from './store'
+import { homeUpdates } from './update'
+import { startWorkerSetups } from './workerMain'
+import type { WorkerLog } from './workerSetup'
 
 /**
  * Where a new home's release comes from: the pinned keys, and in a build from source, a release of your own to try
@@ -44,14 +49,19 @@ export const startHomeConnections = ({
   mine,
   open,
   log,
+  logs,
   protect,
+  usage,
 }: {
+  /** main.log at each level, for what adding a worker does. */
+  readonly logs: WorkerLog
   readonly protect: ProtectCredential
   readonly profile: string
   readonly entry: string
   readonly mine: (contents: WebContents) => boolean
-  readonly open: (home: WindowHome, projectId?: string) => void
+  readonly open: (home: WindowHome, projectId?: string, fresh?: boolean) => void
   readonly log: (message: string) => void
+  readonly usage: (event: HomeUsageEvent) => void
 }) => {
   const connections = new Map<number, ReturnType<typeof connectHomeProcess>>()
   const approvals = new Map<number, AbortController>()
@@ -140,16 +150,25 @@ export const startHomeConnections = ({
     changed: tell,
     overviewChanged,
     glances,
+    usage,
   })
   // A home being set up over SSH: one for the whole app, told to every window as it goes.
   const source = releaseSource()
-  const setups = homeSetups(
-    nativeSetupSystem(profile, (arch, signal) => findRelease(arch, source, signal), source.tools),
-    (setup) => {
-      for (const window of BrowserWindow.getAllWindows())
-        if (!window.isDestroyed() && mine(window.webContents)) window.webContents.send('althar:home-setup', setup)
-    },
-  )
+  const system = nativeSetupSystem(profile, (arch, signal) => findRelease(arch, source, signal), source.tools)
+  const setups = homeSetups(system, (setup) => {
+    for (const window of BrowserWindow.getAllWindows())
+      if (!window.isDestroyed() && mine(window.webContents)) window.webContents.send('althar:home-setup', setup)
+  })
+  // Workers added over SSH from Settings › Computers, from the worker's own releases, published beside the home's.
+  const workers = startWorkerSetups({
+    system: { ...system, release: (arch, signal) => findWorkerRelease(arch, source, signal) },
+    tools: source.tools,
+    mine,
+    // A home reached over the network gives no SSH address this computer's SSH goes to: only its own, or one over SSH.
+    reachesOwnHome: (id) => controller.state(id).current.kind !== 'https',
+    log: logs,
+    release: (signal) => workerRelease(source, signal),
+  })
   const owner = (event: IpcMainInvokeEvent) => {
     if (!mine(event.sender) || event.senderFrame !== event.sender.mainFrame)
       throw new Error('Home connections are available only in Althar’s own window.')
@@ -221,7 +240,9 @@ export const startHomeConnections = ({
     return controller.overview()
   })
   ipcMain.handle('althar:homes-save', (event, check: unknown, name: unknown) => controller.save(owner(event), check, name))
-  ipcMain.handle('althar:homes-open', (event, id: unknown, projectId: unknown) => controller.open(owner(event), id, projectId))
+  ipcMain.handle('althar:homes-open', (event, id: unknown, projectId: unknown, fresh: unknown) =>
+    controller.open(owner(event), id, projectId, fresh),
+  )
   ipcMain.handle('althar:homes-rename', (event, id: unknown, name: unknown) => controller.rename(owner(event), id, name))
   ipcMain.handle('althar:homes-change', (event, id: unknown, check: unknown) => controller.change(owner(event), id, check))
   ipcMain.handle('althar:homes-forget', (event, id: unknown) => {
@@ -286,6 +307,46 @@ export const startHomeConnections = ({
     if (action !== 'trust' && action !== 'stop' && action !== 'resume' && action !== 'upload' && action !== 'dismiss')
       throw new Error('Choose what to do with the setup.')
     void setups.act(action).catch(() => undefined)
+  })
+  // A window's home, over SSH, updated by its own updater; the window reconnects once it answers.
+  const quitting = new AbortController()
+  // By the ssh the window's connection runs (connection/bridge.ts): the Flatpak's way out, or a build's own tools.
+  const tools = sshTools()
+  const updates = homeUpdates({
+    run: runProgram,
+    program: sshProgram(tools === undefined || tools === '' ? undefined : join(tools, 'ssh')),
+    latest: (arch, signal) => findRelease(arch, source, signal),
+    signal: quitting.signal,
+    log,
+  })
+  const sshHome = (event: IpcMainInvokeEvent) => {
+    const { current } = controller.state(owner(event))
+    if (current.kind !== 'ssh' || current.home.ssh === undefined) throw new Error('Only a home reached over SSH updates from its window.')
+    return current.home
+  }
+  ipcMain.handle('althar:homes-update', (event, accept: unknown) =>
+    updates.update(sshHome(event), typeof accept === 'string' ? accept : undefined),
+  )
+  ipcMain.handle('althar:homes-update-check', (event) => updates.check(sshHome(event)))
+  // The newest host release, for an older home's welcome to offer its update by: asked of GitHub a few minutes apart at
+  // most, from here rather than over the home's own network, and afresh on Check again.
+  let news: { readonly at: number; readonly newest: Promise<string | null> } | undefined
+  ipcMain.handle('althar:homes-release', async (event, fresh: unknown) => {
+    owner(event)
+    if (fresh === true || news === undefined || Date.now() - news.at > 10 * 60_000) {
+      const newest = newestHostVersion(source, AbortSignal.any([quitting.signal, AbortSignal.timeout(20_000)]))
+      news = { at: Date.now(), newest }
+      // A failed look isn't kept: the next asks again.
+      newest.catch(() => {
+        if (news?.newest === newest) news = undefined
+      })
+    }
+    try {
+      return { newest: await news.newest }
+    } catch (error) {
+      log(`The newest host release couldn’t be found: ${error instanceof Error ? error.message : String(error)}`)
+      throw new Error('Couldn’t find out the newest host release.')
+    }
   })
   ipcMain.handle('althar:homes-cancel', (event) => controller.cancel(owner(event)))
   const stop = (id: number) => {
@@ -393,6 +454,22 @@ export const startHomeConnections = ({
       }
     })
   }
+  /* A home's pictures, through a connection of their own, opened as a connected window of that home would open one. */
+  const pictures = homePictures(async (homeId, signal) => {
+    const owner = [...connections.keys()].find((id) => {
+      const state = controller.state(id)
+      return state.current.kind !== 'local' && state.current.home.homeId === homeId && state.connection === 'connected'
+    })
+    if (owner === undefined) throw new Error('No window is connected to this home.')
+    return previewPort(owner, signal)
+  })
+  /** Whether another window than this one is on the home. */
+  const otherOn = (homeId: string, but: number) =>
+    BrowserWindow.getAllWindows().some((window) => {
+      if (window.isDestroyed() || window.webContents.id === but) return false
+      const { current } = controller.state(window.webContents.id)
+      return current.kind !== 'local' && current.home.homeId === homeId
+    })
   ipcMain.handle('althar:homes-reconnect', (event) => {
     const id = owner(event)
     if (controller.state(id).current.kind === 'local') return
@@ -414,6 +491,8 @@ export const startHomeConnections = ({
       window.once('closed', () => {
         controller.closed(id)
         void stop(id)
+        // Its home's pictures need no connection once no window is on it.
+        if (home.kind !== 'local' && !otherOn(home.home.homeId, id)) pictures.forget(home.home.homeId)
       })
       if (homePartition(home) !== undefined) {
         window.webContents.session.setPermissionRequestHandler((_contents, _permission, reply) => reply(false))
@@ -422,8 +501,13 @@ export const startHomeConnections = ({
     },
     connect,
     previewPort,
+    /** A picture the home keeps, by its digest: what main serves a window on the home (pictures.ts). */
+    readPicture: pictures.read,
     stopAll: async () => {
       controller.stopping()
+      pictures.stop()
+      workers.stop()
+      quitting.abort()
       await setups.stop()
       await keyChanges
       for (const held of forgottenKeys.values()) clearTimeout(held.timer)

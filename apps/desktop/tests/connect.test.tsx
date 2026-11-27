@@ -467,7 +467,7 @@ describe('connecting Bitbucket', () => {
     expect(await heading('Your account can’t push there')).toBeTruthy()
     expect(within(panel).getByText('Your account there')).toBeTruthy()
     expect(within(panel).getByText('As Reader, your account can’t do this there.')).toBeTruthy()
-    expect(within(panel).getByText('Your account’s role there: its owners can change it.')).toBeTruthy()
+    expect(within(panel).getByText('Its owners can give your account write access there.')).toBeTruthy()
     await press('Connect as it is')
     expect(closed).toHaveBeenCalled()
   })
@@ -887,9 +887,45 @@ describe('connecting GitHub', () => {
       press: 'Check again',
     },
     {
+      // A token kept to reading, or made for another owner, as git's first question of a push was answered.
+      check: lacking('push', {
+        kind: 'no_push',
+        names: ['northwind/meridian-api'],
+        url: 'https://github.com/settings/personal-access-tokens',
+      }),
+      title: 'This token can’t push',
+      says: [
+        'It can read northwind/meridian-api but not push there.',
+        'Give it Contents: Read and write on northwind/meridian-api, with northwind as its resource owner, then Update.',
+      ],
+      press: 'Change it on GitHub',
+      opens: 'https://github.com/settings/personal-access-tokens',
+    },
+    {
       check: lacking('push', { kind: 'role', role: null }),
       title: 'Your account can’t push there',
       says: ['Your account can’t do this there.'],
+      press: 'Check again',
+    },
+    {
+      // A project cloned from someone else's repository: which, why, and a fork of your own a press away.
+      check: lacking('push', { kind: 'role', role: null, names: ['octocat/Hello-World'] }),
+      title: 'You can’t push to octocat/Hello-World',
+      says: [
+        'It’s octocat’s repository, and your account can only read it.',
+        'Fork it to work on your own copy, or ask octocat for write access. Connected as it is, Althar only reads it.',
+      ],
+      press: 'Fork it on GitHub',
+      opens: 'https://github.com/octocat/Hello-World/fork',
+    },
+    {
+      // Several of one owner's: each owner said once, and no single fork to offer.
+      check: lacking('push', { kind: 'role', role: null, names: ['octocat/Hello-World', 'octocat/Spoon-Knife'] }),
+      title: 'You can’t push to 2 of these repositories',
+      says: [
+        'Your account can only read octocat’s repositories.',
+        'Fork them to work on your own copy, or ask octocat for write access. Connected as it is, Althar only reads them.',
+      ],
       press: 'Check again',
     },
     {
@@ -930,6 +966,19 @@ describe('connecting GitHub', () => {
     for (const words of says) expect(within(panel).getByText(words)).toBeTruthy()
     await pressIt(press)
     if (opens !== undefined) expect(open).toHaveBeenLastCalledWith(opens, '_blank')
+  })
+
+  it('says a reason once where lines share it, and no step count on the answer', async () => {
+    const unsaid = { kind: 'unreadable' as const }
+    const check = {
+      ...githubCheck,
+      lines: githubCheck.lines.map((line) =>
+        line.need === 'changes' || line.need === 'issues' ? { ...line, state: 'unknown' as const, fact: null, reason: unsaid } : line,
+      ),
+    }
+    const { panel } = await toCheck(check)
+    expect(await within(panel).findAllByText('GitHub doesn’t say what this token may change.')).toHaveLength(1)
+    expect(within(panel).queryByText(/^Step \d of \d$/)).toBeNull()
   })
 
   it('makes a classic token where a fine-grained one can’t read check runs', async () => {
@@ -1093,6 +1142,65 @@ describe('connecting GitHub', () => {
     expect(client.startSignIn).toHaveBeenCalledWith('github', 'https://github.com', 'conn6')
     // How it stands couldn't be read: said, with the sign-in started again on a press.
     expect(await within(panel).findByText('That sign-in isn’t there any more.')).toBeTruthy()
+    await press('Try again')
+    expect(client.startSignIn).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    ['github', 'GitHub', 'gh', 'https://github.com'],
+    ['gitlab', 'GitLab', 'glab', 'https://gitlab.com'],
+  ] as const)(
+    'offers %s’s browser sign-in first, its command-line tool’s second, and a token last',
+    async (service, name, tool, webUrl) => {
+      const { panel } = await walk(service, {
+        listConnections: vi.fn(async () => ({
+          ...connectionList,
+          products: PRODUCTS.map((product) => (product.product === service ? { ...product, browserSignIn: true } : product)),
+          places: [],
+        })),
+        getConnectGuide: vi.fn(async () =>
+          guideOf(service, { clis: [{ product: service, webUrl, tool, account: 'you', scopes: ['repo'] }] }),
+        ),
+      })
+      const ways = await within(panel).findByRole('group', { name: `Ways to connect ${name}` })
+      const offered = within(ways)
+        .getAllByRole('button')
+        .map((button) => button.textContent ?? '')
+      // For an organisation that refuses Althar's app, gh's or glab's sign-in, then a token made by hand.
+      expect(offered).toHaveLength(3)
+      expect(offered[0]).toMatch(new RegExp(`^Continue with ${name}`))
+      expect(offered[1]).toMatch(new RegExp(`^Use ${tool}’s sign-in`))
+      expect(offered[2]).toMatch(/^Make a token/)
+    },
+  )
+
+  it('says a sign-in kept the token it would have replaced, with the page that installs Althar there', async () => {
+    const message = 'Althar isn’t installed on northwind, so your connection keeps the sign-in it had. Install it there, then try again.'
+    const { client, panel, press } = await walk('github', {
+      listConnections: vi.fn(async () => ({
+        ...connectionList,
+        products: PRODUCTS.map((product) => (product.product === 'github' ? { ...product, browserSignIn: true } : product)),
+        places: [],
+      })),
+      getConnectGuide: vi.fn(async () => guideOf('github')),
+      startSignIn: vi.fn(async () => ({
+        flowId: 'flow9',
+        kind: 'device' as const,
+        userCode: 'WDJB-MJHT',
+        verificationUri: 'https://github.com/login/device',
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+      })),
+      getSignIn: vi.fn(async () => ({
+        state: 'ended' as const,
+        reason: 'failed' as const,
+        message,
+        install: 'https://github.com/apps/althar/installations/new',
+      })),
+    })
+    await press(/Continue with GitHub/)
+    expect(await within(panel).findByText(message)).toBeTruthy()
+    await press('Install Althar')
+    expect(open).toHaveBeenLastCalledWith('https://github.com/apps/althar/installations/new', '_blank')
     await press('Try again')
     expect(client.startSignIn).toHaveBeenCalledTimes(2)
   })

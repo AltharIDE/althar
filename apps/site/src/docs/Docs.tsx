@@ -1,7 +1,7 @@
 import { CURRENT } from '../content/changelog'
 import { LINKS } from '../content/facts'
 import { Footer } from '../shared/footer/Footer'
-import { Nav } from '../shared/Nav'
+import { SiteNav } from '../shared/Bar'
 import { Night, night as n, Panes, Readout, Window } from '../shared/night/Night'
 import s from './Docs.module.css'
 
@@ -22,7 +22,7 @@ export function Docs() {
   const latest = CURRENT
   return (
     <div className={s.page}>
-      <Nav />
+      <SiteNav />
       <Night className={s.main}>
         <Window
           className={s.window}

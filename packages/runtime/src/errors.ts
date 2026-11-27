@@ -326,6 +326,23 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
   detail: Schema.optional(Schema.String),
   /** For `protected`, the project's Repository files switches that are off and would let them go. */
   needs: Schema.optional(Schema.Array(Schema.Literals(['writeSkills', 'writeOpenSpec', 'pushProtected']))),
+  /**
+   * For one Althar pushed with a connection's sign-in, as opening a pull request does: whose it is, how it signs in (a token
+   * pasted or taken from gh or glab, or Althar's app), and the repository it was refused for, as its host names it.
+   */
+  signIn: Schema.optional(
+    Schema.Struct({
+      account: Schema.String,
+      kind: Schema.Literals(['token', 'app']),
+      product: Schema.String,
+      repository: Schema.String,
+      /**
+       * Why, where the host established it when asked again: the account's role there, or the sign-in while the account may
+       * push. Absent where it didn't say, as when GitHub gives no permissions for the repository.
+       */
+      cause: Schema.optional(Schema.Literals(['role', 'token'])),
+    }),
+  ),
 }) {}
 
 /**
@@ -404,7 +421,17 @@ export class FileRefused extends Schema.TaggedError<FileRefused>()('FileRefused'
  */
 export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['merged', 'branch_gone', 'abandoned', 'no_title', 'title_too_long', 'folder_in_use', 'folder_in_way', 'no_lead']),
+  why: Schema.Literals([
+    'merged',
+    'branch_gone',
+    'abandoned',
+    'no_title',
+    'title_too_long',
+    'folder_in_use',
+    'folder_in_way',
+    'no_lead',
+    'pull_open',
+  ]),
 }) {}
 
 /** A finished task's folder that couldn't be removed: its last commit couldn't be kept, or something of it is left (ADR-056). */

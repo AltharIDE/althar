@@ -4,13 +4,15 @@ import { isIP } from 'node:net'
 import { isAbsolute, join, relative, sep } from 'node:path'
 
 import { bindWorkerHandshake, workerCertificateFingerprint } from '@althar/worker-protocol/grpc'
-import { makeAgentWorkerPool } from '@althar/worker-protocol/agent-runs'
+import { makeAgentWorkerPool, type AgentWorkerConnection, type AgentWorkerPool } from '@althar/worker-protocol/agent-runs'
 import { connectHomeRelay, validateHomeRelay } from '@althar/worker-protocol/relay'
 import { Clock, Effect, Schema } from 'effect'
 
 import { fileErrorCode, PrivateFileError, readPrivate, writePrivate } from '../privateFiles'
 import { WorkerHomeError } from './errors'
-import { openWorkerStore } from './store'
+import { homeAddresses, SERVER_NAME, workerAuthority } from './authority'
+import { keyFingerprint, workerCodes, type WorkerGrant } from './codes'
+import { openWorkerStore, type EnrolledWorker } from './store'
 
 export interface WorkerHomePaths {
   readonly profile: string
@@ -28,7 +30,7 @@ const canonical = (path: string) =>
     throw error
   })
 
-const Configuration = Schema.Struct({
+const Configured = Schema.Struct({
   version: Schema.Literal(1),
   address: Schema.String,
   port: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 65535 })),
@@ -37,7 +39,15 @@ const Configuration = Schema.Struct({
   key: Schema.String,
   relay: Schema.optional(Schema.String),
 })
-export type WorkerConfiguration = typeof Configuration.Type
+export type WorkerConfiguration = typeof Configured.Type
+/** Kept by the home itself once the person adds a worker: its own authority's certificates (`authority.ts`), on this port. */
+const Managed = Schema.Struct({
+  version: Schema.Literal(2),
+  port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
+})
+const Configuration = Schema.Union([Configured, Managed])
+/** The port a home takes workers on, where it is free; another the system picks where it isn't. */
+export const WORKER_PORT = 6770
 
 const invalid = () =>
   new WorkerHomeError(
@@ -113,58 +123,203 @@ export const configureWorkers = (options: WorkerHomePaths, config: WorkerConfigu
     catch: configureFailure,
   })
 
-export const listenWorkers = (options: WorkerHomePaths, homeId: string) =>
+const readConfiguration = async (profile: string) => {
+  const bytes = await readPrivate(configurationPath(profile), 16384, true)
+  if (!bytes) return undefined
+  const raw: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+  if (raw === null) return undefined
+  return Schema.decodeUnknownSync(Configuration)(raw)
+}
+
+/** A home's worker listener, open: its port, its workers connected now, and its ledger of every one it enrolled. */
+export interface WorkerListener {
+  readonly port: number
+  readonly agentWorkers: AgentWorkerPool
+  /** The home's enrolled workers, connected or not, for its own list of them. */
+  readonly workers: () => ReadonlyArray<EnrolledWorker>
+  /**
+   * Takes a worker out of this home: its certificate is no longer accepted, and it gets no more work. Connected now, it
+   * hears so and takes itself off its computer; away, it hears so once it connects again.
+   */
+  readonly revoke: (workerId: string) => void
+  /** The run a worker's reservation still holds, through a dropped connection, until it says the run ended. */
+  readonly outstanding: (workerId: string) => { readonly workspaceId: string } | undefined
+  /** The home keeps its own authority: it enrolls workers itself (`managed`), rather than an operator's certificates. */
+  readonly managed?: WorkerEnrollment
+  readonly close: () => void
+}
+
+/** What the home's own authority lets it do: sign a worker's key, make a one-time code, and say which projects it works on. */
+export interface WorkerEnrollment {
+  readonly enroll: (input: { readonly publicKey: Uint8Array; readonly name: string; readonly ssh: string | null }) => WorkerGrant
+  readonly code: (name: string) => Promise<{ readonly code: string; readonly expiresAt: number }>
+  readonly assign: (workerId: string, projectIds: ReadonlyArray<string>) => void
+}
+
+const startListener = async (
+  options: WorkerHomePaths,
+  homeId: string,
+  config: typeof Configuration.Type,
+  now: () => number,
+  connectionChanged: ((outcome: AgentWorkerConnection) => void) | undefined,
+): Promise<WorkerListener> => {
+  const relay = config.version === 1 ? await relayFiles(options, config.relay) : undefined
+  const authority = config.version === 2 ? await workerAuthority(options.profile, now()) : undefined
+  const tls =
+    config.version === 1
+      ? await tlsFiles(options, config)
+      : {
+          certificateAuthorityPem: Buffer.from(authority?.certificate ?? ''),
+          certificatePem: Buffer.from(authority?.home.certificate ?? ''),
+          privateKeyPem: Buffer.from(authority?.home.key ?? ''),
+        }
+  try {
+    const store = await openWorkerStore(options.profile, homeId, now)
+    let listener: Awaited<ReturnType<typeof bindWorkerHandshake>> | undefined
+    let codes: ReturnType<typeof workerCodes> | undefined
+    try {
+      const address = config.version === 1 ? config.address : '::'
+      const ip = address.includes(':') ? `[${address}]` : address
+      const agentWorkers = makeAgentWorkerPool(store.agents, connectionChanged)
+      const bound = await bindWorkerHandshake(`${ip}:${config.port}`, {
+        homeId,
+        ...tls,
+        workerForCertificate: store.workerForCertificate,
+        workerRemoved: store.workerRemoved,
+        diagnostics: store,
+        agentWorkers,
+      })
+      listener = bound
+      const target = address === '0.0.0.0' ? '127.0.0.1' : address === '::' ? '::1' : address
+      const stopRelay =
+        config.version === 1 && relay !== undefined ? connectHomeRelay(relay, { host: target, port: bound.port }) : undefined
+      const grant = (workerId: string, publicKey: Uint8Array): WorkerGrant => {
+        if (authority === undefined) throw new WorkerHomeError('InvalidConfig', 'This home takes workers by its operator’s certificates.')
+        return {
+          homeId,
+          workerId,
+          authority: authority.certificate,
+          certificate: authority.issue(publicKey, workerId, now()),
+          serverName: SERVER_NAME,
+          port: bound.port,
+          addresses: homeAddresses(bound.port),
+        }
+      }
+      const enroll = (input: { readonly publicKey: Uint8Array; readonly name: string; readonly ssh: string | null }) => {
+        if (authority === undefined) throw new WorkerHomeError('InvalidConfig', 'This home takes workers by its operator’s certificates.')
+        // The certificate is made for its worker ID, which its fingerprint gives: sign once to name it, then enroll that.
+        const fingerprint = keyFingerprint(input.publicKey)
+        const workerId = store.enrollNamed(fingerprint, input.name, input.ssh)
+        return grant(workerId, input.publicKey)
+      }
+      if (authority !== undefined)
+        codes = workerCodes({
+          homeId,
+          authority,
+          port: bound.port,
+          now,
+          enroll: (publicKey, name) => enroll({ publicKey, name, ssh: null }),
+        })
+      return {
+        port: bound.port,
+        agentWorkers,
+        workers: () => store.workers(),
+        revoke: (workerId: string) => {
+          store.revoke(workerId)
+          agentWorkers.remove(workerId)
+        },
+        outstanding: (workerId: string) => store.agents.outstanding(workerId),
+        ...(codes === undefined
+          ? {}
+          : {
+              managed: {
+                enroll,
+                code: codes.make,
+                assign: (workerId, projectIds) => store.assign(workerId, projectIds),
+              },
+            }),
+        close: () => {
+          codes?.close()
+          stopRelay?.()
+          bound.close()
+          store.close()
+        },
+      }
+    } catch {
+      codes?.close()
+      listener?.close()
+      store.close()
+      throw new WorkerHomeError('HostUnavailable', 'Could not start the worker listener. Check its certificate files, address and port.')
+    }
+  } finally {
+    tls.privateKeyPem.fill(0)
+  }
+}
+
+/**
+ * A home that is its own authority listens on its port; where something else holds it (gRPC says only that it couldn't
+ * bind), on one the system picks, for this run, rather than not at all. A worker set up meanwhile is told that one.
+ */
+const startManaged = async (
+  options: WorkerHomePaths,
+  homeId: string,
+  port: number,
+  now: () => number,
+  connectionChanged: ((outcome: AgentWorkerConnection) => void) | undefined,
+) => {
+  try {
+    return await startListener(options, homeId, { version: 2, port }, now, connectionChanged)
+  } catch (error) {
+    if (!(error instanceof WorkerHomeError) || error.code !== 'HostUnavailable') throw error
+    return startListener(options, homeId, { version: 2, port: 0 }, now, connectionChanged)
+  }
+}
+const startKept = (
+  options: WorkerHomePaths,
+  homeId: string,
+  config: typeof Configuration.Type,
+  now: () => number,
+  connectionChanged: ((outcome: AgentWorkerConnection) => void) | undefined,
+) =>
+  config.version === 1
+    ? startListener(options, homeId, config, now, connectionChanged)
+    : startManaged(options, homeId, config.port, now, connectionChanged)
+
+export const listenWorkers = (options: WorkerHomePaths, homeId: string, connectionChanged?: (outcome: AgentWorkerConnection) => void) =>
   Clock.clockWith((clock) =>
     Effect.acquireRelease(
       Effect.tryPromise({
         try: async () => {
-          const bytes = await readPrivate(configurationPath(options.profile), 16384, true)
-          if (!bytes) return undefined
-          const raw: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
-          if (raw === null) return undefined
-          const config = Schema.decodeUnknownSync(Configuration)(raw)
-          const relay = await relayFiles(options, config.relay)
-          const tls = await tlsFiles(options, config)
-          try {
-            const store = await openWorkerStore(options.profile, homeId, () => clock.currentTimeMillisUnsafe())
-            let listener: Awaited<ReturnType<typeof bindWorkerHandshake>> | undefined
-            try {
-              const ip = config.address.includes(':') ? `[${config.address}]` : config.address
-              const agentWorkers = makeAgentWorkerPool(store.agents)
-              const bound = await bindWorkerHandshake(`${ip}:${config.port}`, {
-                homeId,
-                ...tls,
-                workerForCertificate: store.workerForCertificate,
-                diagnostics: store,
-                agentWorkers,
-              })
-              listener = bound
-              const target = config.address === '0.0.0.0' ? '127.0.0.1' : config.address === '::' ? '::1' : config.address
-              const stopRelay = relay === undefined ? undefined : connectHomeRelay(relay, { host: target, port: bound.port })
-              return {
-                port: bound.port,
-                agentWorkers,
-                close: () => {
-                  stopRelay?.()
-                  bound.close()
-                  store.close()
-                },
-              }
-            } catch {
-              listener?.close()
-              store.close()
-              throw new WorkerHomeError(
-                'HostUnavailable',
-                'Could not start the worker listener. Check its certificate files, address and port.',
-              )
-            }
-          } finally {
-            tls.privateKeyPem.fill(0)
-          }
+          const config = await readConfiguration(options.profile)
+          if (config === undefined) return undefined
+          return startKept(options, homeId, config, () => clock.currentTimeMillisUnsafe(), connectionChanged)
         },
         catch: configureFailure,
       }),
       (listener) => Effect.sync(() => listener?.close()),
+    ),
+  )
+
+/**
+ * Lets a home take workers, now, without a restart (the person's Add a worker): it keeps a managed configuration, makes
+ * its own authority, and opens its worker port, `WORKER_PORT` where that is free. A home already listening stays as it is.
+ */
+export const openWorkers = (options: WorkerHomePaths, homeId: string, connectionChanged?: (outcome: AgentWorkerConnection) => void) =>
+  Clock.clockWith((clock) =>
+    Effect.acquireRelease(
+      Effect.tryPromise({
+        try: async () => {
+          const now = () => clock.currentTimeMillisUnsafe()
+          const kept = await readConfiguration(options.profile)
+          if (kept !== undefined) return startKept(options, homeId, kept, now, connectionChanged)
+          // Where its own port is taken, the one the system picks, kept, so a worker finds it there again after a restart.
+          const listening = await startManaged(options, homeId, WORKER_PORT, now, connectionChanged)
+          await writePrivate(configurationPath(options.profile), JSON.stringify({ version: 2, port: listening.port }), true)
+          return listening
+        },
+        catch: configureFailure,
+      }),
+      (listener) => Effect.sync(() => listener.close()),
     ),
   )
 

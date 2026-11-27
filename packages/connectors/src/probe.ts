@@ -2,7 +2,7 @@ import { Duration, Effect, Option, Schema } from 'effect'
 
 import { type AccessInput, type AccessLine, type AccessReason, type AccessReport, line } from './access'
 import { authorizationOf } from './credential'
-import { messageOf } from './http'
+import { type Fetch, messageOf } from './http'
 
 /*
  * How a product's check (access.ts) asks its service: one question at a
@@ -66,6 +66,34 @@ export const probe = (
     catch: (error) => unanswered(String(error).slice(0, 300)),
   }).pipe(
     Effect.timeoutOrElse({ duration: WAIT, orElse: () => Effect.succeed(unanswered('The service did not answer in time')) }),
+    Effect.catch((answer) => Effect.succeed(answer)),
+  )
+
+/**
+ * Whether a sign-in may push to a repository, as git's first question of a push is answered: the receive-pack advertisement
+ * (`info/refs?service=git-receive-pack`), which sends nothing and changes nothing, but which a host answers only for one that
+ * may write there. `yes` where it would take a push; `no` where it is refused (401, 403), the hosts' words for a sign-in
+ * that may read but not write; `unsaid` for anything else (nothing answered, a server error, a rate limit, no such page),
+ * where the check goes by what else it knows.
+ */
+export const pushAnswer = (fetch: Fetch, gitUrl: string, authorization: string): Effect.Effect<'yes' | 'no' | 'unsaid'> =>
+  Effect.tryPromise({
+    try: async (signal) => {
+      const response = await fetch(`${gitUrl}/info/refs?service=git-receive-pack`, {
+        method: 'GET',
+        headers: { 'user-agent': 'git/2.47.0 (Althar)', authorization, 'git-protocol': 'version=2' },
+        signal,
+      })
+      // Nothing of the body is wanted: what the status says is the answer.
+      await response.body?.cancel().catch(() => undefined)
+      if (response.status >= 200 && response.status < 300) return 'yes' as const
+      if (response.status === 429 || response.headers.has('retry-after') || response.headers.get('x-ratelimit-remaining') === '0')
+        return 'unsaid' as const
+      return response.status === 401 || response.status === 403 ? ('no' as const) : ('unsaid' as const)
+    },
+    catch: () => 'unsaid' as const,
+  }).pipe(
+    Effect.timeoutOrElse({ duration: WAIT, orElse: () => Effect.succeed('unsaid' as const) }),
     Effect.catch((answer) => Effect.succeed(answer)),
   )
 

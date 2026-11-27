@@ -28,6 +28,21 @@ import { SettleWays } from '../SettleWays/SettleWays'
 import { WorkCard } from '../WorkCard/WorkCard'
 import { Board, BoardColumn, BoardDivider, BoardEmpty, type BoardFolds, BoardList, boardText } from './Board'
 
+/* Running's orders: the oldest first, or at work first and what stands still after it. */
+const ORDERS = [
+  { value: 'started', label: 'Oldest first' },
+  { value: 'status', label: 'Status' },
+]
+const RANKS: Record<TaskStatus, number> = {
+  [TaskStatus.Running]: 0,
+  [TaskStatus.Paused]: 1,
+  [TaskStatus.Queued]: 2,
+  [TaskStatus.Stopped]: 3,
+  [TaskStatus.Yours]: 4,
+  [TaskStatus.Done]: 5,
+}
+const rankOf = (status: TaskStatus | undefined) => RANKS[status ?? TaskStatus.Running]
+
 /* Meridian's board, with the one you open ringed, as it is while the dock shows it; with lanes collapsed where the person did. */
 function Meridian({
   empty = false,
@@ -46,6 +61,8 @@ function Meridian({
   const running = empty ? [] : RUNNING
   const calls = empty ? [] : CALLS
   const settled = empty ? [] : SETTLED
+  const [order, setOrder] = useState('started')
+  const shown = order === 'status' ? running.toSorted((a, b) => rankOf(a.status) - rankOf(b.status)) : running
   return (
     <Board
       label="Meridian’s work"
@@ -67,8 +84,12 @@ function Meridian({
           ))}
         </BoardList>
       </BoardColumn>
-      <BoardColumn lane={BoardLane.Running} count={running.length}>
-        {running.map((x) => (
+      <BoardColumn
+        lane={BoardLane.Running}
+        count={running.length}
+        order={{ label: 'Order', options: ORDERS, value: order, onChange: setOrder }}
+      >
+        {shown.map((x) => (
           <WorkCard key={x.task} {...x} current={open === x.task} onOpen={() => setOpen(x.task)} />
         ))}
       </BoardColumn>
@@ -522,6 +543,19 @@ export const OpeningACard: Story = {
     const title = RUNNING[0]!.title
     await userEvent.click(c.getByRole('button', { name: title }))
     await expect(c.getByRole('button', { name: title }).closest('article')).toHaveAttribute('aria-current', 'true')
+  },
+}
+
+/** Running sorted by status from the menu on its head: at work first, paused after; the button stays in sight while it is. */
+export const SortingRunning: Story = {
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const lane = within(c.getByRole('region', { name: 'Running' }))
+    const titles = () => lane.getAllByRole('article').map((card) => within(card).getAllByRole('button')[0]!.textContent)
+    await userEvent.click(lane.getByRole('button', { name: 'Sort Running' }))
+    await userEvent.click(within(document.body).getByRole('menuitemradio', { name: 'Status' }))
+    await expect(titles().at(-1)).toContain('Refunds rate-limit like charges')
+    await expect(lane.getByRole('button', { name: 'Sort Running' })).toHaveClass(/sorted/)
   },
 }
 

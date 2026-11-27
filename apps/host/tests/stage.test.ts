@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { stageUpdate, checkCandidate, findManifest } from '../src/updates/stage'
 import { authenticateRelease, digest } from '../src/updates/release'
 import { loadInstallation, readState, saveState } from '../src/updates/store'
-import { fixtureFiles, updateFixture } from './updateFixture'
+import { fixtureFiles, updateFixture, NEXT_VERSION } from './updateFixture'
 import { temporary } from './support'
 
 const downloadable = async () => {
@@ -73,7 +73,7 @@ describe('release staging without service interruption', () => {
   })
   it('downloads, extracts, probes and publishes a release while keeping the running code selected', async () => {
     const at = await downloadable()
-    expect(await stageUpdate(at.root, { ...at.dependencies, fetch: at.fetch })).toEqual({ state: 'staged', version: '0.1.1' })
+    expect(await stageUpdate(at.root, { ...at.dependencies, fetch: at.fetch })).toEqual({ state: 'staged', version: NEXT_VERSION })
     const state = await readState(at.root)
     expect(state.current).toBe(at.oldId)
     expect(state.active).toBe(at.oldId)
@@ -125,7 +125,7 @@ describe('release staging without service interruption', () => {
           ? JSON.stringify([
               { tag_name: 'v9.0.0', draft: false, prerelease: false, assets: [asset] },
               { tag_name: 'host-v1.0.0', draft: true, prerelease: false, assets: [asset] },
-              { tag_name: 'host-v0.1.1', draft: false, prerelease: false, assets: [asset] },
+              { tag_name: `host-v${NEXT_VERSION}`, draft: false, prerelease: false, assets: [asset] },
             ])
           : at.envelope,
       )

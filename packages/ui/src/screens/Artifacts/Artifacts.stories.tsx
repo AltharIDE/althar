@@ -3,13 +3,14 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { Artifacts } from './Artifacts'
 
-/* A project's artifacts as one table: filtered by kind, searched and sorted; narrow; and none yet, wide and narrow. */
+/* A project's artifacts as one table: filtered by kind, searched and sorted; narrow; and none yet, wide and narrow. As cards: each with a picture of it or a drawing of its kind, where it is saved, narrowed by Filter. */
 
 const meta = {
   title: 'Screens/Artifacts',
   component: Artifacts,
   parameters: { layout: 'fullscreen' },
   args: {
+    layout: 'list',
     onOpen: fn(),
     canvases: [
       {
@@ -108,7 +109,8 @@ export const Narrowed: Story = {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('radio', { name: 'Document' }))
     await expect(names(canvasElement)).toEqual(['Sign-in, three directions'])
-    await expect(c.getByText('1 of 5')).toBeInTheDocument()
+    // No bare count beside the search: the rows say how many there are.
+    await expect(c.queryByText('1 of 5')).toBeNull()
     await userEvent.click(c.getByRole('radio', { name: 'All' }))
     await userEvent.type(c.getByRole('searchbox', { name: 'Find an artifact' }), 'sign')
     await userEvent.click(c.getByRole('button', { name: 'Name' }))
@@ -173,4 +175,96 @@ export const None: Story = {
 export const NoneNarrow: Story = {
   args: { canvases: [] },
   decorators: Narrow.decorators,
+}
+
+/** As cards: a picture of each (a drawing of its kind where there is none yet), its facts, and where it is saved. */
+export const Cards: Story = {
+  args: {
+    layout: 'cards',
+    canvases: [
+      {
+        id: 'cnv_g',
+        name: 'gift-a-class',
+        title: 'Gift a class',
+        kind: 'boards',
+        version: 4,
+        by: 'Lead of Gift a class',
+        when: '12m ago',
+        at: '2026-11-21T12:00:00.000Z',
+        openComments: 2,
+        saved: { repository: 'kiln', path: 'design/gift-a-class/', state: 'saved' },
+      },
+      {
+        id: 'cnv_f',
+        name: 'booking-flow',
+        title: 'Booking flow',
+        kind: 'mermaid',
+        version: 1,
+        by: 'Coordinator',
+        when: '2h ago',
+        at: '2026-11-21T10:00:00.000Z',
+        openComments: 0,
+        saved: { repository: 'kiln', path: 'docs/flows/booking/', state: 'saving' },
+      },
+      {
+        id: 'cnv_r',
+        name: 'receipt',
+        title: 'Receipt, email and page',
+        kind: 'html',
+        version: 2,
+        by: 'Lead of Gift a class',
+        when: 'yesterday',
+        at: '2026-11-20T10:00:00.000Z',
+        openComments: 0,
+      },
+      {
+        id: 'cnv_n',
+        name: 'notes',
+        title: 'What we learned from five interviews',
+        kind: 'markdown',
+        version: 3,
+        by: 'Lead of Research the gift flow',
+        when: '3d ago',
+        at: '2026-11-18T10:00:00.000Z',
+        openComments: 1,
+      },
+    ],
+  },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('In git at kiln/design/gift-a-class/')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: /^Booking flow/ }))
+    await expect(args.onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'cnv_f' }))
+  },
+}
+
+/** As cards, narrowed to those with open comments. */
+export const CardsFiltered: Story = {
+  args: { ...Cards.args, filter: { saved: false, commented: true } },
+}
+
+/** As cards, with one its own chat is still drawing the first version of, first. */
+export const CardsDrawing: Story = {
+  args: {
+    ...Cards.args,
+    canvases: [
+      {
+        id: 'task_mood',
+        name: '',
+        title: 'Mood board for the spring classes',
+        kind: 'boards',
+        version: 0,
+        by: '',
+        when: 'just now',
+        at: '2026-11-21T12:20:00.000Z',
+        openComments: 0,
+        drawing: true,
+      },
+      ...(Cards.args?.canvases ?? []),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement).getByRole('button', { name: /^Mood board for the spring classes/ })
+    await expect(within(card).getByText('Drawing the first version')).toBeVisible()
+  },
 }

@@ -46,7 +46,7 @@ person can change a task's team at any time.
 
 ## Goals
 
-A lead’s conversation can keep one goal. The person sets it with `/goal <objective>` and can view, edit, pause, resume or clear it above the composer. Althar keeps the objective, the lead’s latest progress report and the outcome with the thread, so a different lead or a restarted runtime can carry on from the current work.
+A lead’s conversation can keep one goal. The person sets it with `/goal <objective>`, and views, edits, pauses, resumes or clears it from `/goal` in the composer ([Commands in the composer](desktop-app.md#commands-in-the-composer)) or from its line above the composer. Each change the person makes is said in the thread as Althar’s line (“You set a goal: …”, “You paused the goal.”): a goal is the thread’s, not said to the lead. A goal given to the coordinator becomes a task’s: it drafts a task, sets the goal on it with `set_goal` and plans it, and the goal waits for the plan to start, so its countdown and Hold still stand ([A goal is a task's](coordinator.md#a-goal-is-a-tasks)). Althar keeps the objective, the lead’s latest progress report and the outcome with the thread, so a different lead or a restarted runtime can carry on from the current work.
 
 A goal’s automatic turns use the usual queue, agent places and permissions. Messages already waiting go first. A goal can yield to the task’s existing waits, including waiting for a person or an external change while a step is open. Goals get twelve automatic turns at a time. Resume grants a fresh allowance when they reach the limit.
 
@@ -549,9 +549,12 @@ change settles when its pull request merges, or when it is abandoned.
 
 **Keep for later is for every kind of task** that finished, not only one
 that isn't a change: a prototype or a chat planned from a preset ends on
-its branch, which makes it a change, and it keeps all the same. Only a
-task with its pull request open, or commits held for Ship, has no Keep:
-those wait on the person in their own ways, which a kept row doesn't show.
+its branch, which makes it a change, and it keeps all the same, and so
+does one whose commits wait for Ship: they stay held on its branch, and
+Accept or Ship are there when it is opened. Only a task with its pull
+request open has no Keep: it waits on the person on its host, which a kept
+row doesn't show, and Keep for later asked of it anyway is refused, saying
+so, its row back where it was.
 
 The person can also tell the lead, which has `settle_task` (done, keep or
 discard). The composer suggests "Mark this as done". The coordinator settles
@@ -598,7 +601,9 @@ stored, so it cannot go stale.
 
 
 **Auto moves a lead's next step to a lighter model of the same agent** when
-the plan's tightest window is 90% used or more. A line in the thread says
+the plan's tightest window is 90% used or more, unless another agent has room on
+the same model: then it stays on its model, and goes to that agent once the plan
+is nearly out. A line in the thread says
 from which model to which, the share used, the window and when it resets.
 Keep turns it back, for the whole task; Undo puts the move back. How models
 are picked is in [agents.md](agents.md).
@@ -686,6 +691,15 @@ each agent for command output and normalizes what each one sends.
   a document it committed reads from the commit Althar kept. Pictures are
   served by the main process from the store, with a 1,120 px copy for the
   thread, and the window never names a path.
+- **A home's pictures reach every window on it through its own connection.**
+  The store is the home's, so a window paired with a home, or a phone, asks
+  for a picture by its digest (`ReadPicture`, a call a paired device may
+  make), and only a picture the window draws is given. The desktop answers
+  the same address in that home's own session, from a copy of the home's
+  pictures kept by digest, and fetches what it doesn't hold over a
+  connection to the home of their own, opened when a picture is first
+  wanted and closed with the home's last window. Bytes that aren't the
+  digest asked for are never kept or shown.
 
 **Not built yet:** sweeping the store. Files whose rows are gone, and old
 pictures and logs, stay until mark-and-sweep is built
@@ -761,3 +775,6 @@ optionally a model, an agent, an effort and the change.
 - 12 Nov 2026: commits that only bring the base branch in, as a clean merge of main, are never the task's work: no hold for Ship, no review, no round; they go up to the open pull request (#773's merge of main had started a second Review and Pull request).
 - 12 Nov 2026: every part changes either way on the person's word to the lead or the coordinator, the lead's own task included: `change_part` sets Checked by, the ending and another preset's parts at once, `change_lead` acts on a lead's own task, Ship honours an ending of its branch alone, and the task menu has Make it a change; a prototype becomes a change in one move, and a change goes back.
 - 17 Nov 2026: a conversation brought in from another tool is an aside, its first brief the conversation so far.
+- 23 Nov 2026: `/goal` opens into the goal in the composer's commands, and each change the person makes to a goal is said in the thread as Althar's line ([Goals](#goals)).
+- 24 Nov 2026: a goal given to the coordinator is set on a task it plans, and a goal on a task whose plan hasn't started waits for it ([Goals](#goals)).
+- 26 Nov 2026: a home's pictures reach a window paired with it, and a phone, through the home's own connection (`ReadPicture`), for every picture a thread shows.

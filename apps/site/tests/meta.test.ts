@@ -28,6 +28,7 @@ describe('page meta', () => {
       '/docs',
       '/enterprise',
       '/office-hours',
+      '/pair',
       '/privacy',
       '/shifts',
       '/thesis',
@@ -57,7 +58,7 @@ describe('page meta', () => {
   })
 
   it('keeps the docs placeholder and the enterprise page out of search', () => {
-    expect(pages.filter((p) => !p.index).map((p) => p.path)).toEqual(['/docs', '/enterprise'])
+    expect(pages.filter((p) => !p.index).map((p) => p.path)).toEqual(['/docs', '/pair', '/enterprise'])
   })
 
   it('finds a page by path, ignoring a trailing slash; any other path is the page that isn’t there', () => {

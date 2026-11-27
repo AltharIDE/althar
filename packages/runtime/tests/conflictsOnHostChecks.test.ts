@@ -234,7 +234,7 @@ describe('a conflict its pull request’s host reports, and the checks on its me
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix]')
+      const { threadId } = yield* opened(working, '[lead:resolve] [lead:fix]')
       moveHostMainOn(working, bare)
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
       yield* until(

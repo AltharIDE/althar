@@ -106,6 +106,9 @@ export const sessionsAsked: Array<{
   readonly params: Parameters<NonNullable<FakeAgentOptions['sessionAsked']>>[0]
 }> = []
 
+/** Each prompt a fake agent in this process received, when and as it read it: what a test says it was asked, failing. */
+export const promptsGot: Array<{ readonly agentId: string; readonly at: string; readonly text: string }> = []
+
 /** What the registry's launch reads of this machine for an agent's own config, set aside while it is made here. */
 const MACHINE_CONFIG = ['HOME', 'TMPDIR', 'XDG_CONFIG_HOME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT'] as const
 
@@ -266,6 +269,7 @@ export const fakeAgents = (
                 agent: fakeAgent({
                   now: () => clock.currentTimeMillisUnsafe(),
                   sessionAsked: (params) => void sessionsAsked.push({ agentId, params }),
+                  promptAsked: (text) => void promptsGot.push({ agentId, at: new Date().toISOString(), text }),
                   ...options,
                   ...each[agentId],
                   ...each[`${agentId}@${env.FAKE_HOME === undefined ? 'usual' : basename(env.FAKE_HOME)}`],
@@ -363,6 +367,8 @@ export const runtime = (
     readonly publishAgain?: Duration.Duration
     /** How long a task is under way after its agent went or its lead's turn ended; none at all unless a test says. */
     readonly betweenAgents?: Duration.Duration
+    /** How a start waits for an agent's own program that isn't there yet: a moment unless a test says. */
+    readonly programWait?: { readonly every: Duration.Duration; readonly within: Duration.Duration }
     /** How long cards are kept between reads at most, until their task moves: none unless a test says, as most write the store by hand. */
     readonly keptFor?: Duration.Duration
     readonly each?: Readonly<Record<string, FakeAgentOptions>>
@@ -403,6 +409,9 @@ export const runtime = (
     readonly screenshot?: RuntimeOptions['screenshot']
     /** How the page beside a conversation is reached, where a test drives one; without, none can be. */
     readonly page?: RuntimeOptions['page']
+    /** How this computer's native apps are used, and what hears that a task's turn ended with it; without, the computer tool isn't served. */
+    readonly computer?: RuntimeOptions['computer']
+    readonly computerEnded?: RuntimeOptions['computerEnded']
     /** The clock and zone automations are read by, and how often they are looked at. */
     readonly automations?: AutomationOptions
     /** The zone leads and the coordinator are told the person's local time in; the computer's unless a test says. */
@@ -416,6 +425,8 @@ export const runtime = (
     readonly leftEvery?: Duration.Duration
     /** How often what waits for a checkout is looked at again (ADR-091): every 100 milliseconds unless a test says. */
     readonly localEvery?: Duration.Duration
+    /** Told each look for where something an agent left running answers from its port, to say what a test saw. */
+    readonly serving?: RuntimeOptions['serving']
   } = {},
 ) =>
   Runtime.layer({
@@ -441,6 +452,7 @@ export const runtime = (
     publishAgain: more.publishAgain ?? Duration.zero,
     ...(more.agentConfigs === undefined ? {} : { agentConfigs: more.agentConfigs }),
     betweenAgents: more.betweenAgents ?? Duration.zero,
+    programWait: more.programWait ?? { every: Duration.millis(10), within: Duration.millis(100) },
     // Cards worked out afresh on every read, as most tests write the store by hand; `ALTHAR_TEST_KEEP_CARDS=1` keeps them as
     // Althar does, to run any test on the cache production reads through.
     keptFor: more.keptFor ?? (process.env.ALTHAR_TEST_KEEP_CARDS === '1' ? KEPT_FOR : Duration.zero),
@@ -456,9 +468,12 @@ export const runtime = (
     // A round waits a moment, not two seconds, for its lead to report what it left running after its turn: the fake
     // agents report it within the turn, but where a test says.
     idle: { reports: Duration.millis(300), ...more.idle },
+    ...(more.serving === undefined ? {} : { serving: more.serving }),
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
     ...(more.page === undefined ? {} : { page: more.page }),
+    ...(more.computer === undefined ? {} : { computer: more.computer }),
+    ...(more.computerEnded === undefined ? {} : { computerEnded: more.computerEnded }),
     ...(more.skills === undefined ? {} : { skills: more.skills }),
     busy: { machine: ROOMY, pressure: false, ...more.busy },
     ...(more.automations === undefined ? {} : { automations: more.automations }),

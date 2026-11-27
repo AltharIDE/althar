@@ -14,6 +14,8 @@ mod agent_managed;
 #[cfg(target_os = "linux")]
 mod agent_preview;
 #[cfg(target_os = "linux")]
+mod agent_readiness;
+#[cfg(target_os = "linux")]
 mod agent_reservation;
 #[cfg(target_os = "linux")]
 mod agent_setup;
@@ -26,12 +28,16 @@ mod agent_workspace;
 #[cfg(target_os = "linux")]
 mod agent_workspace_set;
 #[cfg(target_os = "linux")]
+pub mod cleanup;
+#[cfg(target_os = "linux")]
 pub mod diagnostic;
 pub mod grpc;
 #[cfg(target_os = "linux")]
 pub mod project;
 #[cfg(target_os = "linux")]
 pub mod relay;
+#[cfg(target_os = "linux")]
+pub mod uninstall;
 
 pub mod wire {
     include!(concat!(env!("OUT_DIR"), "/althar.worker.v1.rs"));

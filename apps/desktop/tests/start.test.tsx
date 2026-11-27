@@ -3,10 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { type AccountSignInState, type AgentStatus, ApiError, type ProjectSummary, type Status } from '@althar/contracts'
+import { type AccountSignInState, type AgentStatus, ApiError, type ProjectSummary, SOCKET_CALLS, type Status } from '@althar/contracts'
 import { RuntimeState } from '@althar/ui'
 
-import { useServices } from '../src/renderer/data/services'
+import { type Host, useServices } from '../src/renderer/data/services'
 import { accountEntry } from '../src/renderer/features/accounts/AgentAccounts'
 import { clock } from '../src/renderer/shared/time'
 import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSignIn'
@@ -17,21 +17,36 @@ import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { openGuide, runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
-import { agents, changed, fakeClient, fakeHost, project, streamed, usual, withoutOpenCode } from './fixtures'
+import {
+  agents,
+  changed,
+  connectionList,
+  fakeClient,
+  fakeHost,
+  onLinuxHome,
+  project,
+  remoteConnection,
+  streamed,
+  usual,
+  withoutOpenCode,
+} from './fixtures'
 import { withServices } from './render'
+import { foldersOnHome } from '../src/renderer/data/homeConnection'
+import { draftsOf } from '../src/renderer/features/newProject/draft'
 import { openTheProject, seenTheTour, toTheProject } from './welcome'
 
 function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
   return <HomeView model={useHome()} start={start} onProject={onProject} onTalk={vi.fn()} onTask={vi.fn()} />
 }
 
-function Start({ onProject }: { onProject: (id: string) => void }) {
+function Start({ onProject, onNew = () => {} }: { onProject: (id: string) => void; onNew?: () => void }) {
   const start = useStart()
   return (
     <StartView
       model={start}
       accounts={useAccountSignIn(start)}
       onProject={onProject}
+      onNew={onNew}
       home={() => <Home start={start} onProject={onProject} />}
     />
   )
@@ -500,7 +515,7 @@ describe('the start', () => {
     const { client, emit, watching } = fakeClient()
     withServices(<Start onProject={onProject} />, client)
     const projects = await screen.findByRole('complementary', { name: 'Projects' })
-    await userEvent.click(await within(projects).findByRole('button', { name: /meridian/ }))
+    await userEvent.click(await within(projects).findByRole('button', { name: /^meridian/ }))
     expect(onProject).toHaveBeenCalledWith('p1')
 
     // A change to a project reads the list again; a change to anything else doesn't.
@@ -954,22 +969,324 @@ describe('the start', () => {
   })
 })
 
-it('shows an empty remote home without offering desktop folders or agent installation', async () => {
-  const homeId = `home_${'1'.repeat(32)}`
-  const { client } = fakeClient({
-    connection: {
-      identity: { homeId, actorId: `act_${'2'.repeat(32)}`, deviceId: `dev_${'3'.repeat(32)}`, role: 'socket' },
-      hostDeviceId: `dev_${'3'.repeat(32)}`,
-      apiVersion: 1,
-      appVersion: 'fixture',
-      position: { homeId, cursor: 0, checkpoint: null },
-    },
-    listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
-  })
+it('welcomes an empty remote home with what it found there, and goes into New project the way chosen', async () => {
+  const { client } = fakeClient({ connection: remoteConnection(), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
   const host = fakeHost()
-  withServices(<Start onProject={() => {}} />, client, host)
-  expect(await screen.findByRole('heading', { name: 'No projects on this home yet' })).not.toBeNull()
+  const onNew = vi.fn()
+  withServices(<Start onProject={() => {}} onNew={onNew} />, client, foldersOnHome(host, client))
+  expect(await screen.findByRole('heading', { name: /^This is / })).not.toBeNull()
+  expect(await screen.findByText('Ubuntu 24.04.1 LTS')).not.toBeNull()
   expect(screen.queryByRole('button', { name: /Choose a folder/ })).toBeNull()
   expect(host.pickFolder).not.toHaveBeenCalled()
-  expect(screen.getByText('Add a project on the host and it shows here.')).not.toBeNull()
+  expect(host.findRepositories).not.toHaveBeenCalled()
+  await userEvent.click(screen.getByRole('button', { name: 'Skip the tour' }))
+  expect(await screen.findByText('2 repositories found on this home')).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Start empty' }))
+  expect(onNew).toHaveBeenCalledOnce()
+  expect(draftsOf(client).get()?.way).toBe('new')
+})
+
+it('signs an agent in on an empty remote home and connects a code host there, each over its welcome, and clones this Mac’s projects there', async () => {
+  const linux = onLinuxHome('runner-1')
+  const local = {
+    live: true,
+    list: [
+      {
+        id: 'p_here',
+        name: 'Site',
+        ink: 'teal',
+        working: 0,
+        yours: 0,
+        remotes: [{ url: 'https://github.com/acme/site', product: 'github', host: 'github.com', path: 'acme/site' }],
+      },
+    ],
+  }
+  const homes = {
+    ...linux.homes,
+    overview: vi.fn(async () => ({ ...(await linux.homes.overview()), projects: { local } })),
+  }
+  const signedOut = agents.map((agent) =>
+    agent.id === 'claude-code'
+      ? { ...agent, signIn: 'signed_out' as const, accounts: [{ ...agent.accounts[0]!, signIn: 'signed_out' as const }] }
+      : agent,
+  )
+  const { client } = fakeClient({
+    connection: linux.connection,
+    listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+    status: vi.fn(async () => ({ apiVersion: 1, appVersion: '0.2.1', agents: signedOut })),
+    listConnections: vi.fn(async () => ({ ...connectionList, connections: [] })),
+  })
+  const host = { ...fakeHost(), homes } as unknown as Host
+  const onNew = vi.fn()
+  withServices(<Start onProject={() => {}} onNew={onNew} />, client, foldersOnHome(host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Skip the tour' }))
+  // Signed out there: its sign-in opens over the welcome, its ways in first.
+  await userEvent.click(await screen.findByRole('button', { name: 'Sign Claude Code in on runner-1' }))
+  const signing = await screen.findByRole('dialog', { name: 'Sign Claude Code in on runner-1' })
+  expect(within(signing).getAllByRole('button').length).toBeGreaterThan(1)
+  await userEvent.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Sign Claude Code in on runner-1' })).toBeNull())
+  // No code host there: GitHub is offered, its walk in over the welcome.
+  await userEvent.click(screen.getByRole('button', { name: 'Connect GitHub on runner-1' }))
+  expect(await screen.findByRole('dialog', { name: 'GitHub' })).not.toBeNull()
+  await userEvent.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'GitHub' })).toBeNull())
+  // This Mac's projects, cloned there.
+  await userEvent.click(screen.getByRole('button', { name: 'From this Mac' }))
+  expect(onNew).toHaveBeenCalledOnce()
+  expect(draftsOf(client).get()?.way).toBe('clone')
+})
+
+it('welcomes a home too old to sign its agents in or connect a code host from here with its ways in, and its update for those', async () => {
+  const linux = onLinuxHome('runner-1')
+  const older = SOCKET_CALLS.filter((call) => call !== 'StartAccountSignIn' && call !== 'ConnectToken')
+  const { client } = fakeClient({
+    connection: { ...linux.connection, calls: older },
+    listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+    listConnections: vi.fn(async () => ({ ...connectionList, connections: [] })),
+  })
+  const onNew = vi.fn()
+  withServices(<Start onProject={() => {}} onNew={onNew} />, client, foldersOnHome({ ...fakeHost(), homes: linux.homes } as Host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Skip the tour' }))
+  expect(await screen.findByText('Update runner-1 to sign its agents in and connect GitHub or GitLab from here.')).not.toBeNull()
+  expect(screen.queryByRole('button', { name: /^Sign .* in on runner-1$/ })).toBeNull()
+  expect(screen.queryByRole('button', { name: /^Connect .* on runner-1$/ })).toBeNull()
+  // What it can do from here still goes in.
+  await userEvent.click(screen.getByRole('button', { name: 'Start empty' }))
+  expect(onNew).toHaveBeenCalledOnce()
+})
+
+it('asks a home from before windows made projects there, on a launcher of its own, to update there: its command folded away, and Check again', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  // Installed somewhere of its own: its launcher and profile saved for it, as the connection runs them.
+  const runner = {
+    id: 'h1',
+    name: 'runner-1',
+    homeId: `home_${'1'.repeat(32)}`,
+    ssh: { target: 'althar@runner-1', launcher: '/opt/althar/launcher', profile: '/srv/althar' },
+  }
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: () => () => {},
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(async () => ({ state: 'applied' })),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  const copied = vi.fn(async () => {})
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText: copied }, configurable: true })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  // No tour: the home can't say what it is.
+  expect(await screen.findByRole('heading', { name: 'Welcome to runner-1' })).not.toBeNull()
+  expect(screen.getByText(/runner-1 runs an older Althar. Once it’s updated/)).not.toBeNull()
+  expect(screen.queryByRole('list', { name: 'Ways in' })).toBeNull()
+  // A launcher of its own may be a source checkout's: the window doesn't run it.
+  expect(screen.queryByRole('button', { name: 'Update runner-1' })).toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'How to update it' }))
+  expect(await screen.findByText(/If it runs runner-1 from a source checkout, pull and rebuild there instead/)).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Copy the update command' }))
+  expect(copied).toHaveBeenCalledWith(`sh '/opt/althar/launcher' update --apply --wait --profile '/srv/althar'`)
+  await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+  expect(homes.reconnect).toHaveBeenCalledOnce()
+  expect(homes.update).not.toHaveBeenCalled()
+  expect(client.findHomeFolders).not.toHaveBeenCalled()
+  expect(client.getMachine).not.toHaveBeenCalled()
+})
+
+it('updates an older home reached over SSH in one press, each step as it stands, and reconnects onto the ways in', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'althar@runner-1' } }
+  const listeners = new Set<(state: unknown) => void>()
+  const tell = (state: unknown) => listeners.forEach((listener) => listener(state))
+  let done: (value: unknown) => void = () => {}
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: (listener: (state: unknown) => void) => {
+      listeners.add(listener)
+      return () => void listeners.delete(listener)
+    },
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(() => new Promise((resolve) => (done = resolve))),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
+  // At once, where the press was.
+  expect(screen.getByText('Getting the new release')).not.toBeNull()
+  expect(homes.update).toHaveBeenCalledOnce()
+  expect(screen.queryByRole('button', { name: /yourself/ })).toBeNull()
+  // The home restarts into it: the window's connection drops meanwhile.
+  act(() => tell({ current: { kind: 'ssh', home: runner }, connection: 'disconnected', problem: 'The home disconnected.' }))
+  expect(await screen.findByText('Restarting runner-1')).not.toBeNull()
+  act(() => done({ state: 'applied', version: '0.42.0' }))
+  await waitFor(() => expect(homes.reconnect).toHaveBeenCalledOnce())
+  // Reconnected, it opens on the ways in rather than the tour.
+  expect(window.localStorage.getItem('althar.homeToured')).toBe('1')
+})
+
+it('asks once, at the press, before an update that moves the home’s data, and goes only for the release accepted', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'althar@runner-1' } }
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: () => () => {},
+    reconnect: vi.fn(async () => {}),
+    updateCheck: vi.fn(async () => ({ from: '0.1.0', to: '0.2.0', change: 'data' })),
+    update: vi.fn(() => new Promise(() => {})),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  await waitFor(() => expect(homes.updateCheck).toHaveBeenCalledOnce())
+  await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
+  // Asked at once, nothing run yet.
+  expect(screen.getByText('Update runner-1 to 0.2.0?')).not.toBeNull()
+  expect(screen.getByText('Its data moves to a new format, with a snapshot kept. runner-1 can’t go back to 0.1.0 after.')).not.toBeNull()
+  expect(homes.update).not.toHaveBeenCalled()
+  // Not now: back where it was.
+  await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(homes.update).not.toHaveBeenCalled()
+  await userEvent.click(screen.getByRole('button', { name: 'Update runner-1' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Update' }))
+  expect(homes.update).toHaveBeenCalledExactlyOnceWith('0.2.0')
+  expect(screen.getByText('Getting the new release')).not.toBeNull()
+})
+
+it('asks where the update learned only on the press that it moves the home’s data', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'althar@runner-1' } }
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: () => () => {},
+    reconnect: vi.fn(async () => {}),
+    update: vi
+      .fn()
+      .mockResolvedValueOnce({ state: 'confirm', check: { from: '0.1.0', to: '0.2.0', change: 'data' } })
+      .mockResolvedValueOnce({ state: 'applied', version: '0.2.0' }),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
+  expect(await screen.findByText('Update runner-1 to 0.2.0?')).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Update' }))
+  expect(homes.update).toHaveBeenLastCalledWith('0.2.0')
+  await waitFor(() => expect(homes.reconnect).toHaveBeenCalledOnce())
+})
+
+it('offers Reconnect where an update failed after the home dropped the window’s connection', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'althar@runner-1' } }
+  const listeners = new Set<(state: unknown) => void>()
+  let fail: (error: Error) => void = () => {}
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: (listener: (state: unknown) => void) => {
+      listeners.add(listener)
+      return () => void listeners.delete(listener)
+    },
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(() => new Promise((_, reject) => (fail = reject))),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
+  act(() => listeners.forEach((listener) => listener({ current: { kind: 'ssh', home: runner }, connection: 'disconnected' })))
+  act(() => fail(new Error('The new host did not become ready.')))
+  await userEvent.click(await screen.findByRole('button', { name: 'Reconnect' }))
+  expect(homes.reconnect).toHaveBeenCalledOnce()
+})
+
+it('says why an older home couldn’t update, with Try again and its command folded away', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'althar@runner-1' } }
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: () => () => {},
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(async () => {
+      throw new Error("Error invoking remote method 'althar:homes-update': Error: There’s no newer Althar for runner-1 yet.")
+    }),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
+  expect(await screen.findByText('There’s no newer Althar for runner-1 yet.')).not.toBeNull()
+  expect(screen.getByText('Couldn’t update runner-1')).not.toBeNull()
+  // Still connected: nothing to reconnect.
+  expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Update it on runner-1 yourself' })).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(homes.update).toHaveBeenCalledTimes(2)
+  expect(homes.reconnect).not.toHaveBeenCalled()
+})
+
+it('doesn’t offer an older home an update no release would help: says none is out yet, and Check again looks anew', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'hermes-box' } }
+  // The only host release out is 0.1.0, from before projects were made from a window; then 0.2.0 comes out.
+  const release = vi.fn().mockResolvedValueOnce({ newest: '0.1.0' }).mockResolvedValueOnce({ newest: '0.2.0' })
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: () => () => {},
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(async () => ({ state: 'applied' })),
+    release,
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  expect(await screen.findByText('No newer release yet')).not.toBeNull()
+  expect(screen.getByText('runner-1 runs an Althar host from before projects could be made from here.')).not.toBeNull()
+  expect(screen.getByText('The next Althar host release brings it. Once it’s out, update runner-1 here.')).not.toBeNull()
+  expect(screen.queryByRole('button', { name: 'Update runner-1' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'How to update it' })).toBeNull()
+  expect(release).toHaveBeenCalledWith(false)
+  await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+  // Looked for afresh, past main's few minutes; out now, so it's offered.
+  expect(release).toHaveBeenLastCalledWith(true)
+  const update = await screen.findByRole('button', { name: 'Update runner-1' })
+  // Looking again isn't reconnecting: nothing on the home changed.
+  expect(homes.reconnect).not.toHaveBeenCalled()
+  await userEvent.click(update)
+  expect(homes.update).toHaveBeenCalledOnce()
+})
+
+it('offers the update where the newest release can’t be found out, which says itself how it went', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({ connection: remoteConnection(null), listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+  const runner = { id: 'h1', name: 'runner-1', homeId: `home_${'1'.repeat(32)}`, ssh: { target: 'hermes-box' } }
+  const homes = {
+    state: async () => ({ current: { kind: 'ssh', home: runner }, connection: 'connected' }),
+    onState: () => () => {},
+    reconnect: vi.fn(async () => {}),
+    update: vi.fn(async () => {
+      throw new Error("Error invoking remote method 'althar:homes-update': Error: runner-1’s DNS didn’t answer for api.github.com.")
+    }),
+    release: vi.fn(async () => {
+      throw new Error('Couldn’t find out the newest host release.')
+    }),
+  }
+  const host = fakeHost({ homes: homes as unknown as Host['homes'] })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(host, client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Update runner-1' }))
+  expect(await screen.findByText('runner-1’s DNS didn’t answer for api.github.com.')).not.toBeNull()
+})
+
+it('says it couldn’t look on the home where finding its folders failed, rather than that it found none', async () => {
+  window.localStorage.clear()
+  const { client } = fakeClient({
+    connection: remoteConnection(),
+    listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+    findHomeFolders: vi.fn(async () => {
+      throw new Error('The home disconnected.')
+    }),
+  })
+  withServices(<Start onProject={() => {}} />, client, foldersOnHome(fakeHost(), client))
+  await userEvent.click(await screen.findByRole('button', { name: 'Skip the tour' }))
+  expect(await screen.findByText('Couldn’t look on this home just now')).not.toBeNull()
+  expect(screen.getByRole('button', { name: 'A folder on this home' })).not.toBeNull()
 })

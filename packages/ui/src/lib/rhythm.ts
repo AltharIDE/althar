@@ -29,4 +29,6 @@ export enum Rhythm {
   Line = 'line',
   /** A task's card, or the card that launches one. */
   Card = 'card',
+  /** What the turn at work is using, kept under it, as a session on this computer is: closer to it than a new turn. */
+  Live = 'live',
 }

@@ -22,12 +22,13 @@ import {
   services,
   settledAmong,
   settling,
+  signInsOf,
   startup,
   UsageData,
   lagLogged,
   watchLag,
 } from '@althar/runtime'
-import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
+import { Cause, Clock, Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
 import { SqlClient } from 'effect/sql'
 import { keepCompiledNow } from '../compileCache'
@@ -38,8 +39,11 @@ import { editorsHere, openInEditor } from './editors'
 import { runtimeFacts, runtimeNames } from './facts'
 import { agentsLog, stdoutLogger } from './logging'
 import { type Device, deviceHere } from './onDevice'
+import { phonesIn } from './phones'
 import { profileInUse } from './profileInUse'
 import { pagesWith } from './pages'
+import { computerWith } from './computer'
+import type { ComputerDone, ComputerOwner } from '@althar/runtime/computerBridge'
 import { screenshotsWith, type Taken } from './screenshots'
 import { sealingWith } from './sealing'
 import { openInBrowser, openInTerminal } from './terminal'
@@ -105,24 +109,11 @@ mkdirSync(profile, { recursive: true })
 const agents = agentsLog(process.env.ALTHAR_LOGS)
 
 /**
- * The public ids of Althar's own apps registered with code hosts and
- * trackers, for their browser sign-in, as the build or the environment gives
- * them. A service without one takes a pasted token.
+ * The public ids of Althar's own apps on code hosts and trackers, for their browser sign-in, and its GitHub App's slug, for
+ * its install page: as the build baked them, unless the environment says otherwise. A service without one offers gh's or
+ * glab's sign-in and a pasted token.
  */
-const clientIds = Object.fromEntries(
-  (
-    [
-      ['github', process.env.ALTHAR_GITHUB_CLIENT_ID],
-      ['gitlab', process.env.ALTHAR_GITLAB_CLIENT_ID],
-      ['linear', process.env.ALTHAR_LINEAR_CLIENT_ID],
-    ] as const
-  ).flatMap(([product, id]) => (id === undefined || id === '' ? [] : [[product, id]])),
-)
-const copilotClientId = process.env.ALTHAR_COPILOT_CLIENT_ID || process.env.ALTHAR_GITHUB_CLIENT_ID || __ALTHAR_COPILOT_CLIENT_ID__
-
-/** Althar's GitHub App, by its slug, for where it is installed on an owner; with its id, GitHub's browser sign-in asks to be let in. */
-const githubApp =
-  process.env.ALTHAR_GITHUB_APP === undefined || process.env.ALTHAR_GITHUB_APP === '' ? undefined : process.env.ALTHAR_GITHUB_APP
+const signIns = signInsOf(__ALTHAR_SIGN_IN__, process.env)
 
 /* Secrets the main process is sealing or opening (sealing.ts). */
 const { ask: askMain, answer: answerSealed } = sealingWith((message) => parent.postMessage(message))
@@ -137,6 +128,7 @@ const screenshots = screenshotsWith((message) => parent.postMessage(message))
 
 /* What the lead and the coordinator ask of the page beside their conversation, which the main process answers (pages.ts). */
 const pages = pagesWith((message) => parent.postMessage(message))
+const computer = computerWith((message) => parent.postMessage(message))
 
 /** Code hosts and trackers are called over the app's own network, Chromium's (appFetch.ts). */
 const firstScreen = Deferred.makeUnsafe<void>()
@@ -196,6 +188,8 @@ const options = {
   openUrl: openInBrowser,
   screenshot: screenshots.ask,
   page: pages.ask,
+  computer: computer.ask,
+  computerEnded: (owner: ComputerOwner) => parent.postMessage({ type: 'computer-turn-ended', owner }),
   editors: {
     list: () =>
       device === undefined
@@ -228,6 +222,24 @@ const machineIn = (named: string | undefined) => {
   return cores !== undefined && memory !== undefined && cores > 0 && memory > 0
     ? { cores, memory: memory * 1024 ** 3 }
     : { cores: 64, memory: 256 * 1024 ** 3 }
+}
+
+/**
+ * The pressure the end-to-end tests name in `ALTHAR_FAKE_PRESSURE`, read as this computer's own would be: `memory`,
+ * critical, so one agent works at a time at once; `cpu`, every core busy with work waiting for them, so the number comes
+ * down a place every little while. Without one, none is read: the machine running the tests is never theirs.
+ */
+const pressureIn = (named: string | undefined) => {
+  if (named !== 'memory' && named !== 'cpu') return false as const
+  const read = Effect.map(Clock.currentTimeMillis, (at) => ({
+    at,
+    // Readings that move on, as a computer's do: CPU time spent, and of it, busy.
+    cores: { busy: named === 'cpu' ? at * 4 : at, total: at * 4, count: 4 },
+    memory: { used: 50, total: 100 },
+    pressure: named === 'memory' ? ('critical' as const) : ('normal' as const),
+    contention: named === 'cpu' ? 2 : 0.5,
+  }))
+  return { read, every: Duration.seconds(1) }
 }
 
 /* Ports and folders that arrive before the runtime is ready wait here. */
@@ -273,6 +285,7 @@ const program = Effect.gen(function* () {
           secrets: Secrets.memory(),
         }
       : undefined
+  const fakeCompactionIdle = Number(process.env.ALTHAR_FAKE_COMPACTION_IDLE_MS)
   const fake =
     __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_AGENTS === '1'
       ? {
@@ -294,7 +307,9 @@ const program = Effect.gen(function* () {
           },
           openUrl: () => Effect.succeed(false),
           // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
-          busy: { machine: machineIn(process.env.ALTHAR_MACHINE), pressure: false as const },
+          // Its pressure is none, unless a test names some (`ALTHAR_FAKE_PRESSURE`): memory that is critical, or the CPU busy.
+          busy: { machine: machineIn(process.env.ALTHAR_MACHINE), pressure: pressureIn(process.env.ALTHAR_FAKE_PRESSURE) },
+          ...(fakeCompactionIdle > 0 ? { idle: { compaction: Duration.millis(fakeCompactionIdle) } } : {}),
           // No sign-in of the person's is read for its usage: every provider's endpoint answers that there is none,
           // or, where a test names a share used (`ALTHAR_FAKE_PLAN`), each plan's five hours at that, resetting in two hours.
           usage: { readEndpoint: () => Promise.resolve(fakePlan(process.env.ALTHAR_FAKE_PLAN)) },
@@ -304,8 +319,15 @@ const program = Effect.gen(function* () {
         }
       : undefined
   parent.postMessage({ type: 'startup-stage', stage: 'data' })
-  const workerHome = yield* workersForProfile({ profile, worktrees: options.worktreeRoot })
-  const workerOptions = workerHome === undefined ? {} : { workers: workerHome.execution }
+  const workerHome = yield* workersForProfile(
+    { profile, worktrees: options.worktreeRoot },
+    (outcome) => {
+      parent.postMessage({ type: 'usage', usage: { name: 'worker_connection', properties: { outcome } }, usageAt: Date.now() })
+    },
+    // Opened once the person adds a worker: one more of the runtime's own ports, which no canvas may reach (ADR-104).
+    (port) => parent.postMessage({ type: 'listening', ports: [port] }),
+  )
+  const workerOptions = { workers: workerHome.execution }
   const context = yield* startup(
     'services',
     Layer.build(
@@ -314,9 +336,7 @@ const program = Effect.gen(function* () {
           ? {
               ...(device === undefined ? options : { ...options, onDevice: device.onDevice, probeRoot: join(profile, 'probe') }),
               ...workerOptions,
-              clientIds,
-              ...(copilotClientId ? { copilotClientId } : {}),
-              ...(githubApp === undefined ? {} : { githubApp }),
+              ...signIns,
               secrets,
               fetch: appFetch,
               // What is known of models, for the coordinator to weigh (ADR-015): fetched as the runtime starts, kept in the profile.
@@ -342,12 +362,11 @@ const program = Effect.gen(function* () {
     threads: number
   }>`SELECT (SELECT count(*) FROM projects) AS projects, (SELECT count(*) FROM tasks) AS tasks, (SELECT count(*) FROM threads) AS threads`
   yield* Effect.logInfo('Startup profile').pipe(Effect.annotateLogs({ ...size, database_bytes: statSync(databaseIn(profile)).size }))
-  const workerPort =
-    workerHome === undefined
-      ? undefined
-      : yield* workerHome
-          .listen(Context.get(context, Instance).homeId)
-          .pipe(Effect.catch((error) => Effect.as(Effect.logWarning('The worker listener could not start', error.message), undefined)))
+  const workerPort = yield* workerHome
+    .listen(Context.get(context, Instance).homeId)
+    .pipe(Effect.catch((error) => Effect.as(Effect.logWarning('The worker listener could not start', error.message), undefined)))
+  // Phones reach This Mac's home once the person lets them in (Settings › Computers), and again after a restart.
+  yield* phonesIn(profile, context as never).pipe(Effect.catch((error) => Effect.logWarning('Phones could not be let in', String(error))))
   isReady(context)
   parent.postMessage({ type: 'runtime-ready' })
   // The ports the runtime listens on, which no canvas may reach (ADR-104).
@@ -365,7 +384,9 @@ const program = Effect.gen(function* () {
       Effect.catch((error) => Effect.logWarning('The private local API could not start', error)),
     )
   yield* Effect.forkScoped(
-    Stream.runForEach(Context.get(context, UsageData).events, (usage) => Effect.sync(() => parent.postMessage({ type: 'usage', usage }))),
+    Stream.runForEach(Context.get(context, UsageData).events, ({ event, at }) =>
+      Effect.sync(() => parent.postMessage({ type: 'usage', usage: event, usageAt: at })),
+    ),
   )
   // Tasks over and projects removed, for the main process to clear what their pages kept, where the person keeps it that long (ADR-100).
   yield* Effect.forkScoped(
@@ -488,6 +509,7 @@ parent.on('message', (message) => {
   }
   if (data?.type === 'screenshot-taken' && data.requestId !== undefined) screenshots.answer(data.requestId, data as Taken)
   if (data?.type === 'page-done' && data.requestId !== undefined) pages.answer(data.requestId, data as PageDone)
+  if (data?.type === 'computer-done' && data.requestId !== undefined) computer.answer(data.requestId, data as unknown as ComputerDone)
   if (data?.type === 'first-screen') Effect.runSync(Deferred.succeed(firstScreen, undefined))
   if (data?.type === 'connect' && port !== undefined) accept(port, data.role === 'internal' ? 'internal' : 'window')
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)

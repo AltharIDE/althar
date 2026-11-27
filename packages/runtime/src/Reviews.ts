@@ -21,6 +21,7 @@ import { removeFully } from '@althar/provider-adapters'
 import { Cause, Context, type Crypto, Effect, Layer, Option, Result, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { pullRequestRemotes } from './coordinatorPullRequests'
 import { offScratch, postCard, touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections } from './Connections'
@@ -525,14 +526,21 @@ export class Reviews extends Context.Service<
       const placeOf = (projectId: string, asked: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const bindings = yield* sql<{ id: string; slug: string; name: string; remotes: string; repository: string; projectSlug: string }>`
-            SELECT b.id, b.slug, b.display_name AS name, b.remote_fingerprints AS remotes, l.path AS repository, p.slug AS project_slug
+          const bindings = yield* sql<{
+            id: string
+            slug: string
+            name: string
+            remotes: string
+            changeTarget: string | null
+            repository: string
+            projectSlug: string
+          }>`
+            SELECT b.id, b.slug, b.display_name AS name, b.remote_fingerprints AS remotes, b.change_target, l.path AS repository,
+              p.slug AS project_slug
             FROM repository_bindings b
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
             JOIN projects p ON p.id = b.project_id AND p.archived_at IS NULL
             WHERE b.project_id = ${projectId} AND b.detached_at IS NULL ORDER BY b.created_at, b.rowid`
-          const remotesOf = (binding: (typeof bindings)[number]) =>
-            Option.getOrElse(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(binding.remotes), () => [])
           const wanted = asked.trim()
           if (/^https?:\/\//i.test(wanted)) {
             const found = yield* connections.resolve(wanted)
@@ -544,7 +552,12 @@ export class Reviews extends Context.Service<
             const ref = found.ref
             const same = (path: ReadonlyArray<string>) => path.join('/').toLowerCase() === ref.path.join('/').toLowerCase()
             // Each remote with its host as Althar knows it: an SSH alias of GitHub's is on github.com.
-            const reached = yield* Effect.forEach(bindings, (one) => Effect.forEach(remotesOf(one), connections.reached))
+            const reached = yield* Effect.forEach(bindings, (one) =>
+              Effect.flatMap(
+                pullRequestRemotes({ remotes: one.remotes, changeTarget: one.changeTarget, path: one.repository }),
+                ({ remotes }) => Effect.forEach(remotes, (remote) => connections.reached(remote)),
+              ),
+            )
             const binding = bindings.find((_, index) =>
               (reached[index] ?? []).some((remote) => {
                 const place = parseRemote(remote)
@@ -557,8 +570,17 @@ export class Reviews extends Context.Service<
           }
           const number = /^#?(\d+)$/.exec(wanted)?.[1]
           if (number === undefined) return yield* refused('Give the pull request’s link, or its number: #123.')
+          // Each where its pull requests are: a fork's upstream, where its work goes there (DEV-169).
           const hosted = (yield* Effect.forEach(bindings, (binding) =>
-            Effect.map(connections.hostOf(remotesOf(binding)), (host) => (host === null ? [] : [{ ...host, binding }])),
+            Effect.gen(function* () {
+              const { remotes } = yield* pullRequestRemotes({
+                remotes: binding.remotes,
+                changeTarget: binding.changeTarget,
+                path: binding.repository,
+              })
+              const host = yield* connections.hostOf(remotes)
+              return host === null ? [] : [{ ...host, binding }]
+            }),
           )).flat()
           const [only] = hosted
           if (only === undefined)
@@ -1811,6 +1833,8 @@ export class Reviews extends Context.Service<
                 said: `${name} runs ${copy.trust === 'full' ? 'as trusted' : 'safely'} already.`,
               } as const
             let said: string
+            // What the install printed is the lead's to read; the person's line says how it went, with the output folded under it.
+            let shown: { readonly title: string; readonly description: string; readonly details: string } | undefined
             if (asked === 'safe') {
               const installed = yield* installSafely(copy.path, review.baseCommit)
               // Its lockfile's packages from a git host or a tarball that didn't install, each by name and where it comes from.
@@ -1829,6 +1853,12 @@ export class Reviews extends Context.Service<
                   : installed.ok
                     ? `Runs ${name} safely: installed with \`${installed.command}\`, install scripts off, from the registries its base branch names. Its commands run offline in the sandbox.${missed}`
                     : `Runs ${name} safely, but not everything installed with its install scripts off (\`${installed.command}\`):\n${installed.printed}${missed}\nTrust fully runs them as the team's code does.`
+              if (installed.command !== null && !installed.ok)
+                shown = {
+                  title: `Runs ${name} safely, but not everything installed with its install scripts off.`,
+                  description: `${missed.trim()} Trust fully runs them as the team's code does.`.trim(),
+                  details: [`$ ${installed.command}`, ...(installed.printed === '' ? [] : [installed.printed])].join('\n'),
+                }
             } else
               said = review.outside
                 ? `Trusts ${name} fully: it is set up and runs as the team's code does, with its install scripts and the network.`
@@ -1847,12 +1877,20 @@ export class Reviews extends Context.Service<
                 })
               }),
             )
-            yield* addItem({ projectId: copy.projectId, threadId: copy.threadId }, 'notice', {
-              source: 'runtime',
-              severity: 'info',
-              title: said.split('\n')[0] ?? said,
-              ...(said.includes('\n') ? { description: said.split('\n').slice(1).join('\n') } : {}),
-            })
+            // Where not everything installed: a line saying so, what's missing and what Trust fully does after it, and the
+            // install's command and output folded under it, never pasted into it.
+            yield* addItem(
+              { projectId: copy.projectId, threadId: copy.threadId },
+              'notice',
+              shown === undefined
+                ? {
+                    source: 'runtime',
+                    severity: 'info',
+                    title: said.split('\n')[0] ?? said,
+                    ...(said.includes('\n') ? { description: said.split('\n').slice(1).join(' ') } : {}),
+                  }
+                : { source: 'runtime', severity: 'info', ...shown },
+            )
             // Its lead starts afresh to run it, in the role its trust gives it, told so.
             yield* sessions.moved(copy.threadId)
             yield* sessions

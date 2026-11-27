@@ -74,7 +74,6 @@ export {
   type Verdict,
   RULES,
   type RuleId,
-  type CommandRule,
   type AllowRule,
   type ProjectRuleSet,
   sayAllowRule,
@@ -83,8 +82,8 @@ export {
   type RuleContext,
 } from './ruleContext'
 export { commandOf, commandIn, essentials, pathsOf } from './rulePaths'
-export { type Parsed, parseCommandLine, withoutQuotedHeredocs, programOf, shortCommand, readsWeb } from './shellCommands'
-export { type ReaderVerdict, ALTHAR_TOOL, OFFLINE, type ReaderOptions, decideReader } from './readerRules'
+export { parseCommandLine, withoutQuotedHeredocs, programOf, shortCommand, readsWeb } from './shellCommands'
+export { ALTHAR_TOOL, OFFLINE, decideReader } from './readerRules'
 
 /** Visible irreversible code-host actions. Unknown operations run (ADR-097). */
 const hostKinds = (words: ReadonlyArray<string>): ReadonlyArray<Kept> => {
@@ -281,6 +280,13 @@ const hostRuleOf = (text: string, rules: ProjectRuleSet['commands'], system: Sys
   })
   return met.find((rule) => rule.decision === 'never') ?? met[0]
 }
+
+/**
+ * Whether a never rule kept for this pattern refuses more than its own words: one that reads as a host meets a request
+ * for that host or any host under it, and a command naming them, however it was kept (`hostRuleOf`). An allow rule
+ * meets only its own words.
+ */
+export const refusesHostsUnder = (pattern: string): boolean => hostPatternOf(pattern) !== undefined
 
 // ---- Commands --------------------------------------------------------------
 
@@ -1004,11 +1010,19 @@ const gitReadsElsewhere = (subcommand: string, args: ReadonlyArray<string>): boo
   return false
 }
 
+/** The words that run a command as root: `sudo`, `doas` and `pkexec` before it, `su` with a command. */
+const AS_ROOT = /(?:^|[\s;&|()`$])(?:sudo|doas|pkexec)(?=\s|$)|(?:^|[\s;&|()`$])su\s+(?:\S+\s+)*-c\b/u
+
+/** What the person reads of a command run as root on a worker, why it asks: as ask cards say it (irreversible.ts). */
+export const AS_ROOT_REASON = 'Running a command as root on a worker changes it for every task and user there, so it asks you first.'
+
 const commandKinds = (text: string, context: RuleContext): ReadonlyArray<Kept> => {
   const { commands, opaque } = eachCommand(text, context)
   // What a quoted heredoc holds is text: words in it say nothing of what the command does.
   const read = withoutQuotedHeredocs(text)
   return [
+    // On a worker, as root changes the machine outside the task's worktree for good: the person says first (ADR-103).
+    ...(context.worker !== undefined && AS_ROOT.test(read) ? [kept(AS_ROOT_REASON, 'outside', 'irreversible')] : []),
     ...(opaque && /\bpush\b|\bdeploy\b|\bpublish\b|\bmerge\b/.test(read)
       ? [
           kept(

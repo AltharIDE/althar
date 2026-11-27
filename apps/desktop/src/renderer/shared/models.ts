@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react'
 import {
   type AgentModels,
   type AgentStatus,
+  type ProjectWorker,
   agentDefaultName,
   isAgentDefault,
   knownModelName,
@@ -510,12 +511,71 @@ export const upcomingOn = (session: {
   }
 }
 
-/** Puts a running thread on what the person chose: its model and effort, or another agent taking over with them. */
-export const moveTo = async (client: Client, threadId: string, current: Choice, next: Choice): Promise<void> => {
-  if (next.agentId !== current.agentId) {
+/**
+ * Puts a running thread on what the person chose: its model and effort, or another agent taking over with them. `holding` is
+ * what the thread is with, or going to with a switch already asked for: the same agent again keeps its session and moves it
+ * to the model and effort picked, never starting it afresh, even where another agent waits to take its next turn. Each pick
+ * names its agent, so the runtime never sets one agent's model on another taking the thread over meanwhile.
+ */
+export const moveTo = async (client: Client, threadId: string, current: Choice, next: Choice, holding: Choice = current): Promise<void> => {
+  const { agentId } = next
+  if (agentId !== current.agentId && agentId !== holding.agentId) {
     await client.switchAgent(startOf(threadId, next))
     return
   }
-  if (next.model !== null && next.model !== current.model) await client.setModel({ threadId, model: next.model })
-  if (next.effort !== null && next.effort !== current.effort) await client.setEffort({ threadId, effort: next.effort })
+  // Back from another agent waiting to take over: what is picked now takes its place, all of it, and where it leaves the
+  // model or effort to the agent, as the agent holds it, so the runtime still hears it is back.
+  const back = agentId !== current.agentId
+  const model = next.model ?? (back ? holding.model : null)
+  const effort = next.effort ?? (back ? holding.effort : null)
+  // An agent that tells neither is picked back as itself.
+  if (back && model === null && effort === null) await client.setAgent({ threadId, agentId })
+  if (model !== null && (back || model !== current.model)) await client.setModel({ threadId, agentId, model })
+  if (effort !== null && (back || effort !== current.effort)) await client.setEffort({ threadId, agentId, effort })
+}
+
+/** The worker a pick is for: the agents it has and has signed in, and the models each offers there, as its check found. */
+export type PickOn = Pick<ProjectWorker, 'providers' | 'signedIn' | 'readiness'>
+
+/**
+ * What a worker offers (ADR-103), from what its own check said: of the home's agents, those it has, signed in there where it
+ * says, each with the models it offers there, in its order, with what the home knows of the same model (its efforts, its
+ * description) where it knows it. An agent whose models the worker hasn't said offers only its own default, which is what
+ * a run there starts on: never the home's list, which the worker may not have.
+ */
+export const onWorker = (
+  known: ReadonlyArray<AgentModels>,
+  agents: ReadonlyArray<AgentStatus>,
+  worker: PickOn,
+): { readonly known: ReadonlyArray<AgentModels>; readonly agents: ReadonlyArray<AgentStatus> } => {
+  const there = new Map((worker.readiness?.models ?? []).map((entry) => [entry.providerId, entry.models]))
+  const offering = agents.filter((agent) => worker.providers.includes(agent.id) && (worker.signedIn?.includes(agent.id) ?? true))
+  return {
+    agents: offering,
+    known: offering.map((agent): AgentModels => {
+      const home = known.find((offered) => offered.agentId === agent.id)
+      const said = there.get(agent.id) ?? []
+      const models = said.map(
+        (model) =>
+          home?.models.find((one) => one.id === model.id) ?? {
+            id: model.id,
+            name: model.name,
+            description: null,
+            efforts: [],
+            effort: null,
+          },
+      )
+      const on = home?.model != null && said.some((model) => model.id === home.model) ? home.model : (said[0]?.id ?? null)
+      return {
+        agentId: agent.id,
+        models,
+        model: on,
+        effort: on !== null && on === home?.model ? home.effort : null,
+        defaults: home?.defaults ?? [],
+        blocked: home?.blocked ?? [],
+        probing: false,
+        images: home?.images ?? null,
+      }
+    }),
+  }
 }

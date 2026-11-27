@@ -51,6 +51,7 @@ import { type Answers, answersOf, followUpBody, followUpWords } from './followUp
 import { baseBranch, forkOf, fromParent, tellOf, workRemotes } from './forks'
 import {
   branchExists,
+  committerIn,
   commitOf,
   commitsAhead,
   fetchInto,
@@ -69,6 +70,7 @@ import { outward } from './outward'
 import { Policies, linksIssues } from './Policies'
 import { hasBranch, startCommitOf, startOf, towardIn } from './Projects'
 import { type PullRequestIssue, commitsWord, nameOf, sameDescription, withIssues } from './pullRequestWords'
+import { pushDetailOf, pushFailureOf } from './pushFailure'
 import { refreshRemotes } from './recordedRemotes'
 import { change, fact, timestamp } from './records'
 import { guardPush } from './repositoryGuard'
@@ -383,14 +385,6 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
    * change is there already is left out. The files they conflict in, with
    * nothing picked left half done, or null once all are on it.
    */
-  /** Who git writes a commit as: the person, as their own git commits, or Althar where this Mac names no one. */
-  const committerIn = (path: string) =>
-    Effect.map(gitOutcome(path, 'config', 'user.email'), (email) =>
-      email.stdout !== '' || process.env.GIT_COMMITTER_EMAIL !== undefined
-        ? []
-        : ['-c', 'user.name=Althar', '-c', 'user.email=althar@localhost'],
-    )
-
   const pickOnto = (path: string, commits: ReadonlyArray<string>) =>
     Effect.gen(function* () {
       const as = yield* committerIn(path)
@@ -604,6 +598,40 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
       return plan?.kept === 1
     })
 
+  /**
+   * A push with a connection's sign-in that the host refused: where git says the sign-in wasn't taken, or was but may not
+   * write there, said as whose sign-in it was, for which repository, so the card says what puts it right, never git's own
+   * line (kept for Details). Any other failure stands as git's.
+   */
+  const refusedWith = (taskId: string, failed: GitFailed, connectionId: string, repository: Repository, branch: string) =>
+    Effect.gen(function* () {
+      const known = pushFailureOf(failed)
+      if (known === null || (known.why !== 'forbidden' && known.why !== 'denied')) return yield* Effect.fail(failed)
+      const info = (yield* connections.list.pipe(Effect.orElseSucceed(() => []))).find((one) => one.id === connectionId)
+      // Asked again, for this repository alone: whether the host says it was the account's role or the sign-in.
+      const cause = known.why === 'forbidden' ? yield* connections.pushCause(connectionId, repository.path) : null
+      return yield* new PushRefused({
+        taskId,
+        why: known.why,
+        remote: `${repository.path.join('/')}/${branch}`,
+        // The host's own line, where it gave one: what says why, where a bare status doesn't.
+        ...(known.said === undefined ? {} : { said: known.said }),
+        ...(info === undefined ? {} : { host: info.name }),
+        detail: pushDetailOf(failed),
+        ...(info === undefined
+          ? {}
+          : {
+              signIn: {
+                account: info.account.login,
+                kind: info.auth === 'device_flow' ? ('app' as const) : ('token' as const),
+                product: info.product,
+                repository: repository.path.join('/'),
+                ...(cause === null ? {} : { cause }),
+              },
+            }),
+      })
+    })
+
   const publishOne = (
     input: PublishInput,
     given: PublishRow,
@@ -747,7 +775,9 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
         ref: task.baseRef ?? own.defaultBranch,
         head,
       })
-      yield* pushTo(task.path, pushTarget, task.branch, head)
+      yield* pushTo(task.path, pushTarget, task.branch, head).pipe(
+        Effect.catchTag('GitFailed', (failed) => refusedWith(input.taskId, failed, found.connectionId, own, task.branch)),
+      )
       yield* settle
       if (input.end === 'none') return { kind: 'pushed', branch: task.branch, left } as const
       const draft = input.end === 'draft' && host.capabilities.drafts

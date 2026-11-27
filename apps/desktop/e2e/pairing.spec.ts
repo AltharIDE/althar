@@ -96,7 +96,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
   execFileSync(process.execPath, [resolve('node_modules/vite-plus/bin/vp'), 'build', '--config', 'e2e/networkHost.config.ts'], {
     stdio: 'pipe',
   })
-  const port = await portNumber()
+  let port = await portNumber()
   const readySchema = Schema.Struct({ homeId: HomeId, hostDeviceId: ClientDeviceId, projectId: Schema.String, taskId: Schema.String })
   const start = async () => {
     let output = ''
@@ -123,7 +123,35 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
       throw error
     }
   }
-  let host = await start()
+  /**
+   * The host on `port`, which was only free when it was picked: another process on a busy machine may take it before the
+   * host listens, and a host just stopped may not have let go of it yet. The host then says its home refused to listen
+   * (ConnectionRefused). Before anything is paired, another port will do; after, the home is known by this one, so the same
+   * port is tried again.
+   */
+  const startListening = async (paired: boolean) => {
+    let started: Awaited<ReturnType<typeof start>> | undefined
+    let fatal: unknown
+    // Tried again as the budget allows, as any wait is: with no time of its own.
+    await expect(async () => {
+      try {
+        started = await start()
+      } catch (error) {
+        // Anything but the host's refusal to listen is not a port that was taken: it fails at once.
+        if (!String(error).includes('ConnectionRefused')) {
+          fatal = error
+          return
+        }
+        progress(`Native pairing: the host could not listen on ${port} (${String(error).split('\n')[0]}), trying again`)
+        if (!paired) port = await portNumber()
+        throw error
+      }
+    }).toPass()
+    if (fatal !== undefined) throw fatal
+    if (started === undefined) throw new Error('The host fixture did not start')
+    return started
+  }
+  let host = await startListening(false)
   progress('Native pairing: standalone host ready')
   const clientRoot = mkdtempSync(join(tmpdir(), 'althar-pairing-client-'))
   const clientEnvironment = {
@@ -164,7 +192,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     const invitation = Schema.decodeUnknownSync(Schema.Struct({ code: Schema.String }))(
       JSON.parse(execFileSync(process.execPath, [entry, 'pair', root], { encoding: 'utf8' })),
     )
-    await page.getByRole('button', { name: 'Homes', exact: true }).click()
+    await page.getByRole('button', { name: 'Computers', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Connect a home…', exact: true }).click()
     // A first home opens on what a home is, then how to set one up; one set up already pairs, or is checked over SSH.
     await page.getByRole('dialog', { name: 'Your first home' }).getByRole('button', { name: 'Set one up' }).click()
@@ -194,7 +222,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
           throw new Error(await page.getByRole('dialog').getByRole('alert').innerText())
         }),
     ])
-    await expect(remote.getByRole('button', { name: 'My VPS, connected. Homes', exact: true })).toBeVisible()
+    await expect(remote.getByRole('button', { name: 'My VPS, connected. Computers', exact: true })).toBeVisible()
     progress('Native pairing: paired remote window connected')
     await remote
       .getByRole('complementary', { name: 'Projects' })
@@ -220,12 +248,12 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     await remote.screenshot({ path: 'test-results/pairing-flow-03-remote.png', scale: 'css' })
     host.child.kill('SIGTERM')
     await host.closed
-    await expect(remote.getByRole('button', { name: 'My VPS, disconnected. Homes', exact: true })).toBeVisible()
+    await expect(remote.getByRole('button', { name: 'My VPS, disconnected. Computers', exact: true })).toBeVisible()
     const before = host.ready
-    host = await start()
+    host = await startListening(true)
     expect(host.ready).toEqual(before)
     await remote.getByRole('button', { name: 'Reconnect', exact: true }).click()
-    await expect(remote.getByRole('button', { name: 'My VPS, connected. Homes', exact: true })).toBeVisible()
+    await expect(remote.getByRole('button', { name: 'My VPS, connected. Computers', exact: true })).toBeVisible()
     progress('Native pairing: connected after host restart')
     await expect(remote.getByRole('heading', { name: 'remote-project', exact: true })).toBeVisible()
     const saved = await page.evaluate(async () => (await window.althar.homes!.list())[0])
@@ -234,8 +262,8 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     progress('Native pairing: desktop closed for relaunch')
     ;({ electronApp, page, child: desktopChild } = await launch(clientRoot, clientEnvironment))
     progress('Native pairing: desktop relaunched')
-    await expect(page.getByRole('button', { name: 'Homes', exact: true })).toBeVisible()
-    await page.getByRole('button', { name: 'Homes', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Computers', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Computers', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Manage homes…', exact: true }).click()
     const manage = page.getByRole('dialog', { name: 'Homes', exact: true })
     await expect(manage.getByText('My VPS', { exact: true })).toBeVisible()
@@ -261,7 +289,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     const deviceId = saved.https.deviceId
     if (deviceId === undefined) throw new Error('No saved paired device')
     execFileSync(process.execPath, [entry, 'revoke', root, deviceId])
-    await expect(remote.getByRole('button', { name: 'My VPS, disconnected. Homes', exact: true })).toBeVisible()
+    await expect(remote.getByRole('button', { name: 'My VPS, disconnected. Computers', exact: true })).toBeVisible()
     progress('Native pairing: revocation disconnected the client')
     expect(readFileSync(join(clientRoot, 'profile/homes.json'), 'utf8')).not.toContain(invitation.code)
   } finally {

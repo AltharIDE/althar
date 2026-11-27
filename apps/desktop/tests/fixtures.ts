@@ -1,5 +1,6 @@
 import { isoAfter } from '@althar/testing'
 import type {
+  HostReach,
   HostRepository,
   RepositoryOwner,
   AccountSignInState,
@@ -40,13 +41,17 @@ import type {
   ThreadSnapshot,
   Unfurl,
   WatchEvent,
+  ConnectionInfo,
+  HomeFolders,
 } from '@althar/contracts'
+import { Api, SOCKET_CALLS } from '@althar/contracts'
 import { vi } from 'vitest'
 
 import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
-import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
+import { type Client, type ProjectRulesChange, refusedHere } from '../src/renderer/data/client'
 import { withChange } from '../src/renderer/features/rules/useRules'
 import type { Host, PagesHost } from '../src/renderer/data/services'
+import type { HomeState, HomesHost } from '../src/homes'
 
 /* What the runtime would say, as plain values, and a client that says it. */
 
@@ -1102,6 +1107,14 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     openProject: vi.fn(async () => project),
     readFolder: vi.fn(async () => ({ kind: 'repository' as const, name: 'meridian', repositories: [], project: null })),
     lookElsewhere: vi.fn(async () => ({ worktrees: [], setups: [], conversations: [] })),
+    findHomeFolders: vi.fn(async () => homeFolders),
+    getMachine: vi.fn(async () => ({
+      system: 'Ubuntu 24.04.1 LTS',
+      cores: 8,
+      memory: 32 * 1024 ** 3,
+      disk: { free: 212 * 1000 ** 3, size: 512 * 1000 ** 3 },
+      git: '2.43.0',
+    })),
     bringIn: vi.fn(async () => ({ tasks: [], asides: [], setups: 0, histories: 0, failed: [] })),
     placeRepository: vi.fn(async (_grant: string, name: string) => ({
       name: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
@@ -1118,11 +1131,14 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       files: 1,
     })),
     listHostRepositories: vi.fn(async (): Promise<ReadonlyArray<HostRepository>> => []),
+    readHostReach: vi.fn(async (): Promise<HostReach> => ({ limited: null })),
     listRepositoryOwners: vi.fn(async (): Promise<ReadonlyArray<RepositoryOwner>> => [{ id: 'ada', name: 'ada', kind: 'user' as const }]),
-    cloneRepository: vi.fn(async (_grant: string, from: { readonly path: ReadonlyArray<string> } | { readonly url: string }) => {
-      const name = ('url' in from ? (from.url.split('/').at(-1) ?? 'repo') : (from.path.at(-1) ?? 'repo')).replace(/\.git$/, '')
-      return { grant: `grant_${name}`, path: `/Users/ada/code/${name}` }
-    }),
+    cloneRepository: vi.fn(
+      async (_grant: string, from: { readonly path: ReadonlyArray<string> } | { readonly url: string }, folder?: string) => {
+        const name = folder ?? ('url' in from ? (from.url.split('/').at(-1) ?? 'repo') : (from.path.at(-1) ?? 'repo')).replace(/\.git$/, '')
+        return { grant: `grant_${name}`, path: `/Users/ada/code/${name}` }
+      },
+    ),
     publishRepository: vi.fn(async (input: { readonly owner: RepositoryOwner; readonly name: string }) => ({
       remote: `${input.owner.id}/${input.name}`,
       webUrl: `https://github.com/${input.owner.id}/${input.name}`,
@@ -1152,10 +1168,16 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       lines: 3,
     })),
     listCanvases: vi.fn(async () => []),
+    listArtifactsDrawing: vi.fn(async () => []),
     getCanvas: vi.fn(async () => {
       throw new Error('No canvas')
     }),
     readCanvasText: vi.fn(async () => ({ path: 'README.md', text: '# Canvas', bytes: 8 })),
+    getArtifactsPlace: vi.fn(async () => ({ home: null, guess: null })),
+    listRepositoryFolders: vi.fn(async () => ({ folders: [], truncated: false })),
+    setArtifactsHome: vi.fn(async () => {}),
+    saveCanvas: vi.fn(async () => {}),
+    stopSavingCanvas: vi.fn(async () => {}),
     getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [], settledTotal: 0 })),
     getOlderSettled: vi.fn(async () => []),
     getHome: vi.fn(async () => home()),
@@ -1178,6 +1200,14 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       { id: 'finder', name: 'Finder' },
     ]),
     getLoad: vi.fn(async () => load),
+    getPlaces: vi.fn(async () => ({ busy: 2, configured: 4, atOnce: 4, why: null, waiting: 0 })),
+    getWorkers: vi.fn(async () => ({ enabled: false, workers: [] })),
+    removeWorker: vi.fn(async () => undefined),
+    addWorker: vi.fn(async () => {
+      throw new Error('No worker to add here.')
+    }),
+    createWorkerCode: vi.fn(async () => ({ code: 'althar-worker1.e30', expiresAt: Date.now() + 600_000 })),
+    setWorkerProjects: vi.fn(async () => undefined),
     getPlanUsage: vi.fn(async () => ({ accounts: [] })),
     dismissSignInEnding: vi.fn(async () => undefined),
     getModelRooms: vi.fn(async () => []),
@@ -1210,6 +1240,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     switchAgent: vi.fn(async () => 's2'),
     setModel: vi.fn(async () => {}),
     setEffort: vi.fn(async () => {}),
+    setAgent: vi.fn(async () => {}),
     getModels: vi.fn(async () => models),
     setDefaultEffort: vi.fn(async () => {}),
     setModelBlocked: vi.fn(async () => {}),
@@ -1292,6 +1323,18 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     rollBackSkill: vi.fn(async () => installedSkill),
     uninstallSkill: vi.fn(async () => {}),
     setAgentsAtOnce: vi.fn(async () => {}),
+    phoneAccess: vi.fn(async () => ({ origin: null, switchable: true, on: false })),
+    setPhoneAccess: vi.fn(async (on: boolean) => ({ origin: on ? 'https://studio-mac.local:6769' : null, switchable: true, on })),
+    createPairingCode: vi.fn(async () => ({
+      code: 'althar-pairing1.e30',
+      link: 'https://althar.ai/pair#1.e30',
+      tokenHash: 'a'.repeat(64),
+      expiresAt: Date.now() + 5 * 60_000,
+      left: 5 * 60_000,
+    })),
+    pairingStatus: vi.fn(async () => ({ state: 'waiting' as const, expiresAt: Date.now() + 5 * 60_000 })),
+    pairedDevices: vi.fn(async () => ({ clients: [], next: null })),
+    removePairedDevice: vi.fn(async () => {}),
     setFolderWait: vi.fn(async () => {}),
     setPlansAndReviews: vi.fn(async () => {}),
     setNewProjectDefaults: vi.fn(async () => {}),
@@ -1301,6 +1344,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     removeTaskFolder: vi.fn(async () => ({ freed: 0, failed: 0 })),
     moveInLine: vi.fn(async () => {}),
     lineOldestFirst: vi.fn(async () => {}),
+    startAnyway: vi.fn(async () => true),
     interrupt: vi.fn(async () => {}),
     tryAgain: vi.fn(async () => {}),
     compact: vi.fn(async () => {}),
@@ -1331,6 +1375,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     startPlan: vi.fn(async () => {}),
     stopWaiting: vi.fn(async () => {}),
     holdPlan: vi.fn(async () => true),
+    placePlan: vi.fn(async () => false),
     holdDraft: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
     changeTeam: vi.fn(async () => {}),
@@ -1349,6 +1394,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     answerCheckout: vi.fn(async () => {}),
     moveTask: vi.fn(async () => ({ kind: 'moved' as const })),
     dropMove: vi.fn(async () => {}),
+    moveTaskTo: vi.fn(async () => ({ kind: 'placed' as const, said: 'Moved.' })),
     workToward: vi.fn(async () => []),
     handOverHeld: vi.fn(async () => {}),
     listConnections: vi.fn(async () => connectionList),
@@ -1395,6 +1441,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     renameAccount: vi.fn(async () => {}),
     removeAccount: vi.fn(async () => {}),
+    signOutAccount: vi.fn(async () => {}),
     orderAccounts: vi.fn(async () => {}),
     findAccounts: vi.fn(async () => [{ grant: 'grant_work', name: 'work', path: '/Users/me/.codex-work', tool: 'codex-profiles' }]),
     signInAccount: vi.fn(async () => ({ line: 'codex login', opened: true })),
@@ -1625,3 +1672,92 @@ export const streamed = (
   agentId,
   text,
 })
+
+/**
+ * A window on a Linux home of its own, reached over SSH (studio): main's word for the window's home, and the
+ * connection the window has to it, with the calls a home says it may make today, which don't take workers out.
+ */
+export const onLinuxHome = (name = 'studio') => {
+  const home = { id: `remote_${'5'.repeat(32)}`, name, homeId: `home_${'6'.repeat(32)}`, ssh: { target: name } }
+  const identity = { homeId: home.homeId, actorId: `act_${'7'.repeat(32)}`, deviceId: `dev_${'8'.repeat(32)}`, role: 'socket' as const }
+  const state: HomeState = { current: { kind: 'ssh', home }, connection: 'connected', identity }
+  const off = () => () => undefined
+  const homes: HomesHost = {
+    state: vi.fn(async () => state),
+    list: vi.fn(async () => [home]),
+    overview: vi.fn(async () => ({ homes: [home], windows: { [home.homeId]: 'connected' as const }, projects: {}, opened: {} })),
+    inspect: vi.fn(async () => Promise.reject(new Error('Not in this test'))),
+    connect: vi.fn(async () => undefined),
+    save: vi.fn(async () => undefined),
+    open: vi.fn(async () => undefined),
+    openNew: vi.fn(async () => undefined),
+    rename: vi.fn(async () => undefined),
+    change: vi.fn(async () => undefined),
+    forget: vi.fn(async () => undefined),
+    restore: vi.fn(async () => undefined),
+    cancelCheck: vi.fn(async () => undefined),
+    reconnect: vi.fn(async () => undefined),
+    report: vi.fn(),
+    onState: vi.fn(off),
+    onOverview: vi.fn(off),
+    onOpen: vi.fn(off),
+    onProject: vi.fn(off),
+    onNewProject: vi.fn(off),
+  }
+  return {
+    homes,
+    connection: {
+      identity,
+      hostDeviceId: identity.deviceId,
+      apiVersion: 1,
+      appVersion: 'test',
+      position: { homeId: home.homeId, cursor: 0, checkpoint: null },
+      calls: SOCKET_CALLS,
+    },
+  }
+}
+
+/**
+ * A window's connection to a home on another computer, with the calls the
+ * home says it may make: today's, by default; none said, as a home from
+ * before it said, where `calls` is null.
+ */
+export const remoteConnection = (calls: ReadonlyArray<string> | null = SOCKET_CALLS): ConnectionInfo => {
+  const homeId = `home_${'1'.repeat(32)}`
+  return {
+    identity: { homeId, actorId: `act_${'2'.repeat(32)}`, deviceId: `dev_${'3'.repeat(32)}`, role: 'socket' },
+    hostDeviceId: `dev_${'3'.repeat(32)}`,
+    apiVersion: 1,
+    appVersion: 'fixture',
+    position: { homeId, cursor: 0, checkpoint: null },
+    ...(calls === null ? {} : { calls }),
+  }
+}
+
+/** Every call the API has, by its tag. */
+const API_TAGS: ReadonlySet<string> = new Set(Api.requests.keys())
+
+/**
+ * A fake client as a window on another computer's home has it: each call the home doesn't list for this connection is
+ * refused, as the real client refuses it (`refusedHere`), so a screen meets what that window meets.
+ */
+export const onHomeWindow = (overrides: Partial<Client> = {}, calls: ReadonlyArray<string> = SOCKET_CALLS) => {
+  const fake = fakeClient({ ...overrides, connection: remoteConnection(calls) })
+  const client = fake.client as unknown as Record<string, unknown>
+  for (const [name, method] of Object.entries(client)) {
+    const tag = `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`
+    if (typeof method !== 'function' || !API_TAGS.has(tag) || calls.includes(tag)) continue
+    client[name] = vi.fn(async () => Promise.reject(refusedHere(tag)))
+  }
+  return fake
+}
+
+/** What a home on another computer finds where its person keeps code, and where new code goes there. */
+export const homeFolders: HomeFolders = {
+  lookedIn: ['~/code'],
+  repositories: [
+    { grant: 'grant_site', name: 'site', where: '~/code/site', branch: 'main', worked: 1_700_000_000_000 },
+    { grant: 'grant_api', name: 'api', where: '~/code/api', branch: 'main', worked: 1_690_000_000_000 },
+  ],
+  place: { grant: 'grant_code', where: '~/code' },
+}

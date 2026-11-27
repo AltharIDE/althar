@@ -2,6 +2,7 @@ import {
   AcceptCard,
   Board,
   BoardColumn,
+  type BoardFolds,
   BoardLane,
   BoardList,
   CallCard,
@@ -12,6 +13,7 @@ import {
   ProjectTabs,
   SettledRow,
   TaskLaunch,
+  type TaskLaunchProps,
   type LaunchStep,
   type ModelInfo,
   TaskStatus,
@@ -70,6 +72,7 @@ export function Launch({
   from = true,
   estimate,
   narrow = false,
+  ...more
 }: {
   steps?: readonly LaunchStep[]
   wait?: number
@@ -79,7 +82,7 @@ export function Launch({
   estimate?: string
   /** Laid out for a narrow window: each step's agents under its name, the estimate shorter. */
   narrow?: boolean
-}) {
+} & Partial<Pick<TaskLaunchProps, 'drafting' | 'startsAt' | 'queued' | 'preset'>>) {
   const plan = steps ?? PLAN_432
   estimate ??= narrow ? 'About 40 min · about $2' : 'About 40 min · about $2 on your subscriptions'
   const launch = (
@@ -106,6 +109,7 @@ export function Launch({
       )}
       wait={wait}
       onStart={none}
+      {...more}
     />
   )
   return narrow ? <div className={s.narrowPlan}>{launch}</div> : launch
@@ -190,6 +194,10 @@ export interface BoardStory {
   lane: BoardLane
   card?: ReactNode
   arriving?: boolean
+  /** Not on the board yet: it is still being planned. */
+  absent?: boolean
+  /** Just put in Up next, started: it comes into the lane, what is under it making room. */
+  landing?: boolean
   /** Its card's class, in the lane it has reached. */
   className?: string
 }
@@ -204,7 +212,7 @@ export type UsageOut = 'paused' | 'moved'
  * Tally's board `beat` beats on: each running task a step further at its own pace, and staying on its last. While
  * Claude Code is `out`, the tasks on it pause, then move on, each to another lab, with Codex on a review.
  */
-export function BoardAtWork({ beat, story, out }: { beat: number; story?: BoardStory; out?: UsageOut }) {
+export function BoardAtWork({ beat, story, out, folds }: { beat: number; story?: BoardStory; out?: UsageOut; folds?: BoardFolds }) {
   // With a story, each card is keyed by its task, so it slides when one comes in above it.
   const keyed = (task: string, item: ReactNode) => (story ? <div data-move={task}>{item}</div> : item)
   const first = (lane: BoardLane) =>
@@ -218,15 +226,15 @@ export function BoardAtWork({ beat, story, out }: { beat: number; story?: BoardS
         {story.card}
       </div>
     ) : null
-  const next = story && story.lane !== BoardLane.Next ? NEXT.filter((x) => x.task !== story.task) : NEXT
+  const next = story && (story.lane !== BoardLane.Next || story.absent) ? NEXT.filter((x) => x.task !== story.task) : NEXT
   const extra = (lane: BoardLane) => (story?.lane === lane && lane !== BoardLane.Next ? 1 : 0)
   return (
-    <Board label="Tally’s work">
+    <Board label="Tally’s work" {...(folds ? { folds } : {})}>
       <BoardColumn lane={BoardLane.Next} count={next.length}>
         <BoardList>
           {next.map((x, i) =>
             story?.task === x.task ? (
-              <div key={x.task} data-story="">
+              <div key={x.task} data-story="" {...(story.landing ? { 'data-move': x.task } : {})}>
                 <NextRow {...x} place={i + 1} />
               </div>
             ) : (

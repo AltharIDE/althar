@@ -40,6 +40,23 @@ export interface HomeProject {
   readonly working: number
   /** What waits on the person there, as its board counts it; the same. */
   readonly yours: number
+  /**
+   * Where its repositories' code is, by each one's page on its code host and the host, where it has one: what a window on
+   * another home clones it from. Told by this computer's own window only, and only while it's open; never kept.
+   */
+  readonly remotes?: ReadonlyArray<HomeProjectRemote>
+}
+/**
+ * A project's repository on its code host, as Althar knows it there: the host's address and the repository's path on it
+ * (git.acme.com, PLATFORM/site), which a home connected to that host clones it by; the product, where Althar knows it; and
+ * its page (https://github.com/acme/site), which is its git address too on GitHub, GitLab and Bitbucket Cloud, but not on
+ * Bitbucket Data Center.
+ */
+export interface HomeProjectRemote {
+  readonly url: string
+  readonly product: string | null
+  readonly host: string
+  readonly path: string
 }
 /** Where a home's projects stand: read now by a connected window on it (live), or as one last read them. */
 export interface HomeProjects {
@@ -96,6 +113,16 @@ export interface HomeSetup {
 export type SetupAction = 'trust' | 'stop' | 'resume' | 'upload' | 'dismiss'
 /** Handed to a window that can't set a home up (the Flatpak: main/homes/setup.ts's canSetUp), so it doesn't offer it. */
 export const NO_SETUP_ARG = '--althar-no-home-setup'
+/**
+ * Handed to every window: this app's version, which a window on another computer's home can't read from its runtime (that
+ * says the home's own), for what the window says of the app itself (what's new, About).
+ */
+export const APP_VERSION_ARG = '--althar-version='
+/** The app's version a window was handed in `APP_VERSION_ARG`; undefined where it wasn't, or isn't one. */
+export const appVersionFromArgs = (argv: ReadonlyArray<string>): string | undefined => {
+  const value = argv.find((one) => one.startsWith(APP_VERSION_ARG))?.slice(APP_VERSION_ARG.length)
+  return value !== undefined && /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(value) ? value : undefined
+}
 
 export const isHomeSetup = (value: unknown): value is HomeSetup | null => {
   if (value === null) return true
@@ -109,7 +136,77 @@ export const isHomeSetup = (value: unknown): value is HomeSetup | null => {
   )
 }
 
+/**
+ * What updating the window's home to the newest release changes, by what the home says it runs (its `release-info`) and
+ * what the newest release's signed manifest says: `none`, the same API and data; `data`, the same API as this app but
+ * its data moves to a new format, which the home can't come back from to its old release; `api`, an API this app
+ * doesn't speak, so the window doesn't update it.
+ */
+export interface HomeUpdateCheck {
+  /** The release the home runs, and the newest published. */
+  readonly from: string
+  readonly to: string
+  readonly change: 'none' | 'data' | 'api'
+}
+
+/**
+ * A home updated from its window: the release it runs now, where it said; or, where the newest moves its data to a
+ * new format and that wasn't accepted yet, nothing done, with what it changes, to ask first.
+ */
+export type HomeUpdated =
+  | { readonly state: 'applied'; readonly version?: string }
+  | { readonly state: 'confirm'; readonly check: HomeUpdateCheck }
+
+/**
+ * The newest host release published, by its version: null where none is. The window offers a home's update by it,
+ * and the home's own updater still authenticates whatever it takes.
+ */
+export interface HostReleaseNews {
+  readonly newest: string | null
+}
+
+/**
+ * The newest host release that can't make projects from a window: #1150 brought that after it. An older home's update
+ * helps only once a release past it is out.
+ */
+export const LAST_WITHOUT_MAKING_PROJECTS = '0.1.0'
+/**
+ * The newest host release whose window can't set it up: sign its agents in or connect its code hosts from here. A home
+ * on it, or older, is offered its update for that once a release past it is out.
+ */
+export const LAST_WITHOUT_SETTING_UP = '0.2.0'
+/**
+ * The newest host release whose window can't change the home's own settings (how its tasks go, its pull requests, its
+ * presets, its agents at once, its task folders): a home on it, or older, is offered its update once a release past it is out.
+ */
+export const LAST_WITHOUT_HOME_SETTINGS = '0.2.1'
+
+const newer = (left: string, right: string) => {
+  const a = left.split('.').map(Number)
+  const b = right.split('.').map(Number)
+  for (let index = 0; index < 3; index++) if ((a[index] ?? 0) !== (b[index] ?? 0)) return (a[index] ?? 0) > (b[index] ?? 0)
+  return false
+}
+/** Whether a published release brings what the last release without it (`since`) lacked: one past it. */
+export const releaseBrings = (news: HostReleaseNews, since: string) => news.newest !== null && newer(news.newest, since)
+/** Whether a published release brings making projects from a window: one past the last without it. */
+export const releaseMakesProjects = (news: HostReleaseNews) => releaseBrings(news, LAST_WITHOUT_MAKING_PROJECTS)
+
 export interface HomesHost {
+  /**
+   * The newest host release published, as main last found it (a few minutes ago at most), or found afresh where
+   * `fresh`; fails where it couldn't be found out.
+   */
+  readonly release?: (fresh?: boolean) => Promise<HostReleaseNews>
+  /**
+   * The window's home, reached over SSH, updated by its own managed updater: answers once the new release runs, or
+   * fails with a line saying why. The window's connection drops while the home restarts. Where the newest release
+   * moves the home's data to a new format, it goes only once `accept` names that release's version; otherwise it
+   * answers `confirm`, having done nothing.
+   */
+  readonly update?: (accept?: string) => Promise<HomeUpdated>
+  /** What updating the window's home, over SSH, would change: asked before it's offered, so a data change is asked about at once. */
+  readonly updateCheck?: () => Promise<HomeUpdateCheck>
   /** A home being set up over SSH, or none; with the calls that start and steer it. */
   readonly setup?: () => Promise<HomeSetup | null>
   readonly setUp?: (target: SshHomeTarget) => Promise<void>
@@ -128,6 +225,8 @@ export interface HomesHost {
   readonly save: (checkId: string, name: string) => Promise<void>
   /** Its window, opened or brought forward; on one of its projects, where one is given. */
   readonly open: (id: string, projectId?: string) => Promise<void>
+  /** Its window, opened or brought forward, on New project. */
+  readonly openNew: (id: string) => Promise<void>
   readonly rename: (id: string, name: string) => Promise<void>
   /** A saved home's connection, from a check that found the same home there. */
   readonly change: (id: string, checkId: string) => Promise<void>
@@ -143,6 +242,8 @@ export interface HomesHost {
   readonly onOpen: (listener: () => void) => () => void
   /** A project to show, asked from another window's Manage homes: held until the window listens. */
   readonly onProject: (listener: (projectId: string) => void) => () => void
+  /** New project, asked from another window's Manage homes: held until the window listens. */
+  readonly onNewProject: (listener: () => void) => () => void
 }
 
 export const isHomeState = (value: unknown): value is HomeState => {

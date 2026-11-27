@@ -1,0 +1,237 @@
+import { describe, expect, it, vi } from 'vitest'
+
+import type { ComputerOwner, ComputerState } from '@althar/runtime/computerBridge'
+
+import { computerSessions } from '../src/main/computer/sessions'
+import { testComputerWorker } from '../src/main/computer/testNative'
+import type { ComputerWorker } from '../src/main/computer/worker'
+
+const TASK = `task_${'a'.repeat(32)}`
+const OWNER: ComputerOwner = { taskId: TASK, sessionId: 'lead', turnId: 'turn', threadId: 'thread', title: 'Verify computer access' }
+const signal = () => new AbortController().signal
+
+const setup = (
+  worker: () => ComputerWorker = testComputerWorker,
+  canShareDisplay = () => true,
+  grants?: () => { readonly screen: boolean; readonly access: boolean },
+) => {
+  const states: Array<ComputerState> = []
+  const sessions = computerSessions({
+    worker,
+    changed: (state) => states.push(state),
+    canAsk: () => true,
+    canShareDisplay,
+    available: () => true,
+    ...(grants === undefined ? {} : { grants }),
+  })
+  const ask = async (owner = OWNER) => {
+    const approval = sessions.call(owner, { op: 'request', reason: 'Use Writer and Reader' }, signal())
+    await vi.waitFor(() => expect(states.findLast((one) => one.taskId === owner.taskId)?.request).toBeDefined())
+    const request = states.findLast((one) => one.taskId === owner.taskId)!.request!
+    return { approval, request }
+  }
+  /** Asked and allowed: the windows it may use, by their apps. */
+  const allowed = async (owner = OWNER) => {
+    const { approval, request } = await ask(owner)
+    expect(sessions.allow(owner.taskId, { requestId: request.id, allow: true })).toBe(true)
+    const done = await approval
+    if (!('value' in done)) throw new Error(done.error)
+    const granted = JSON.parse(done.value.text) as { readonly windows: ReadonlyArray<{ readonly id: string; readonly app: string }> }
+    return Object.fromEntries(granted.windows.map((one) => [one.app, one.id]))
+  }
+  return { sessions, states, ask, allowed }
+}
+
+describe('desktop access for a task', () => {
+  it('lets one answer take in every window, foreground input and the display, for that turn only', async () => {
+    const { sessions, ask } = setup()
+    const { approval, request } = await ask()
+    expect(request.primaryDisplay).toBe(true)
+    expect(sessions.allow(TASK, { requestId: 'stale', allow: true })).toBe(false)
+    expect(sessions.allow(TASK, { requestId: request.id, allow: true })).toBe(true)
+    const done = await approval
+    expect(done).toMatchObject({ value: { text: expect.stringContaining('"desktop":"desktop","foreground":true') } })
+    const { windows } = JSON.parse('value' in done ? done.value.text : '{}') as { windows: Array<{ id: string; app: string }> }
+    expect(windows.map((one) => one.app)).toEqual(['Writer', 'Reader'])
+    for (const one of windows) expect(await sessions.call(OWNER, { op: 'observe', target: one.id }, signal())).toHaveProperty('value')
+    expect(await sessions.call(OWNER, { op: 'observe', target: 'desktop' }, signal())).toHaveProperty('value')
+    expect(await sessions.call({ ...OWNER, turnId: 'next' }, { op: 'observe', target: windows[0]!.id }, signal())).toHaveProperty('error')
+  })
+
+  it('keeps foreground input where the display itself cannot be shared', async () => {
+    const { sessions, ask } = setup(testComputerWorker, () => false)
+    const { request, approval } = await ask()
+    expect(request.primaryDisplay).toBe(false)
+    sessions.allow(TASK, { requestId: request.id, allow: true })
+    expect(await approval).toMatchObject({ value: { text: expect.stringContaining('"desktop":null,"foreground":true') } })
+    expect(await sessions.call(OWNER, { op: 'observe', target: 'desktop' }, signal())).toMatchObject({
+      error: expect.stringContaining('can’t be shared on this computer'),
+    })
+    sessions.stop(TASK)
+  })
+
+  it('opens any installed app by its name, bundle id, path or id, as a person would, and gives back its window to use', async () => {
+    const { sessions: mine, allowed } = setup()
+    expect(await mine.call(OWNER, { op: 'launch', app: 'Planner' }, signal())).toMatchObject({
+      error: expect.stringContaining('Request access first'),
+    })
+    await allowed()
+    const opened = await mine.call(OWNER, { op: 'launch', app: 'planner' }, signal())
+    if (!('value' in opened)) throw new Error(opened.error)
+    expect(opened.value.text).toMatch(/^Opened Planner\. Its windows: /)
+    const [window] = JSON.parse(opened.value.text.match(/Its windows: (\[.*\])\./)![1]!) as Array<{ id: string; title: string }>
+    expect(window).toMatchObject({ title: 'Today' })
+    expect(await mine.call(OWNER, { op: 'observe', target: window!.id }, signal())).toHaveProperty('value')
+    // Named again any way, it is the same app, and its window keeps its id.
+    for (const app of ['com.example.planner', '/Applications/Planner.app', 'Planner.app'])
+      expect(await mine.call(OWNER, { op: 'launch', app }, signal())).toMatchObject({
+        value: { text: expect.stringContaining(window!.id) },
+      })
+    const status = await mine.call(OWNER, { op: 'status' }, signal())
+    const { apps } = JSON.parse('value' in status ? status.value.text : '{}') as { apps: Array<{ id: string; app: string }> }
+    expect(await mine.call(OWNER, { op: 'launch', app: apps[0]!.id }, signal())).toMatchObject({
+      value: { text: expect.stringContaining(window!.id) },
+    })
+    mine.stopAll('Done.')
+  })
+
+  it('says what was wrong with a launch or a target, so the task can correct it', async () => {
+    const { sessions, states, allowed } = setup()
+    const windows = await allowed()
+    const status = await sessions.call(OWNER, { op: 'status' }, signal())
+    const { apps } = JSON.parse('value' in status ? status.value.text : '{}') as { apps: Array<{ id: string; app: string }> }
+    expect(await sessions.call(OWNER, { op: 'launch', app: 'Plan' }, signal())).toEqual({
+      error: 'Plan didn’t open (app_not_found). Installed apps with a name like it: Planner.',
+    })
+    // The card doesn't keep saying it is opening an app that didn't open.
+    expect(states.at(-1)?.action).toBe('Waiting for the task’s next action.')
+    expect(await sessions.call(OWNER, { op: 'launch', app: 'Planer' }, signal())).toEqual({
+      error: 'Planer didn’t open (app_not_found). Installed apps with a name like it: Planner.',
+    })
+    expect(await sessions.call(OWNER, { op: 'launch', app: windows.Writer! }, signal())).toEqual({
+      error: `${windows.Writer} is a window’s id: observe it rather than launch it.`,
+    })
+    const unknown = 'd4444444-4444-4444-8444-444444444444'
+    expect(await sessions.call(OWNER, { op: 'launch', app: unknown }, signal())).toMatchObject({
+      error: expect.stringContaining(`No app has the id ${unknown} in this turn. Give the app’s name instead`),
+    })
+    expect(await sessions.call(OWNER, { op: 'observe', target: apps[0]!.id }, signal())).toMatchObject({
+      error: expect.stringContaining('is an app’s id, not a window’s: launch it'),
+    })
+    expect(await sessions.call(OWNER, { op: 'observe', target: unknown }, signal())).toMatchObject({
+      error: expect.stringContaining(`No window has the id ${unknown} in this turn.`),
+    })
+    sessions.stopAll('Done.')
+  })
+
+  it('says which of the system’s grants Althar lacks, rather than finding every window nameless and empty', async () => {
+    let grants = { screen: false, access: true }
+    const { sessions, states, allowed } = setup(
+      testComputerWorker,
+      () => true,
+      () => grants,
+    )
+    expect(await sessions.call(OWNER, { op: 'request', reason: 'Read Planner' }, signal())).toEqual({
+      error:
+        'macOS hasn’t let Althar see or use other apps: Screen Recording is off for Althar in System Settings › Privacy & Security. Tell the person: they switch it on once, then reopen Althar, and you can request again.',
+    })
+    grants = { screen: false, access: false }
+    expect(await sessions.call(OWNER, { op: 'request', reason: 'Read Planner' }, signal())).toMatchObject({
+      error: expect.stringContaining('Screen Recording and Accessibility are off for Althar'),
+    })
+    // Nothing was asked of the person.
+    expect(states.filter((one) => one.request !== undefined)).toHaveLength(0)
+    grants = { screen: true, access: true }
+    expect(await allowed()).toHaveProperty('Writer')
+    sessions.stopAll('Done.')
+  })
+
+  it('ends the session when the person declines', async () => {
+    const { sessions, states, ask } = setup()
+    const { approval, request } = await ask()
+    expect(sessions.allow(TASK, { requestId: request.id, allow: false })).toBe(true)
+    expect(await approval).toEqual({ error: 'The person declined computer access.' })
+    expect(states.at(-1)).toMatchObject({ phase: 'stopped', action: 'Computer access declined.' })
+  })
+
+  it('asks once a turn, keeping the ids it gave', async () => {
+    const { sessions, states, allowed } = setup()
+    const first = await allowed()
+    const asked = states.filter((one) => one.request !== undefined).length
+    const again = await sessions.call(OWNER, { op: 'request', reason: 'Find Reader again' }, signal())
+    expect(states.filter((one) => one.request !== undefined)).toHaveLength(asked)
+    expect(again).toMatchObject({ value: { text: expect.stringContaining(first.Reader!) } })
+  })
+
+  it('leaves an app another task is using to it until that turn ends', async () => {
+    const { sessions, allowed } = setup()
+    const mine = await allowed()
+    expect(await sessions.call(OWNER, { op: 'observe', target: mine.Writer! }, signal())).toHaveProperty('value')
+    const other = { ...OWNER, taskId: `task_${'b'.repeat(32)}` }
+    const theirs = await allowed(other)
+    expect(await sessions.call(other, { op: 'observe', target: theirs.Writer! }, signal())).toEqual({
+      error: 'Another task is using Writer. Wait for its turn to end.',
+    })
+    expect(await sessions.call(other, { op: 'observe', target: theirs.Reader! }, signal())).toHaveProperty('value')
+    sessions.ended(OWNER)
+    // Once its helper has stopped.
+    await vi.waitFor(async () =>
+      expect(await sessions.call(other, { op: 'observe', target: theirs.Writer! }, signal())).toHaveProperty('value'),
+    )
+    sessions.stopAll('Done.')
+  })
+
+  it('keeps another task’s input to the whole display off an app it holds, and its apps off one that used the display', async () => {
+    const { sessions, allowed } = setup()
+    const mine = await allowed()
+    expect(await sessions.call(OWNER, { op: 'observe', target: mine.Writer! }, signal())).toHaveProperty('value')
+    const other = { ...OWNER, taskId: `task_${'b'.repeat(32)}` }
+    await allowed(other)
+    const click = { op: 'click' as const, target: 'desktop', observation: 'obs', at: { x: 40, y: 40 } }
+    // It may look at the display, but not reach into Writer through it.
+    expect(await sessions.call(other, { op: 'observe', target: 'desktop' }, signal())).toHaveProperty('value')
+    expect(await sessions.call(other, click, signal())).toEqual({ error: 'Another task is using Writer. Wait for its turn to end.' })
+    sessions.ended(OWNER)
+    await vi.waitFor(async () => expect(await sessions.call(other, click, signal())).toHaveProperty('value'))
+    // Having sent input to the whole display, it holds every app until its turn ends.
+    const next = { ...OWNER, turnId: 'next' }
+    const again = await allowed(next)
+    const refused = { error: 'Another task is using the primary display. Wait for its turn to end.' }
+    expect(await sessions.call(next, { op: 'observe', target: again.Reader! }, signal())).toEqual(refused)
+    expect(await sessions.call(next, { ...click, target: again.Reader! }, signal())).toEqual(refused)
+    expect(await sessions.call(next, click, signal())).toEqual(refused)
+    sessions.ended(other)
+    await vi.waitFor(async () =>
+      expect(await sessions.call(next, { op: 'observe', target: again.Reader! }, signal())).toHaveProperty('value'),
+    )
+    sessions.stopAll('Done.')
+  })
+
+  it('stops a pending native call, then refuses input after taking over and stopping', async () => {
+    const stopped = vi.fn(() => Promise.resolve())
+    let finish: (() => void) | undefined
+    const { sessions, allowed } = setup(() => {
+      const fallback = testComputerWorker()
+      return {
+        run: (call) =>
+          call.op === 'act'
+            ? new Promise((resolve) => {
+                finish = () => resolve({ kind: 'acted', answer: { text: 'Late answer' } })
+              })
+            : fallback.run(call),
+        stop: stopped,
+      }
+    })
+    const target = (await allowed()).Writer!
+    const press = { op: 'click' as const, target, observation: 'obs', at: { element: 'e1' } }
+    const action = sessions.call(OWNER, press, signal())
+    expect(sessions.pause(TASK)).toBe(true)
+    expect(stopped).toHaveBeenCalledOnce()
+    expect(await sessions.call(OWNER, press, signal())).toMatchObject({ error: expect.stringContaining('has control') })
+    finish?.()
+    expect(await action).toHaveProperty('error')
+    expect(sessions.resume(TASK)).toBe(true)
+    expect(sessions.stop(TASK)).toBe(true)
+    expect(await sessions.call(OWNER, press, signal())).toMatchObject({ error: expect.stringContaining('first') })
+  })
+})

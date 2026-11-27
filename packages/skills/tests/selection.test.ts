@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -82,5 +82,31 @@ describe('the Agent Skills layout', () => {
     expect(result.directory).toBe(join(root, 'runs', 'r1', 'codex'))
     expect(await readFile(join(result.directory, '.agents', 'skills', 'alpha', 'SKILL.md'), 'utf8')).toContain('name: alpha')
     expect(result.projected).toEqual(['alpha'])
+  })
+
+  it('keeps scripts runnable and ordinary reference files read-only in the projected skill', async () => {
+    await install(root, 'alpha', {
+      ...good('alpha'),
+      'scripts/verify': 'Check the fixture',
+      'references/example.md': 'Example input',
+    })
+    const result = await run(
+      projectRun({
+        root,
+        runId: 'r1',
+        agent: 'codex',
+        selected: await run(activeSelection(root)),
+        capabilities: [],
+        keepOutOf: [],
+        layout: 'agents',
+      }),
+    )
+    const skill = join(result.directory, '.agents', 'skills', 'alpha')
+    const script = join(skill, 'scripts', 'verify')
+    const reference = join(skill, 'references', 'example.md')
+    expect(await readFile(script, 'utf8')).toBe('Check the fixture')
+    expect(await readFile(reference, 'utf8')).toBe('Example input')
+    expect((await stat(script)).mode & 0o700).toBe(process.platform === 'win32' ? 0o400 : 0o500)
+    expect((await stat(reference)).mode & 0o700).toBe(0o400)
   })
 })

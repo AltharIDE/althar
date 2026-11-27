@@ -21,8 +21,8 @@ The app shares its profile and worktrees with the command-line client (`apps/cli
 | `ALTHAR_FAKE_AGENTS=1` | Off. Runs the scripted fake agent under Claude Code's and Codex's names, and a fake GitHub at `https://github.test`, keeping tokens in memory rather than the Keychain, for the end-to-end tests. Packaged builds leave it out |
 | `ALTHAR_FAKE_REMOTE` | None. With the fakes, the bare repository that pushes to the fake GitHub land in |
 | `ALTHAR_FAIL_MIGRATION=1` | Off. Adds a migration that always fails, so the window shows what an update that couldn't move the data looks like. Run the app on a profile once without it first, so there is data to copy. Packaged builds leave it out |
-| `ALTHAR_GITHUB_CLIENT_ID`, `ALTHAR_GITLAB_CLIENT_ID`, `ALTHAR_LINEAR_CLIENT_ID` | None. The public ids of Althar's apps on those services, for signing in through the browser; without one, the service takes a pasted token |
-| `ALTHAR_COPILOT_CLIENT_ID` | Optional override for Althar's bundled public OAuth app ID, `Ov23liI3MfkqFXCKYuNh`. Falls back to `ALTHAR_GITHUB_CLIENT_ID`, then the bundled ID. The build reads overrides from the environment or `apps/desktop/.env`; the release workflow takes the repository variable of the same name. A runtime environment value overrides the build. A replacement app must have device flow enabled. No client secret is used, and people using the packaged app configure nothing. Enterprise-host app IDs can be supplied by runtime embedders through `copilotEnterpriseClientIds` |
+| `ALTHAR_GITHUB_CLIENT_ID`, `ALTHAR_GITHUB_APP`, `ALTHAR_GITLAB_CLIENT_ID`, `ALTHAR_LINEAR_CLIENT_ID` | What the build was given, else none. The public ids of Althar's own apps on those services, for signing in through the browser (GitHub's App's client id and its slug, for its install page; GitLab's application; Linear's OAuth app). Without one, the service offers gh's or glab's sign-in and a pasted token. The build reads them from the environment or `apps/desktop/.env`; the release workflow takes the repository variables of the same names. None is a secret. Set at run time, each wins |
+| `ALTHAR_COPILOT_CLIENT_ID` | Optional override for Althar's bundled public OAuth app ID for Copilot, `Ov23liI3MfkqFXCKYuNh`. Never the GitHub App's: Copilot takes an OAuth app's token. The build reads an override from the environment or `apps/desktop/.env`; the release workflow takes the repository variable of the same name. A runtime environment value overrides the build. A replacement app must have device flow enabled. No client secret is used, and people using the packaged app configure nothing. Enterprise-host app IDs can be supplied by runtime embedders through `copilotEnterpriseClientIds` |
 | `DO_NOT_TRACK=1` | Off. Keeps usage data and crash reports off, whatever their switches in Settings say |
 | `ALTHAR_POSTHOG_KEY`, `ALTHAR_POSTHOG_HOST` | None. The PostHog project usage data and crash reports go to, read by `bun run package` and `bun run release` only (also from `apps/desktop/.env`, see `.env.example`); every other build sends nothing. The release workflow takes them from the repository's variables of the same names |
 | `ALTHAR_REPORT_URL` | What the build was given, else none. Where Report a problem posts: the reports Worker (`apps/report`), its address alone posting to `/reports`; `https:`, or a local `http:` for `wrangler dev`. Without one, a report is saved in Downloads as a zip and a message opens in the mail app. Set it when building (`ALTHAR_REPORT_URL=… bun run build:package`) to bake it in; the release workflow takes it from the repository's `ALTHAR_REPORT_URL` variable. Set at run time, it wins |
@@ -53,6 +53,12 @@ On a Mac, the end-to-end tests run quietly, so you can keep working while they r
 
 ```bash
 ALTHAR_E2E_FOREGROUND=1 bun run test:e2e
+```
+
+On Linux, the end-to-end tests never open anything on your desktop: each run gets a display of its own that no one sees (`scripts/display.ts`). Where Xvfb is installed (Fedora `xorg-x11-server-Xvfb`, Debian and Ubuntu `xvfb`, Arch `xorg-server-xvfb`), the run starts it on a free display number, with a cookie only the run has, as `xvfb-run` does, and stops it when it ends. Where it isn't, or won't start, the app runs on Chromium's headless platform (`--ozone-platform=headless`, on a 1280 × 1024 screen), which needs nothing installed, still draws the window for screenshots, and puts no icon in a tray. Either way the run is off your session bus too, on a bare one of its own where `dbus-run-session` is installed, so no tray icon or notification reaches your desktop. CI's workflows, which run the tests under `xvfb-run` themselves, keep that display with `ALTHAR_E2E_DISPLAY=inherit`. `ALTHAR_E2E_DISPLAY` chooses: `xvfb` or `headless` for one of them, or `inherit` to run on the display and bus the shell has, to watch a run on your own desktop:
+
+```bash
+ALTHAR_E2E_DISPLAY=inherit bun run test:e2e e2e/home.spec.ts
 ```
 
 ### On Linux
@@ -97,6 +103,40 @@ first time: "Windows protected your PC". Choose **More info**, then **Run
 anyway**. Where the browser holds the download back too, keep it (Edge: …
 → Keep, then Keep anyway). Signing has its slot: `WINDOWS_SIGNING` in
 `scripts/package.ts`, and the skipped Sign step in `release.yml`.
+
+### Computer use
+
+A task can ask to use native apps on the computer running this desktop app.
+It asks once a turn, in the task's conversation, saying why. **Allow for
+this turn** lets it use any app or window, type and click in the
+foreground, and see the primary display, until the turn ends; a later
+request in the same turn finds what opened since without asking again.
+An app one task uses stays with it until its turn ends, so two tasks never
+drive the same app. Input to the whole display can reach any app, so it
+waits while another task holds one, and once sent, it keeps every app for
+that task until its turn ends. The task can show the window it observed,
+and keep screenshots in its conversation and step evidence.
+
+Use **Take over** to pause computer input and **Resume** to return it to
+the task. **Stop** ends that turn's computer session. The desktop shortcut
+is Command-Shift-Escape on a Mac and Ctrl-Shift-Escape elsewhere, where
+the desktop lets the app register it. Seeing the display can expose other
+open apps to the task's model.
+On Linux, seeing the primary display requires a single connected display;
+apps and windows work across connected displays.
+
+Use a signed-in graphical session. On macOS the system may require
+Accessibility and Screen Recording access. On Linux, accessibility and
+capture depend on the desktop session and, on Wayland, the compositor.
+Native input and capture are supplied by the bundled Cua Driver SDK.
+
+The normal desktop end-to-end spec uses a stand-in driver. To exercise
+native input on a test desktop with the required OS permissions, run the
+same spec with `ALTHAR_TEST_NATIVE_COMPUTER=portable`. It launches two
+fixture apps, exports a note from one, opens it in the other, and checks
+the saved file and the screenshot through Althar. Set
+`ALTHAR_E2E_FOREGROUND=1` on macOS as well. GitHub Actions runs the native
+spec on a dedicated X11 display and a Windows runner.
 
 ### The Flatpak
 
@@ -181,7 +221,7 @@ With `gh`, each is one command, for example `base64 -i cert.p12 | gh secret set 
 2. Create a fine-grained personal access token whose resource owner is `AltharIDE`, with access to that one repository and the permission Contents: read and write, and nothing else.
 3. Add it as the secret `HOMEBREW_TAP_TOKEN` in the `release` environment (`gh secret set HOMEBREW_TAP_TOKEN --env release --repo AltharIDE/althar`), beside the others above. Fine-grained tokens expire: note the date, and replace the secret before it.
 
-When a release is published (not when it is drafted), the workflow waits for the `release` environment's reviewer, downloads that release's `Althar-<version>-arm64.dmg` and `Althar-<version>-x64.dmg`, takes each one's sha256 (it must agree with GitHub's own digest of the file), fills the cask in and pushes `Casks/althar.rb` to the tap. It skips prereleases and any release that isn't the latest. Run again for the same version it changes nothing. It creates and publishes no release.
+When a release is published (not when it is drafted), the workflow waits for the `release` environment's reviewer, downloads that release's `Althar-<version>-arm64.dmg` and `Althar-<version>-x64.dmg`, takes each one's sha256 (it must agree with GitHub's own digest of the file), fills the cask in and pushes `Casks/althar.rb` to the tap. It skips prereleases and any release that isn't the latest, and its job is skipped altogether for a release whose tag doesn't start with `v`, such as the host's (`host-v0.2.1`). Run again for the same version it changes nothing. It creates and publishes no release.
 
 A release event runs the workflow as it is on the release's tag, so a release made before the workflow existed, or a missed one, is done by hand: Actions → homebrew-tap → Run workflow, on `main`, with the tag (`gh workflow run homebrew-tap.yml --ref main -f tag=v0.5.0`). The `release` environment's deployment rules must allow `main` for that, as for a release run by hand.
 

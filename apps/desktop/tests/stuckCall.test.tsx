@@ -160,6 +160,27 @@ describe('the pull request Althar couldn’t open', () => {
     expect(await screen.findByText('Went on without it')).toBeTruthy()
   })
 
+  it('says whose sign-in the host refused and what to do, with the code hosts first and Try again beside', async () => {
+    const detail =
+      'GitHub refused sam’s token for AltharIDE/althar: it can read the repository but not push to it. Give the token write access to AltharIDE/althar (a fine-grained token’s Contents: Read and write, made for AltharIDE), or connect GitHub with one that can push there, then try again.'
+    const step = stuck({ step: 'publish', why: 'push_refused', agentId: null, detail })
+    const onAnswer = vi.fn()
+    const onConnect = vi.fn()
+    withServices(
+      <StuckCall request={request(step)} stuck={step} agents={agents} agentName={() => ''} onAnswer={onAnswer} onConnect={onConnect} />,
+      fakeClient().client,
+    )
+    expect(await screen.findByText(`Couldn't open the pull request. ${detail}`)).toBeTruthy()
+    expect(screen.queryByText(/git push|unable to access/)).toBeNull()
+    // Changing the sign-in comes first: trying again before can't help.
+    const names = screen.getAllByRole('button').map((button) => button.textContent)
+    expect(names.indexOf('Open code hosts')).toBeLessThan(names.indexOf('Try again'))
+    await userEvent.click(screen.getByRole('button', { name: 'Open code hosts' }))
+    expect(onConnect).toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'althar' })
+  })
+
   it('says what went wrong opening it, in the host’s words where it gave some', () => {
     expect(stuckWords.publishing(stuck({ step: 'publish', why: 'failed_to_start', detail: 'The branch is protected.' }))).toBe(
       "Couldn't open the pull request. The branch is protected.",

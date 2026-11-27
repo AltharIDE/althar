@@ -339,6 +339,27 @@ describe('the wait for a reply', () => {
     expect(kinds(blocksOf({ ...source(sent), reading: true, turnEnded: later }, new Map(), at))).toEqual(['you', 'turn', 'you', 'waiting'])
   })
 
+  it('lets go of the wait once the person stopped the turn on what was asked, whatever session starts next', () => {
+    const stop = items.notice({ source: 'runtime', role: 'interrupted', title: 'Interrupted by you.' }, null)
+    const thread = [items.you('Go'), items.says('Done.'), items.you('.'), stop]
+    // A new session starting, which knows of no turn ended: what was stopped isn't waited on, however long ago.
+    expect(kinds(blocksOf({ ...source(thread), reading: true, turnEnded: null }, new Map(), at, after(62_000)))).toEqual([
+      'you',
+      'turn',
+      'you',
+      'interrupted',
+    ])
+    // Asked again since, the new ask is waited on.
+    expect(kinds(blocksOf({ ...source([...thread, items.you('Again')]), reading: true }, new Map(), at))).toEqual([
+      'you',
+      'turn',
+      'you',
+      'interrupted',
+      'you',
+      'waiting',
+    ])
+  })
+
   it('has what waits after the last reply asked as the agent starts to read it, and queued where nothing will', () => {
     const thread = [items.you('Go'), items.says('Done.'), items.you('And the docs?', { state: 'queued', interrupting: false })]
     const shown = (reading: boolean) => blocksOf({ ...source(thread), reading }, new Map(), at)
@@ -759,5 +780,119 @@ describe('repeated host news in a thread', () => {
 
   it('never folds what people said', () => {
     expect(kinds(build([items.arrival({ text: 'a' }), items.arrival({ text: 'a' })]))).toEqual(['comment×1', 'comment×1'])
+  })
+})
+
+describe('merges on their way, at the thread’s foot', () => {
+  const PULL = 'https://github.com/meridian/api/pull/'
+  const moving = (state: 'checks' | 'merged' = 'checks') =>
+    items.mergeLine({ rows: [{ number: 1224, title: 'Plan card offers Runs on', url: `${PULL}1224`, state }] })
+  const kept = (id: string, label: string, url: string | null, quiet = true) =>
+    items.notice(
+      {
+        title: `Kept your errand: merge ${label}`,
+        source: 'runtime',
+        errand: { id, quiet, merges: [{ label, url, task: url === null ? `task_${id}` : null, once: 'once its checks pass' }] },
+      },
+      null,
+    )
+  const tool = (title: string) => items.tool({ title, toolKind: 'other', status: 'completed' })
+
+  it('folds a merge errand’s lines, so the turn that kept them reads as one, and holds a moving card at the foot', () => {
+    const thread = [
+      items.you('see everything thru to main'),
+      items.says('Queuing #1224.'),
+      kept('e1', '#1224', `${PULL}1224`),
+      tool('keep_errand'),
+      moving(),
+      kept('e2', 'Keep for later', null),
+    ]
+    const blocks = blocksOf(source(thread), new Map(), at)
+    // No line across the thread, and no second turn of the coordinator's with nothing but a call in it.
+    expect(blocks.map((block) => block.kind)).toEqual(['you', 'turn', 'merging'])
+    const foot = blocks.at(-1)
+    expect(foot).toMatchObject({ kind: 'merging', groups: [{ branch: null }] })
+    if (foot?.kind !== 'merging') throw new Error('no foot')
+    // The card's pull request once, and the merge kept for one with no pull request yet, by its task, waiting.
+    expect(foot.groups[0]?.rows.map((row) => [row.label, row.state, row.once])).toEqual([
+      ['#1224', 'checks', undefined],
+      ['Keep for later', 'waiting', 'once its checks pass'],
+    ])
+  })
+
+  it('stays the foot under what was said since, and under a reply on its way', () => {
+    const thread = [items.says('Queuing #1224.'), moving(), items.you('anything else?'), items.says('Nothing else.')]
+    expect(blocksOf(source(thread), new Map(), at).map((block) => block.kind)).toEqual(['turn', 'you', 'turn', 'merging'])
+    const asking = [...thread, items.you('and now?')]
+    expect(
+      blocksOf(source(asking, true), new Map(), at)
+        .map((block) => block.kind)
+        .slice(-2),
+    ).toEqual(['waiting', 'merging'])
+  })
+
+  it('stands folded where it was asked once all are in, with no foot', () => {
+    const thread = [items.says('Queuing #1224.'), moving('merged'), items.says('All in.')]
+    expect(blocksOf(source(thread), new Map(), at).map((block) => block.kind)).toEqual(['turn', 'merge_line', 'turn'])
+  })
+
+  it('goes by each errand’s newest line: a merge with nothing left is off the foot, and one that needs the person stays a line', () => {
+    const done = items.notice(
+      { title: 'Merged #1300. Errand done', source: 'runtime', errand: { id: 'e1', quiet: true, merges: [] } },
+      null,
+    )
+    const held = items.notice(
+      {
+        title: 'Errand on hold: merge #1301 — its checks failed. Say go ahead to continue.',
+        source: 'runtime',
+        errand: { id: 'e2', quiet: false, merges: [{ label: '#1301', url: `${PULL}1301`, task: null, once: '' }] },
+      },
+      null,
+    )
+    const blocks = blocksOf(source([kept('e1', '#1300', `${PULL}1300`), done, held]), new Map(), at)
+    expect(blocks.map((block) => block.kind)).toEqual(['divider', 'merging'])
+    const foot = blocks.at(-1)
+    if (foot?.kind !== 'merging') throw new Error('no foot')
+    expect(foot.groups[0]?.rows.map((row) => row.label)).toEqual(['#1301'])
+  })
+
+  it('tells pull requests apart by their address, and merges kept for tasks by their task, not by the name they show', () => {
+    const elsewhere = 'https://github.com/meridian/web/pull/1224'
+    const keptFor = (id: string, label: string, url: string | null, task: string | null) =>
+      items.notice(
+        {
+          title: `Kept your errand: merge ${label}`,
+          source: 'runtime',
+          errand: { id, quiet: true, merges: [{ label, url, task, once: '' }] },
+        },
+        null,
+      )
+    const thread = [
+      // #1224 of one repository is in; #1224 of another is only kept.
+      moving('merged'),
+      keptFor('e1', '#1224', elsewhere, null),
+      // Two tasks that happen to show the same name.
+      keptFor('e2', 'Readiness', null, 'task_a'),
+      keptFor('e3', 'Readiness', null, 'task_b'),
+      // The same task's merge kept twice is one.
+      keptFor('e4', 'Readiness', null, 'task_b'),
+    ]
+    const foot = blocksOf(source(thread), new Map(), at).at(-1)
+    if (foot?.kind !== 'merging') throw new Error('no foot')
+    expect(foot.groups[0]?.rows.map((row) => [row.label, row.url])).toEqual([
+      ['#1224', elsewhere],
+      ['Readiness', null],
+      ['Readiness', null],
+    ])
+  })
+
+  it('has no foot for a card left with nothing on it, as once its last one was called off', () => {
+    const blocks = blocksOf(source([items.says('Queuing #1224.'), items.mergeLine({ rows: [] })]), new Map(), at)
+    expect(blocks.some((block) => block.kind === 'merging')).toBe(false)
+  })
+
+  it('leaves a line of Althar’s own that isn’t a merge errand’s as it was', () => {
+    const blocks = blocksOf(source([items.notice({ title: 'Switched to Codex', source: 'runtime' }, null)]), new Map(), at)
+    expect(blocks.map((block) => block.kind)).toEqual(['divider'])
   })
 })

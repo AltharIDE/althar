@@ -8,8 +8,10 @@ import {
   heldNote,
   keptNote,
   labelOf,
+  mergesLeft,
   plainReason,
   resumedNote,
+  settledNote,
   stepNote,
   stillNote,
   unwatched,
@@ -34,6 +36,16 @@ describe('an errand step leaves one short line', () => {
     const note = stepNote('request_pull_request_reviewers', PR, { reviewers: ['balazsotakomaiya'], teams: [] }, hostAnswer())
     assert.strictEqual(note.title, 'Asked balazsotakomaiya to review #698')
     assert.deepStrictEqual(note.links, [{ label: '#698', url: PR }])
+  })
+
+  it('says why the host refused it from the first of its errors, as GitLab and Bitbucket give them', () => {
+    const refused = (body: unknown) => stepNote('request_pull_request_reviewers', PR, { reviewers: ['x'] }, hostAnswer(422, body)).title
+    assert.include(refused({ errors: ['Reviewer is not a member'] }), 'failed: Reviewer is not a member (HTTP 422)')
+    assert.include(refused({ errors: [{ message: 'x is not a collaborator' }] }), 'failed: x is not a collaborator (HTTP 422)')
+    // Errors it can't read say only that the host refused it.
+    assert.include(refused({ errors: [{ code: 'invalid' }] }), 'failed: the host refused it (HTTP 422)')
+    assert.include(refused({ errors: [7] }), 'failed: the host refused it (HTTP 422)')
+    assert.include(refused({ errors: 'not a list' }), 'failed: the host refused it (HTTP 422)')
   })
 
   it('names several reviewers and says how many more', () => {
@@ -308,5 +320,72 @@ describe('an errand on hold, called off, resumed or failed reads in plain words'
       'Errand on hold: merge the 0.9.0 pull request — #958 went back to a draft after you asked. Say go ahead to continue.',
     )
     assert.match(stillNote(true, '#958 went back to a draft after the person asked.', [waiting]).title, /went back to a draft/)
+  })
+})
+
+describe('what a merge errand still has to merge', () => {
+  const merge = (target: string, says?: string) => ({
+    tool: 'merge_pull_request',
+    target,
+    says,
+    waits: [{ kind: 'checks' }],
+  })
+
+  it('names each by its pull request, or its task while it has none, with what it waits for, leaving out what is done', () => {
+    assert.deepStrictEqual(
+      mergesLeft([
+        { step: merge(PR), done: true, task: null },
+        { step: merge('https://github.com/AltharIDE/althar/pull/699'), done: false, task: { id: 'task_plan', title: 'Plan card' } },
+        {
+          step: merge('task:keep-for-later', 'Merge Keep for later’s pull request'),
+          done: false,
+          task: { id: 'task_keep', title: 'Keep for later' },
+        },
+        { step: merge('task:workers', 'Merge the workers readiness pull request'), done: false, task: null },
+      ]),
+      [
+        { label: '#699', url: 'https://github.com/AltharIDE/althar/pull/699', task: 'task_plan', once: 'once its checks pass' },
+        { label: 'Keep for later', url: null, task: 'task_keep', once: 'once its checks pass' },
+        { label: 'workers readiness pull request', url: null, task: null, once: 'once its checks pass' },
+      ],
+    )
+  })
+
+  it('is nothing for an errand that does anything else, whose lines stand as they are', () => {
+    assert.isNull(mergesLeft([{ step: { tool: 'push_tag', target: 'v0.9.0', waits: [] }, done: false, task: null }]))
+    assert.isNull(mergesLeft([]))
+  })
+})
+
+describe('the line of a held errand that closed by itself', () => {
+  const pull = { label: '#957', url: PR.replace('698', '957') }
+  it('says what was done already, each linked, where nothing is left', () => {
+    const note = settledNote([
+      { said: '#957 merged already', links: [pull] },
+      { said: 'v0.9.0 is tagged already', links: [] },
+    ])
+    assert.strictEqual(note.title, 'Errand done: #957 merged already; v0.9.0 is tagged already')
+    assert.deepStrictEqual(note.links, [pull])
+  })
+  it('says what came that Althar couldn’t watch for, and what to ask for again', () => {
+    const note = settledNote([], {
+      steps: [
+        { tool: 'push_tag', target: 'AltharIDE/althar tag v0.9.0', request: { tag: 'v0.9.0' }, waits: [{ kind: 'merged' }] },
+        { tool: 'publish_release', target: 'AltharIDE/althar release v0.9.0', request: { tag: 'v0.9.0' }, waits: [{ kind: 'draft' }] },
+      ],
+      happened: { said: '#957 merged', links: [pull] },
+    })
+    assert.strictEqual(
+      note.title,
+      'Errand closed: #957 merged, which Althar couldn’t watch for. Ask again to tag v0.9.0, then publish the v0.9.0 release.',
+    )
+    assert.deepStrictEqual(note.links, [pull])
+  })
+  it('says a merge done already once, not again as what the next step waited for', () => {
+    const note = settledNote([{ said: '#957 merged already', links: [pull] }], {
+      steps: [{ tool: 'push_tag', target: 'AltharIDE/althar tag v0.9.0', request: { tag: 'v0.9.0' }, waits: [{ kind: 'merged' }] }],
+      happened: { said: '#957 merged', links: [pull] },
+    })
+    assert.strictEqual(note.title, 'Errand closed: #957 merged already, which Althar couldn’t watch for. Ask again to tag v0.9.0.')
   })
 })

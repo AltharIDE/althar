@@ -332,10 +332,73 @@ describe('moving a running thread to a choice', () => {
     await moveTo(client, 'th1', on, { ...on, effort: null })
     expect([client.setModel, client.setEffort, client.switchAgent].map((call) => vi.mocked(call).mock.calls.length)).toEqual([0, 0, 0])
     await moveTo(client, 'th1', on, { ...on, model: 'sonnet', effort: 'low' })
-    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'sonnet' })
-    expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', effort: 'low' })
+    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'sonnet' })
+    expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', effort: 'low' })
     await moveTo(client, 'th1', on, { agentId: 'codex', model: null, effort: 'low' })
     expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', effort: 'low' })
+  })
+
+  it('keeps the session of the agent it is with, picked back from another waiting to take its next turn', async () => {
+    const { client } = fakeClient()
+    // On Codex, with OpenCode waiting to take over: back to Codex, then to another of its models.
+    const codex = { agentId: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh' }
+    const waiting = { agentId: 'opencode', model: 'opencode/gpt-6.2-sol', effort: 'xhigh' }
+    await moveTo(client, 'th1', waiting, { agentId: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh' }, codex)
+    await moveTo(client, 'th1', codex, { agentId: 'codex', model: 'gpt-6.1-sol', effort: 'high' }, codex)
+    expect(client.switchAgent).not.toHaveBeenCalled()
+    // Each pick names its agent, so one made while another takes the thread over is never set on that one.
+    expect(vi.mocked(client.setModel).mock.calls.map(([input]) => input)).toEqual([
+      { threadId: 'th1', agentId: 'codex', model: 'gpt-6.1-terra' },
+      { threadId: 'th1', agentId: 'codex', model: 'gpt-6.1-sol' },
+    ])
+    expect(vi.mocked(client.setEffort).mock.calls.map(([input]) => input.effort)).toEqual(['xhigh', 'high'])
+    // Another agent still takes over, and one picked while a switch to it is under way moves that switch's session.
+    const claude = { agentId: 'claude-code', model: 'opus', effort: 'high' }
+    await moveTo(client, 'th1', claude, { agentId: 'claude-code', model: 'sonnet', effort: 'high' }, claude)
+    await moveTo(
+      client,
+      'th1',
+      { agentId: 'codex', model: 'gpt-6.1-sol', effort: 'high' },
+      { agentId: 'claude-code', model: 'opus', effort: null },
+      codex,
+    )
+    expect(client.switchAgent).toHaveBeenCalledOnce()
+    expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'opus' })
+    expect(client.setModel).toHaveBeenLastCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'sonnet' })
+  })
+
+  it('tells the runtime the agent is back where it tells neither its model nor its effort', async () => {
+    const { client } = fakeClient()
+    // An agent with no model or effort to pick, picked back over OpenCode waiting to take over: picked as itself.
+    const plain = { agentId: 'acp-rpc', model: null, effort: null }
+    await moveTo(
+      client,
+      'th1',
+      { agentId: 'opencode', model: 'small', effort: null },
+      { agentId: 'acp-rpc', model: null, effort: null },
+      plain,
+    )
+    expect(client.setAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'acp-rpc' })
+    expect(client.setModel).not.toHaveBeenCalled()
+    expect(client.setEffort).not.toHaveBeenCalled()
+    expect(client.switchAgent).not.toHaveBeenCalled()
+  })
+
+  it('tells the runtime the agent is back when picked back as it is, with nothing of its own chosen', async () => {
+    const { client } = fakeClient()
+    // OpenCode waits to take over; the person picks Codex again, leaving its model and effort as Codex holds them.
+    const codex = { agentId: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh' }
+    await moveTo(
+      client,
+      'th1',
+      { agentId: 'opencode', model: 'small', effort: null },
+      { agentId: 'codex', model: null, effort: null },
+      codex,
+    )
+    expect(client.switchAgent).not.toHaveBeenCalled()
+    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-6.1-terra' })
+    expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', effort: 'xhigh' })
+    expect(client.setAgent).not.toHaveBeenCalled()
   })
 })
 
@@ -515,5 +578,114 @@ describe('naming a model on a screen', () => {
     await waitFor(() => expect(client.getModels).toHaveBeenCalled())
     await waitFor(() => expect(shown?.textContent).toBe('DeepSeek V4.1 Flash|via OpenCode Go'))
     expect(withAccount?.textContent).toBe('DeepSeek V4.1 Flash|via OpenCode Go · work')
+  })
+})
+
+describe('a worker’s models (ADR-103)', () => {
+  it('offers only its agents, signed in there, and of each the models it offers there', async () => {
+    const { onWorker } = await import('../src/renderer/shared/models')
+    const known = [
+      {
+        agentId: 'claude-code',
+        models: [
+          { id: 'opus', name: 'Opus', description: null, efforts: [], effort: null },
+          { id: 'sonnet', name: 'Sonnet', description: null, efforts: [{ id: 'high', name: 'High' }], effort: null },
+        ],
+        model: 'opus',
+        effort: null,
+        defaults: [],
+        blocked: [],
+        probing: false,
+        images: true,
+      },
+      {
+        agentId: 'codex',
+        models: [{ id: 'gpt', name: 'GPT', description: null, efforts: [], effort: null }],
+        model: 'gpt',
+        effort: null,
+        defaults: [],
+        blocked: [],
+        probing: false,
+        images: true,
+      },
+    ]
+    const agents = [
+      { id: 'claude-code', name: 'Claude Code' },
+      { id: 'codex', name: 'Codex' },
+    ] as never
+    const there = onWorker(known, agents, {
+      providers: ['claude-code', 'codex'],
+      signedIn: ['claude-code'],
+      readiness: {
+        sandbox: { starts: true },
+        tools: [],
+        models: [
+          {
+            providerId: 'claude-code',
+            models: [
+              { id: 'sonnet', name: 'Sonnet' },
+              { id: 'haiku', name: 'Haiku' },
+            ],
+          },
+        ],
+      },
+    })
+    expect(there.agents.map((agent) => agent.id)).toEqual(['claude-code'])
+    expect(there.known[0]?.models.map((model) => model.id)).toEqual(['sonnet', 'haiku'])
+    // What the home knows of a model it has too stays with it.
+    expect(there.known[0]?.models[0]?.efforts).toEqual([{ id: 'high', name: 'High' }])
+  })
+
+  it('offers what the worker said of an agent the home hasn’t read yet, and only an agent’s default where the worker hasn’t said', async () => {
+    const { onWorker } = await import('../src/renderer/shared/models')
+    const agents = [
+      { id: 'claude-code', name: 'Claude Code' },
+      { id: 'codex', name: 'Codex' },
+    ] as never
+    const home = [
+      {
+        agentId: 'claude-code',
+        models: [{ id: 'opus', name: 'Opus', description: null, efforts: [], effort: null }],
+        model: 'opus',
+        effort: null,
+        defaults: [],
+        blocked: [],
+        probing: false,
+        images: true,
+      },
+    ]
+    const there = onWorker(home, agents, {
+      providers: ['claude-code', 'codex'],
+      readiness: {
+        sandbox: { starts: true },
+        tools: [],
+        models: [{ providerId: 'codex', models: [{ id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol' }] }],
+      },
+    })
+    // Codex, which the home hasn't read: the worker's own list.
+    expect(there.known.find((one) => one.agentId === 'codex')).toMatchObject({
+      models: [{ id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol' }],
+      model: 'gpt-6.2-sol',
+    })
+    // Claude Code, which the worker said nothing of: its own default only, never the home's Opus.
+    expect(there.known.find((one) => one.agentId === 'claude-code')).toMatchObject({ models: [], model: null })
+    // Where the worker offers the model the home is on, it stays on it, at its effort.
+    const same = onWorker([{ ...home[0]!, effort: 'high' }], agents, {
+      providers: ['claude-code'],
+      readiness: {
+        sandbox: { starts: true },
+        tools: [],
+        models: [
+          {
+            providerId: 'claude-code',
+            models: [
+              { id: 'sonnet', name: 'Sonnet' },
+              { id: 'opus', name: 'Opus' },
+            ],
+          },
+        ],
+      },
+    })
+    expect(same.known[0]).toMatchObject({ model: 'opus', effort: 'high' })
   })
 })

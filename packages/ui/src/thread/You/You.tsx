@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { AttachmentKind, Delivery, unreachable } from '../../foundations/vocabulary'
@@ -141,6 +141,30 @@ export function You({
   )
 }
 
+/** How far from the chip's own shape a picture may be and still fill it: a strip or a tall shot fits whole instead. */
+const FILLS = { wide: 2.4, tall: 1 }
+
+/*
+ * An image's picture in its chip: filling it where it is about the chip's shape, whole where cropping it would leave only
+ * its middle (a strip of a screen is mostly margin there), and the picture icon where it doesn't load.
+ */
+function Thumb({ a }: { a: Extract<MessageAttachment, { kind: AttachmentKind.Image }> }) {
+  const shown = a.thumb ?? a.src
+  const [failed, setFailed] = useState<string | null>(null)
+  const ratio = a.width !== undefined && a.height !== undefined && a.height > 0 ? a.width / a.height : null
+  const whole = ratio !== null && (ratio > FILLS.wide || ratio < FILLS.tall)
+  const drawn = shown !== undefined && shown !== '' && failed !== shown
+  return (
+    <span className={s.imageArea} data-drawn={drawn || undefined}>
+      {drawn ? (
+        <img src={shown} alt="" className={s.thumb} data-whole={whole || undefined} onError={() => setFailed(shown)} />
+      ) : (
+        <Icon name="image" size={16} />
+      )}
+    </span>
+  )
+}
+
 /* An image opens with the shell's openImage, with the message's other images a key away; a file opens wherever the consumer sends it. Without either, the chip is still. */
 function AttachmentChip({
   a,
@@ -156,10 +180,9 @@ function AttachmentChip({
   const { openImage } = useThreadShell()
   switch (a.kind) {
     case AttachmentKind.Image: {
-      const shown = a.thumb ?? a.src
       const body = (
         <>
-          <span className={s.imageArea}>{shown ? <img src={shown} alt="" className={s.thumb} /> : <Icon name="image" size={16} />}</span>
+          <Thumb a={a} />
           <span className={s.name}>{a.name}</span>
         </>
       )

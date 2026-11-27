@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from 'react'
 
-import type { AgentStatus, ProjectSummary } from '@althar/contracts'
+import type { AgentStatus, ProjectSummary, Service } from '@althar/contracts'
 import {
   BrandMark,
   Button,
   CrashReportsLine,
+  Dialog,
   Icon,
   keys,
   Menu,
@@ -18,9 +19,8 @@ import {
   RuntimeState,
   Problem,
 } from '@althar/ui'
-import { Welcome, type WelcomeStep, welcomeText } from '@althar/ui/screens'
+import { HomeWelcome, Welcome, type WelcomeStep, welcomeText } from '@althar/ui/screens'
 
-import { useHomeState } from '../homes/useHomes'
 import { brandOf, pinnedOf } from '../../shared/agents'
 import { reads } from '../../data/reads'
 import { hostChoices, PutOnHost, thingOn } from '../../shared/PutOnHost'
@@ -33,6 +33,7 @@ import { HomePending } from '../../shared/Pending'
 import { usePreferences } from '../../shared/usePreferences'
 import { AgentSignIn } from '../accounts/AgentAccounts'
 import type { AccountSignInModel } from '../accounts/useAccountSignIn'
+import { ConnectDialog } from '../connections/ConnectDialog'
 import { ConnectionsView } from '../connections/ConnectionsView'
 import { useConnections } from '../connections/useConnections'
 import { hostsCode, serviceOf, serviceOfProduct } from '../connections/ways'
@@ -40,6 +41,7 @@ import { BareBar } from '../tabs/TabsFrame'
 import s from './Start.module.css'
 import { useElsewhere } from '../elsewhere/useElsewhere'
 import { useFirstProject } from './useFirstProject'
+import { useHomeWelcome } from './useHomeWelcome'
 import type { StartModel } from './useStart'
 import { markToured, toured, useWelcoming, welcome } from './welcome'
 
@@ -68,6 +70,8 @@ export const text = {
   checkAgain: 'Check again',
   /** An agent signed in, on its row in the welcome. */
   signedIn: 'Signed in',
+  /** Over another computer's home's welcome, an agent signing in there. */
+  signInOn: (agent: string, home: string) => `Sign ${agent} in on ${home}`,
   /** The welcome, in this computer's words, with the keys this system has. */
   first: () => ({
     welcome: {
@@ -193,17 +197,19 @@ export function StartView({
   model,
   accounts,
   onProject,
+  onNew,
   home,
 }: {
   model: StartModel
   /** Signing the agents' accounts in, on the first screen. */
   accounts: AccountSignInModel
   onProject: (projectId: string) => void
+  /** The New project tab, its draft started: where an empty home's welcome goes in. */
+  onNew: () => void
   /** The home, once there are projects. */
   home: () => ReactNode
 }) {
-  const { client, host } = useServices()
-  const here = useHomeState(host.homes)
+  const { client } = useServices()
   const welcoming = useWelcoming()
   // With no project, or none read because the runtime didn't answer, the first screen, which says what went wrong; and the
   // welcome while it is on show, over the project made on its way.
@@ -211,17 +217,7 @@ export function StartView({
 
   if (client.connection !== undefined) {
     if (model.projects === null) return <HomePending />
-    if (model.projects.length === 0)
-      return (
-        <div className={s.window}>
-          <BareBar />
-          <main className={s.remoteEmpty}>
-            <Icon name="home" size={28} className={s.remoteGlyph} />
-            <h1>No projects on {here !== null && here.current.kind !== 'local' ? here.current.home.name : 'this home'} yet</h1>
-            <p>Add a project on the host and it shows here.</p>
-          </main>
-        </div>
-      )
+    if (model.projects.length === 0) return <EmptyHome model={model} accounts={accounts} onNew={onNew} />
     return home()
   }
 
@@ -230,6 +226,47 @@ export function StartView({
   if (model.projects === null) return <HomePending />
 
   return home()
+}
+
+/**
+ * A home on another computer with no projects yet: its welcome, under the window's bar, its ways in opening New project.
+ * An agent signs in there, and a code host connects there, over the welcome, as each would in Settings.
+ */
+function EmptyHome({ model, accounts, onNew }: { model: StartModel; accounts: AccountSignInModel; onNew: () => void }) {
+  const connections = useConnections()
+  const [connecting, setConnecting] = useState<Service | null>(null)
+  const welcome = useHomeWelcome(onNew, {
+    signIn: (agentId) => signInTo(model, accounts, agentId),
+    connect: (service) => setConnecting(service as Service),
+  })
+  if (welcome === null) return <HomePending />
+  return (
+    <div className={s.window}>
+      <BareBar />
+      <HomeWelcome {...welcome} />
+      {connecting !== null && <ConnectDialog model={connections} opening={{ service: connecting }} onClose={() => setConnecting(null)} />}
+      <SigningIn model={model} accounts={accounts} home={welcome.name} />
+    </div>
+  )
+}
+
+/** An agent signing in on the home, over its welcome: its ways, then each step of the one chosen; it closes as it ends. */
+function SigningIn({ model, accounts, home }: { model: StartModel; accounts: AccountSignInModel; home: string }) {
+  const flow = accounts.signingIn
+  const agent = flow === null ? undefined : model.status?.agents.find((one) => one.id === flow.agentId)
+  if (flow === null || agent === undefined) return null
+  const again = flow.again === null ? undefined : agent.accounts.find((account) => account.id === flow.again)
+  const listed = agent.accounts.filter((account) => account.id !== flow.made)
+  return (
+    <Dialog title={text.signInOn(agent.name, home)} width={480} holding onClose={accounts.cancel}>
+      <AgentSignIn
+        agent={agent}
+        signIn={accounts}
+        position={again === undefined ? listed.length + 1 : listed.indexOf(again) + 1}
+        {...(again === undefined ? {} : { account: { name: again.name } })}
+      />
+    </Dialog>
+  )
 }
 
 /** What the setup reads while the draft is being started: nothing chosen. */
@@ -320,6 +357,10 @@ function First({
 
   // Where its code comes from: a folder, as this computer has them, or a clone, or a new repository, as a new project's page has them.
   const services = useServices()
+  const { host } = services
+  useEffect(() => {
+    if (firstRun || made !== null) host.welcomeUsage?.('step', step)
+  }, [firstRun, host, made, step])
   const store = draftsOf(services.client)
   const draft = useSyncExternalStore(store.subscribe, store.get)
   // The welcome's own draft, for a clone or a new repository: it goes with the welcome, so no New project tab is left behind.
@@ -344,6 +385,7 @@ function First({
     void (
       folderWay || draft === null ? project.make() : draftActions(services).create(inkOf(draft, []), { publish: null, tracker: null })
     ).then(async (one) => {
+      if (firstRun) host.welcomeUsage?.('project', way, one === null ? 'not_created' : 'created')
       if (one === null) return
       // Never long: a look that takes more than a moment leaves the step out rather than hold the welcome up.
       await Promise.race([elsewhere.load(one.id), new Promise((done) => setTimeout(done, LOOK_MOST))])
@@ -356,6 +398,7 @@ function First({
     if (made === null) return
     welcome.end()
     onProject(made.id)
+    host.welcomeUsage?.('completed')
   }
 
   // ⌘N chooses a folder, ⌘↵ makes the project, on its step, as the screen says; Ctrl off a Mac. Keys typed into an account's
@@ -378,7 +421,6 @@ function First({
   })
 
   const { preferences, set } = usePreferences()
-  const { host } = useServices()
   const list = connections.list
   const hostConnected =
     list?.connections.some((connection) => {
@@ -409,9 +451,7 @@ function First({
           folderWay
             ? project.picked
             : way === 'clone'
-              ? setup.chosen === null
-                ? []
-                : [setup.chosen]
+              ? setup.chosen
               : draft?.fresh != null || draft?.folders.some((folder) => folder.came === 'new') === true
                 ? ['fresh']
                 : []

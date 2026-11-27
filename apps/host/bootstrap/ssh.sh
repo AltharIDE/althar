@@ -62,6 +62,19 @@ probe() {
   event look done ",\"os\":\"linux\",\"arch\":\"$arch\",\"systemdUserManager\":$manager,\"freeKiB\":$available,\"git\":$git,\"login\":\"$user\",\"root\":$([ "$uid" = 0 ] && printf true || printf false),\"linger\":$linger$action"
 }
 
+# Newer Ubuntu lets only programs AppArmor names make a user namespace (kernel.apparmor_restrict_unprivileged_userns),
+# which bubblewrap, the sandbox of a worker's agents, needs. As root, once: a rule for the worker's own bubblewrap alone,
+# at its program folder's releases, as the release's check says it (apps/host/src/workerCheck.ts `apparmorRule`).
+sandbox_rule() {
+  [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || :)" = 1 ] || return 0
+  command -v apparmor_parser >/dev/null || return 0
+  case "$1" in /*) ;; *) return 0 ;; esac
+  case "$1" in *[!A-Za-z0-9._/-]*) return 0 ;; esac
+  printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' "profile althar-worker-bwrap $1/bundle-*/**/bwrap flags=(unconfined) {" '  userns,' '  include if exists <local/althar-worker-bwrap>' '}' > /etc/apparmor.d/althar-worker-bwrap.new &&
+    mv -f -- /etc/apparmor.d/althar-worker-bwrap.new /etc/apparmor.d/althar-worker-bwrap &&
+    apparmor_parser -r /etc/apparmor.d/althar-worker-bwrap
+}
+
 root_login() {
   [ "$uid" = 0 ] || fail setup InvalidLogin
   key=$1
@@ -106,7 +119,10 @@ root_login() {
       mv -f -- "$temporary" .ssh/authorized_keys
     ' sh "$key" || fail setup AccountKeyFailed
     loginctl enable-linger althar || fail setup AccountLingerFailed
-    event setup done ',"login":"althar","linger":true'
+    account_home=$(getent passwd althar | cut -d: -f6)
+    sandbox=true
+    sandbox_rule "$account_home/.local/share/althar-worker-program" || sandbox=false
+    event setup done ",\"login\":\"althar\",\"linger\":true,\"sandboxRule\":$sandbox"
   ) 9>"$root_state/lock"
 }
 
@@ -124,11 +140,117 @@ if [ "$operation" = root-login ]; then
   exit
 fi
 
+# A worker installs from a signed release of its own, published beside the home's, into a program folder of its own;
+# then the release's own worker commands set it up (apps/host/src/workerSetup.ts).
+role=host
+case "$operation" in worker-*) role=worker; operation=${operation#worker-} ;; esac
+
 uid=$(id -u)
 [ "$uid" != 0 ] || fail setup DedicatedUserRequired
 case "${XDG_DATA_HOME:-$HOME/.local/share}" in /*) ;; *) fail setup InvalidRequest ;; esac
 root=${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program.setup-v1
+if [ "$role" = worker ]; then root=${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program; fi
 if printf '%s' "$root" | grep -q '[[:cntrl:]]' || [ "$(printf '%s' "$root" | wc -l)" != 0 ]; then fail setup InvalidRequest; fi
+
+# A machine without SSH adds itself with a one-time code (Settings › Computers › Add a worker › With a code): the
+# person runs this script there, published beside the release as althar-worker.sh, with `join <code>`. It takes the
+# newest release from where the script came from, checks its archive against its manifest, and installs it as the SSH
+# setup would; the release then asks the home for its certificate with the code (worker join). The release's key comes
+# from the same place: later updates must be signed by it.
+join_code=''
+if [ "$operation" = join ]; then
+  [ "$#" -eq 1 ] || fail enroll InvalidRequest
+  case "$1" in althar-worker1.*) ;; *) fail enroll InvalidCode ;; esac
+  case "$1" in *[!A-Za-z0-9._-]*) fail enroll InvalidCode ;; esac
+  [ "${#1}" -le 8192 ] || fail enroll InvalidCode
+  join_code=$1
+  role=worker
+  root=${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program
+  probe 1
+  command -v curl >/dev/null || fail get CannotDownload
+  base=${ALTHAR_RELEASE_BASE:-https://github.com/AltharIDE/althar/releases/latest/download}
+  case "$base" in https://*|http://127.0.0.1*|http://localhost*) ;; *) fail get InvalidRequest ;; esac
+  # The worker's own release; from a release before workers had their own, the home's, which carries the worker too.
+  fetched=$(curl --fail --silent --show-error --location --max-redirs 5 --max-filesize 262144 -- "$base/althar-worker-linux-$arch.json") ||
+    fetched=$(curl --fail --silent --show-error --location --max-redirs 5 --max-filesize 262144 -- "$base/althar-host-linux-$arch.json") ||
+    fail get NoRelease
+  release_key=$(curl --fail --silent --show-error --location --max-redirs 5 --max-filesize 4096 -- "$base/althar-host-release.pub") || fail get NoRelease
+  # The manifest's payload is base64url without padding: as base64, padded, for base64 -d.
+  encoded=$(printf '%s' "$fetched" | sed -n 's/.*"payload":"\([A-Za-z0-9_-]*\)".*/\1/p' | tr '_-' '/+')
+  case $(( ${#encoded} % 4 )) in 2) encoded="$encoded==" ;; 3) encoded="$encoded=" ;; esac
+  payload=$(printf '%s' "$encoded" | base64 -d 2>/dev/null) || fail get ReleaseRejected
+  [ -n "$payload" ] || fail get ReleaseRejected
+  field() { printf '%s' "$payload" | sed -n "s|.*\"$1\":\($2\).*|\1|p"; }
+  set -- download "$(field sha256 '"[a-f0-9]*"' | tr -d '"')" "$(field bytes '[0-9]*')" "$(field unpackedBytes '[0-9]*')" \
+    "$(field url '"https://[^"]*"' | tr -d '"')" "$(printf '%s' "$fetched" | base64 | tr -d '\n')" "$(printf '%s\n' "$release_key" | base64 | tr -d '\n')"
+  operation=install
+fi
+
+# How a release runs its worker's commands: a worker's own release by its own entry; a home's, which workers were
+# installed from before they had their own, as `althar-host worker …`. Sets `entry` and `via` for "$entry" ${via:+"$via"}.
+worker_entry() {
+  if [ -f "$1/dist/althar-worker.js" ]; then entry=$1/dist/althar-worker.js via=''
+  elif [ -f "$1/dist/althar-host.js" ]; then entry=$1/dist/althar-host.js via=worker
+  else return 1
+  fi
+}
+worker_program() {
+  current=$root/current
+  [ -x "$current/node/bin/node" ] && worker_entry "$current" || fail start WorkerNotInstalled
+}
+if [ "$role" = worker ]; then
+  case "$operation" in
+    enroll)
+      [ "$#" -eq 2 ] || fail start InvalidRequest
+      case "$1" in *[!A-Za-z0-9_-]*|'') fail start InvalidRequest ;; esac
+      [ "${#1}" -le 65536 ] || fail start InvalidRequest
+      worker_program
+      # Where the window's own home is this SSH client's computer, the address this login came from reaches it.
+      first=''
+      if [ "$2" = 1 ] && [ -n "${SSH_CONNECTION:-}" ]; then first=${SSH_CONNECTION%% *}; fi
+      case "$first" in *[!0-9a-fA-F.:]*) first='' ;; esac
+      exec "$current/node/bin/node" "$entry" ${via:+"$via"} enroll --grant "$1" --first "$first"
+      ;;
+    agents)
+      [ "$#" -eq 0 ] || fail agents InvalidRequest
+      worker_program
+      exec "$current/node/bin/node" "$entry" ${via:+"$via"} agents
+      ;;
+    sign-in)
+      [ "$#" -eq 2 ] || fail sign-in InvalidRequest
+      case "$1" in *[!a-z0-9-]*|'') fail sign-in InvalidRequest ;; esac
+      case "$2" in browser|device) ;; *) fail sign-in InvalidRequest ;; esac
+      worker_program
+      exec "$current/node/bin/node" "$entry" ${via:+"$via"} sign-in --agent "$1" --way "$2"
+      ;;
+    check)
+      [ "$#" -eq 0 ] || fail check InvalidRequest
+      worker_program
+      exec "$current/node/bin/node" "$entry" ${via:+"$via"} check
+      ;;
+    sandbox)
+      # What only root may do to let its agents' sandbox start, with sudo where this login may without a password.
+      [ "$#" -eq 0 ] || fail check InvalidRequest
+      worker_program
+      exec "$current/node/bin/node" "$entry" ${via:+"$via"} sandbox
+      ;;
+    linger)
+      # A worker is a user service: without lingering, the user's service manager, and the worker with it, stops once
+      # this login ends. Turned on where this login may without a password; else the line for its administrator.
+      [ "$#" -eq 0 ] || fail look InvalidRequest
+      user=$(id -un)
+      lingers() { [ "$(loginctl -p Linger --value show-user -- "$user" 2>/dev/null || :)" = yes ]; }
+      if ! lingers && command -v sudo >/dev/null; then sudo -n loginctl enable-linger -- "$user" >/dev/null 2>&1 || :; fi
+      if ! lingers; then
+        event look failed ",\"code\":\"LingerOff\",\"command\":$(json_string "sudo loginctl enable-linger -- $user")"
+        exit 1
+      fi
+      event look done ',"linger":true'
+      exit
+      ;;
+    status|resume) fail setup InvalidRequest ;;
+  esac
+fi
 
 case "$operation" in
   status|resume)
@@ -229,5 +351,13 @@ private_dir "$root" || fail get UnsafeState
   printf '%s\n' "$release" > "$scratch/ready"
   mv -T -- "$scratch/ready" "$root/ready"
   event get done ",\"bytes\":$bytes,\"totalBytes\":$bytes"
-  "$bundle/node/bin/node" "$bundle/dist/althar-host.js" setup --manifest "$bundle/.manifest" --release-key "$bundle/.release-key" --json
+  if [ "$role" = worker ]; then
+    worker_entry "$bundle" || fail get NoWorker
+    "$bundle/node/bin/node" "$entry" ${via:+"$via"} install --program "$bundle"
+    if [ -n "$join_code" ]; then
+      "$bundle/node/bin/node" "$entry" ${via:+"$via"} join --code "$join_code" --name "$(hostname)"
+    fi
+  else
+    "$bundle/node/bin/node" "$bundle/dist/althar-host.js" setup --manifest "$bundle/.manifest" --release-key "$bundle/.release-key" --json
+  fi
 ) 9>"$root/transfer.lock"

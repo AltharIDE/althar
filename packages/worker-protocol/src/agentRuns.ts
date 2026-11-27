@@ -17,10 +17,12 @@ import {
   AgentWorkerHeartbeatSchema,
   type AgentWorkerCapacity,
   AgentWorkspaceSetupSchema,
+  AgentWorkerRemovedSchema,
   WorkerControlService,
   type AgentHomeFrame,
   type AgentRunExit,
   type AgentWorkerCapability,
+  type AgentWorkerReadiness,
   type AgentWorkspaceSetupResult,
 } from './gen/althar/worker/v1/control_pb.ts'
 import { validWorkerProtocolId, WORKER_PROTOCOL_VERSION } from './handshake.ts'
@@ -75,6 +77,11 @@ export interface AgentRunAssignment extends AgentPlacement {
 
 interface AgentRunOptions {
   readonly signal?: AbortSignal
+  /**
+   * The run goes only to a slot whose own check, as it said it last, found its agents' sandbox starts and this provider
+   * started there: the slot that receives it, not one the home looked at before.
+   */
+  readonly requireReady?: boolean
   readonly checkout?: WorkerCheckout
   readonly toolPort?: number
   readonly setup?: WorkerSetup
@@ -87,9 +94,84 @@ export interface WorkerSetupCommands {
   readonly commands: ReadonlyArray<string>
 }
 
-export type WorkerSetup =
+/** A program on a worker's PATH, or one a run asks it to install first: `bun`, `node`, `pnpm` or `uv`, at a version or `latest`. */
+export interface WorkerTool {
+  readonly name: string
+  readonly version: string
+}
+
+export type WorkerSetup = (
   | WorkerSetupCommands
   | { readonly repositories: ReadonlyArray<WorkerSetupCommands & { readonly workspaceId: string }> }
+) & {
+  /** What the worker installs into its own folder, without root, before the commands run. */
+  readonly tools?: ReadonlyArray<WorkerTool>
+}
+
+/**
+ * What a worker's own check found (`althar-host worker check`): whether Claude Code's sandbox starts there, and where not
+ * why (`NoUserNamespaces`, `NoBubblewrap`, `NoSocat`, `Failed`) with the command an administrator runs to let it; the
+ * tools on its PATH; and the models each of its signed-in agents offers.
+ */
+export interface WorkerReadiness {
+  readonly sandbox: { readonly starts: true } | { readonly starts: false; readonly problem: string; readonly fix?: string }
+  readonly tools: ReadonlyArray<WorkerTool>
+  readonly models: ReadonlyArray<{
+    readonly providerId: string
+    readonly models: ReadonlyArray<{ readonly id: string; readonly name: string }>
+  }>
+  /** Each signed-in agent, started once as a run starts it: whether it did, and where not, why. */
+  readonly agents: ReadonlyArray<{ readonly providerId: string; readonly starts: boolean; readonly problem?: string }>
+}
+
+const SANDBOX_PROBLEMS = new Set(['NoUserNamespaces', 'NoBubblewrap', 'NoSocat', 'Failed'])
+const TOOL_NAME = /^[a-z0-9][a-z0-9._+-]{0,47}$/u
+const TOOL_VERSION = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/u
+// eslint-disable-next-line no-control-regex -- A name a worker reports is shown: no control characters.
+const SHOWN = /^[^\x00-\x1f\x7f]{1,200}$/u
+// eslint-disable-next-line no-control-regex -- Why an agent couldn't start is shown, on one line.
+const SHOWN_LONG = /^[^\x00-\x1f\x7f]{1,400}$/u
+// eslint-disable-next-line no-control-regex -- The command is shown to copy, on one line.
+const FIX = /^[^\x00-\x1f\x7f]{1,4096}$/u
+
+/** Why a worker's own check, as it reported it, keeps a provider's run from it; none where it found both start. */
+export const unreadyOf = (readiness: WorkerReadiness | undefined, providerId: string): string | undefined => {
+  if (readiness === undefined) return 'The worker hasn’t checked it can run a task yet.'
+  if (!readiness.sandbox.starts) return 'The worker’s agents’ sandbox can’t start there.'
+  const started = readiness.agents.find((agent) => agent.providerId === providerId)
+  return started?.starts === true ? undefined : 'The worker hasn’t started this agent there, or it couldn’t.'
+}
+
+/** A worker's check as it reported it, kept to what can be shown and trusted. */
+export const readinessOf = (reported: AgentWorkerReadiness): WorkerReadiness => {
+  const problem = SANDBOX_PROBLEMS.has(reported.sandboxProblem) ? reported.sandboxProblem : 'Failed'
+  const fix = FIX.test(reported.sandboxFix)
+  return {
+    sandbox: reported.sandboxStarts ? { starts: true } : { starts: false, problem, ...(fix ? { fix: reported.sandboxFix } : {}) },
+    tools: reported.tools
+      .filter((tool) => TOOL_NAME.test(tool.name) && TOOL_VERSION.test(tool.version))
+      .slice(0, 64)
+      .map(({ name, version }) => ({ name, version })),
+    models: reported.models
+      .filter((entry) => PROVIDER_ID.test(entry.providerId))
+      .slice(0, MAX_CAPABILITIES)
+      .map((entry) => ({
+        providerId: entry.providerId,
+        models: entry.models
+          .filter((model) => SHOWN.test(model.id) && SHOWN.test(model.name))
+          .slice(0, 96)
+          .map(({ id, name }) => ({ id, name })),
+      })),
+    agents: reported.agents
+      .filter((agent) => PROVIDER_ID.test(agent.providerId))
+      .slice(0, MAX_CAPABILITIES)
+      .map(({ providerId, starts, problem }) => ({
+        providerId,
+        starts,
+        ...(starts || !SHOWN_LONG.test(problem) ? {} : { problem }),
+      })),
+  }
+}
 
 export interface WorkerRepository {
   readonly workspaceId: string
@@ -162,6 +244,14 @@ const capacityOf = (reported: AgentWorkerCapacity | undefined): WorkerCapacity |
 export interface AvailableAgentWorker {
   readonly workerId: string
   readonly capacity?: WorkerCapacity
+  /** Of its providers, those signed in on it, where it says. */
+  readonly signedIn?: ReadonlyArray<string>
+  /** The Althar release it runs, where it says. */
+  readonly release?: string
+  /** What its own check found, where it has checked. */
+  readonly readiness?: WorkerReadiness
+  /** It offers its agents for any project the home grants it. */
+  readonly anyProject?: boolean
   readonly capabilities: ReadonlyArray<
     Pick<AgentWorkerCapability, 'projectId' | 'providerId'> & Partial<Pick<AgentWorkerCapability, 'workspaceSets'>>
   >
@@ -170,11 +260,15 @@ export interface AvailableAgentWorker {
 
 interface Slot {
   readonly workerId: string
+  /** What it said of itself; who is signed in, again with its heartbeats. */
+  said: Pick<AvailableAgentWorker, 'signedIn' | 'release' | 'anyProject' | 'readiness'>
   readonly capacity: () => WorkerCapacity | undefined
   readonly capabilities: ReadonlyArray<AgentWorkerCapability>
   readonly start: (placement: AgentPlacement, options: AgentRunOptions) => Promise<WorkerAgentProcess>
   readonly openTools: (runId: string, invalidate: () => void) => { port: number; active: () => boolean; release: () => void } | undefined
   readonly busy: () => boolean
+  /** Tells it the person removed it, so it takes itself off its computer, and ends its stream: where it is idle. */
+  readonly remove: () => boolean
 }
 
 interface SnapshotPart {
@@ -218,9 +312,16 @@ interface Run {
 
 const encode = (payload: AgentHomeFrame['payload']): Buffer =>
   Buffer.from(toBinary(AgentHomeFrameSchema, create(AgentHomeFrameSchema, { payload })))
+/** What a worker the person removed hears from its home, between runs or in place of a hello. */
+export const removedFrame = (): Buffer => encode({ case: 'removed', value: create(AgentWorkerRemovedSchema) })
+
+/** A capability for any project the home grants: a worker its home set up offers its agents so, and the grants decide. */
+export const ANY_PROJECT = '*'
+const covers = (capability: Pick<AgentWorkerCapability, 'projectId'>, projectId: string): boolean =>
+  capability.projectId === projectId || capability.projectId === ANY_PROJECT
 
 const supports = (slot: Slot, projectId: string, providerId: string): boolean =>
-  slot.capabilities.some((item) => item.projectId === projectId && item.providerId === providerId)
+  slot.capabilities.some((item) => covers(item, projectId) && item.providerId === providerId)
 
 export const MAX_WORKER_REPOSITORIES = 8
 export const MAX_WORKER_SET_BYTES = 2 * MAX_WORKER_BUNDLE_BYTES
@@ -274,10 +375,19 @@ const validSetupResult = (current: Run, result: AgentWorkspaceSetupResult | unde
   )
 }
 
+export type AgentWorkerConnection = 'connected' | 'disconnected'
+
 /** The home routes by a verified certificate and the worker's operator-granted project and provider. */
-export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
+export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: (outcome: AgentWorkerConnection) => void) => {
   const slots = new Map<string, Slot>()
   const previews = makePreviewTunnels()
+  const reportConnection = (outcome: AgentWorkerConnection): void => {
+    try {
+      connectionChanged?.(outcome)
+    } catch {
+      // Reporting must never interrupt worker execution or cleanup.
+    }
+  }
 
   const connect = (call: ServerDuplexStream<Buffer, Buffer>, homeId: string, enrolledWorker: () => string | undefined): void => {
     let slot: Slot | undefined
@@ -320,7 +430,10 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
       if (closed) return
       closed = true
       clearTimeout(timer)
-      if (slot !== undefined && slots.get(slot.workerId) === slot) slots.delete(slot.workerId)
+      if (slot !== undefined && slots.get(slot.workerId) === slot) {
+        slots.delete(slot.workerId)
+        reportConnection('disconnected')
+      }
       if (run !== undefined) {
         clearTimeout(run.starting)
         clearTimeout(run.stopping)
@@ -434,8 +547,11 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
               create(
                 AgentWorkspaceSetupSchema,
                 'repositories' in setup
-                  ? { repositories: setup.repositories.map((one) => ({ ...one, commands: [...one.commands] })) }
-                  : { directory: setup.directory, commands: [...setup.commands] },
+                  ? {
+                      repositories: setup.repositories.map((one) => ({ ...one, commands: [...one.commands] })),
+                      tools: [...(setup.tools ?? [])],
+                    }
+                  : { directory: setup.directory, commands: [...setup.commands], tools: [...(setup.tools ?? [])] },
               ),
             )
       if (plan !== undefined && (plan.byteLength === 0 || plan.byteLength > MAX_SETUP_BYTES))
@@ -467,7 +583,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         transfer.abort()
         accept?.resolve(false)
       }
-      const capability = slot.capabilities.find((cap) => cap.projectId === placement.projectId && cap.providerId === placement.providerId)
+      const capability = slot.capabilities.find((cap) => covers(cap, placement.projectId) && cap.providerId === placement.providerId)
       const workerId = slot.workerId
       const managed = makeManagedCommands(
         id,
@@ -475,15 +591,12 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         () => run?.id === id && ownsRun(run),
         send,
         (message) => fail(status.INVALID_ARGUMENT, message),
-        (providerId, withSkills, withCheckout) =>
-          slot?.capabilities.some(
-            (cap) =>
-              cap.projectId === placement.projectId &&
-              cap.providerId === providerId &&
-              cap.helperAgents &&
-              (!withSkills || cap.helperSkillFiles) &&
-              (!withCheckout || cap.helperCheckouts),
-          ) === true,
+        (providerId, withSkills, withCheckout) => {
+          const cap = slot?.capabilities.find((each) => covers(each, placement.projectId) && each.providerId === providerId)
+          if (cap === undefined) return 'agent'
+          // What it lacks is what a newer worker reports it can do.
+          return cap.helperAgents && (!withSkills || cap.helperSkillFiles) && (!withCheckout || cap.helperCheckouts) ? undefined : 'update'
+        },
         capability?.managedPreview === true
           ? {
               open: (commandId, port, active, signal) =>
@@ -590,6 +703,9 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           STOP_TIMEOUT_MS,
         )
         current.stopping.unref()
+        // An unread provider stream may have paused this call. Stop and its
+        // confirmation must still get through after the provider is released.
+        call.resume()
         sendControl({ case: 'stop', value: create(AgentRunStopSchema, { runId: current.id }) })
       }
       return current.exit.promise
@@ -617,7 +733,14 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
             capabilities.length === 0 ||
             capabilities.length > MAX_CAPABILITIES ||
             distinct.size !== capabilities.length ||
-            capabilities.some(({ projectId, providerId }) => !validWorkerProtocolId(projectId, 'proj_') || !PROVIDER_ID.test(providerId))
+            capabilities.some(
+              ({ projectId, providerId }) =>
+                !(validWorkerProtocolId(projectId, 'proj_') || (payload.value.anyProject && projectId === ANY_PROJECT)) ||
+                !PROVIDER_ID.test(providerId),
+            ) ||
+            payload.value.signedIn.length > MAX_CAPABILITIES ||
+            payload.value.signedIn.some((providerId) => !PROVIDER_ID.test(providerId)) ||
+            payload.value.release.length > 64
           )
             return fail(status.INVALID_ARGUMENT, 'The worker sent invalid agent capabilities.')
           if (slots.has(workerId)) return fail(status.ALREADY_EXISTS, 'This worker already has an agent stream.')
@@ -628,17 +751,36 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           accountReserved = payload.value.capacity?.accountReserved ?? false
           reserveBeforeTransfer = payload.value.reserveBeforeTransfer
           sampledAt = performance.now()
+          const hello = payload.value
           slot = {
             workerId,
+            said: {
+              ...(hello.reportsSignIn ? { signedIn: [...new Set(hello.signedIn)] } : {}),
+              ...(hello.release === '' ? {} : { release: hello.release }),
+              ...(hello.anyProject ? { anyProject: true } : {}),
+              ...(hello.readiness === undefined ? {} : { readiness: readinessOf(hello.readiness) }),
+            },
             capabilities,
             start,
             openTools,
             busy: () =>
               run !== undefined || recovering !== undefined || (accountReserved && performance.now() - sampledAt <= AGENT_WORKER_LEASE_MS),
             capacity: () => (performance.now() - sampledAt > AGENT_WORKER_LEASE_MS ? undefined : capacity),
+            remove: () => {
+              // A run, or one to reconcile, holds its workspace: the home doesn't remove a worker then.
+              if (closed || run !== undefined || recovering !== undefined) return false
+              const told = send({ case: 'removed', value: create(AgentWorkerRemovedSchema) })
+              release(new Error('The person removed this worker.'))
+              void told.then(
+                () => call.end(),
+                () => undefined,
+              )
+              return true
+            },
           }
           slots.set(workerId, slot)
           renew(AGENT_WORKER_LEASE_MS)
+          reportConnection('connected')
           sendControl({
             case: 'hello',
             value: create(AgentHomeHelloSchema, {
@@ -661,6 +803,9 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         if (payload.case === 'heartbeat') {
           if (payload.value.sequence !== sequence + 1) return fail(status.INVALID_ARGUMENT, 'The worker heartbeat was out of order.')
           sequence = payload.value.sequence
+          if (payload.value.reportsSignIn && payload.value.signedIn.every((providerId) => PROVIDER_ID.test(providerId)))
+            slot.said = { ...slot.said, signedIn: [...new Set(payload.value.signedIn)].slice(0, MAX_CAPABILITIES) }
+          if (payload.value.readiness !== undefined) slot.said = { ...slot.said, readiness: readinessOf(payload.value.readiness) }
           if (payload.value.capacity !== undefined) {
             capacity = capacityOf(payload.value.capacity)
             accountReserved = payload.value.capacity.accountReserved
@@ -787,6 +932,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           const { data } = payload.value
           if (current.phase === 'starting' || data.byteLength === 0 || data.byteLength > MAX_AGENT_CHUNK)
             return fail(status.INVALID_ARGUMENT, 'The worker sent invalid agent output.')
+          if (current.phase === 'stopping') return
           if (!current.output.write(data)) {
             call.pause()
             current.output.once('drain', () => {
@@ -886,17 +1032,34 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
     list: (projectId: string): ReadonlyArray<AvailableAgentWorker> =>
       [...slots.values()]
         .filter(({ workerId }) => ledger.permits(workerId, projectId))
-        .map(({ workerId, capabilities, busy, capacity }) => {
+        .map(({ workerId, capabilities, busy, capacity, said }) => {
           const reported = capacity()
           return {
             workerId,
-            capabilities: capabilities.filter((item) => item.projectId === projectId),
+            ...(said.signedIn === undefined ? {} : { signedIn: said.signedIn }),
+            ...(said.readiness === undefined ? {} : { readiness: said.readiness }),
+            // One for any project is, here, for this one.
+            capabilities: capabilities.filter((item) => covers(item, projectId)).map((item) => ({ ...item, projectId })),
             busy: busy(),
             ...(reported === undefined ? {} : { capacity: reported }),
           }
         })
         .filter((item) => item.capabilities.length > 0),
+    /** Every worker connected now, whatever it may work on: for the home's own list of its workers, not for placing work. */
+    connected: (): ReadonlyArray<AvailableAgentWorker> =>
+      [...slots.values()].map(({ workerId, capabilities, busy, capacity, said }) => {
+        const reported = capacity()
+        return {
+          workerId,
+          ...said,
+          capabilities: capabilities.map(({ projectId, providerId }) => ({ projectId, providerId })),
+          busy: busy(),
+          ...(reported === undefined ? {} : { capacity: reported }),
+        }
+      }),
     openTools: (workerId: string, runId: string, invalidate: () => void) => slots.get(workerId)?.openTools(runId, invalidate),
+    /** Tells a worker connected now that the person removed it: whether it was there, idle, to hear it. */
+    remove: (workerId: string): boolean => slots.get(workerId)?.remove() ?? false,
     start: async (workerId: string, placement: AgentPlacement, options: AgentRunOptions = {}): Promise<WorkerAgentProcess> => {
       const { checkout, repositories, toolPort, skills } = options
       if (toolPort !== undefined && (!Number.isInteger(toolPort) || toolPort < 1 || toolPort > 65_535))
@@ -909,29 +1072,27 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
       )
         return Promise.reject(new Error('This worker is unavailable for that project and provider.'))
       if (!validWorkerProtocolId(placement.workspaceId, 'ws_')) return Promise.reject(new Error('The worker needs a valid workspace ID.'))
+      if (options.requireReady === true) {
+        const unready = unreadyOf(slot.said.readiness, placement.providerId)
+        if (unready !== undefined) return Promise.reject(new Error(unready))
+      }
       if (checkout !== undefined && !validCheckout(checkout)) throw new Error('The worker needs a valid, bounded Git bundle.')
       if (repositories !== undefined) {
         if (checkout !== undefined || !validRepositorySet(repositories, placement.workspaceId))
           throw new Error('The worker needs a valid, bounded set of Git repositories.')
         if (
-          !slot.capabilities.some(
-            (cap) => cap.projectId === placement.projectId && cap.providerId === placement.providerId && cap.workspaceSets,
-          )
+          !slot.capabilities.some((cap) => covers(cap, placement.projectId) && cap.providerId === placement.providerId && cap.workspaceSets)
         )
           throw new Error('Update this worker to run a task with several repositories.')
       }
       if (skills !== undefined) {
-        if (
-          !slot.capabilities.some(
-            (cap) => cap.projectId === placement.projectId && cap.providerId === placement.providerId && cap.skillFiles,
-          )
-        )
+        if (!slot.capabilities.some((cap) => covers(cap, placement.projectId) && cap.providerId === placement.providerId && cap.skillFiles))
           throw new Error('Update this worker to load the selected skills.')
       }
       if (
         options.setup !== undefined &&
         !slot.capabilities.some(
-          (entry) => entry.projectId === placement.projectId && entry.providerId === placement.providerId && entry.workspaceSetup,
+          (entry) => covers(entry, placement.projectId) && entry.providerId === placement.providerId && entry.workspaceSetup,
         )
       )
         throw new Error('Update this worker to run the project’s setup in its task checkout.')

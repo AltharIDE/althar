@@ -1,0 +1,1046 @@
+/* A home's welcome: the tour's card, opening into the arrival; or the arrival alone, every visit after the first. */
+
+.stage {
+  position: relative;
+  isolation: isolate;
+  container: welcome / size;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  overflow: clip;
+  background: var(--n-2);
+}
+.touring {
+  padding: 28px;
+}
+.arriving {
+  padding: 32px 32px 28px;
+}
+/* Althar's light, at the foot, fading before it reaches the words. */
+.light {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  mask-image: linear-gradient(to top, #000 0%, rgb(0 0 0 / 0.55) 42%, transparent 82%);
+}
+/* On the card it stands low, rising as tall as the arrival's as the card opens. */
+.lift {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 100%;
+  transition: transform 1400ms cubic-bezier(0.3, 0.8, 0.2, 1);
+}
+.lift[data-open] {
+  transform: scaleY(1.5);
+}
+/* The page read out as it comes up, for a screen reader alone. */
+.said {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--t-3);
+}
+.display {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  line-height: 1.02;
+  color: var(--t-1);
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+.display:focus {
+  outline: none;
+}
+/* a name, a letter at a time, each a blur clearing where it stands */
+.name {
+  display: inline-flex;
+  flex-wrap: wrap;
+}
+.name span {
+  display: inline-block;
+  white-space: pre;
+  animation: blur-in 460ms linear backwards;
+  animation-delay: calc(270ms + var(--i) * 32ms);
+}
+
+/* ---- the card ---- */
+
+.card {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  width: min(880px, 100%);
+  height: min(600px, 100%);
+  border-radius: 20px;
+  animation: blur-in 380ms linear backwards;
+}
+/* The card's paper, a layer of its own, so opening and closing the card only scales and fades it. */
+.paper {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--lift-dialog);
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 22px;
+  padding: 20px 28px 0;
+}
+.brand {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  max-width: 30%;
+  margin-top: -3px;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+}
+.brand svg {
+  flex: none;
+}
+.brandName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.track {
+  flex: 1;
+  min-width: 0;
+}
+.skip {
+  flex: none;
+  min-width: 32px;
+  text-align: right;
+}
+.body {
+  container-type: inline-size;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 22px;
+  min-height: 0;
+  padding: 30px 28px 12px;
+  overflow-y: auto;
+}
+.words {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: blur-in 420ms linear backwards;
+}
+.title {
+  font-size: 34px;
+  letter-spacing: -0.03em;
+}
+.line {
+  max-width: 560px;
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.scene {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
+  animation: blur-in 420ms linear 70ms backwards;
+}
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 28px 20px;
+}
+/* Back, from page 2 on, coming in as it's needed */
+.foot > * {
+  animation: fade 240ms linear backwards;
+}
+.grow {
+  flex: 1;
+}
+
+/* ---- 1 · the home ---- */
+
+.answering {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 44px;
+  min-height: 0;
+  padding-bottom: 18px;
+}
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.hello {
+  font-size: 52px;
+}
+.spec {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-bottom: 6px;
+}
+.figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+.figure {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 18px 20px 0;
+  border-left: 1px solid var(--line);
+  animation: blur-in 440ms linear backwards;
+  animation-delay: calc(440ms + var(--i) * 90ms);
+}
+.figure:first-child {
+  padding-left: 0;
+  border-left: none;
+}
+.figure dt {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.figure dd {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+}
+.figure b {
+  font-family: var(--font-display);
+  font-size: 56px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  color: var(--t-1);
+}
+.figure small {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 550;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--t-3);
+}
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  min-height: 18px;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--t-3);
+  animation: blur-in 440ms linear 720ms backwards;
+}
+.tools span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.tools span[data-ready] {
+  color: var(--ok-ink);
+}
+
+/* the narrowest window: the figures and the name smaller */
+@container (max-width: 640px) {
+  .hello {
+    font-size: 40px;
+  }
+  .figure {
+    padding-inline: 14px;
+  }
+  .figure b {
+    font-size: 40px;
+  }
+  /* what a figure is counted in goes under it, rather than being cut short */
+  .figure dd {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .figure small {
+    overflow: visible;
+    white-space: normal;
+  }
+}
+
+/* ---- 2 · what the home has ---- */
+
+.needs {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  margin: 0;
+  padding: 6px 6px 6px 14px;
+  border-radius: 12px;
+  list-style: none;
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.needs li {
+  display: grid;
+  grid-template-columns: 18px minmax(96px, 150px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  font-size: 13px;
+  color: var(--t-1);
+  animation: blur-in 420ms linear backwards;
+  animation-delay: calc(200ms + var(--i) * 60ms);
+}
+.needs li + li {
+  border-top: 1px solid var(--line);
+}
+.needs .checking {
+  display: block;
+  color: var(--t-3);
+  animation: none;
+}
+.needMark {
+  display: inline-flex;
+  color: var(--t-2);
+}
+.needName {
+  overflow: hidden;
+  font-weight: 550;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.needNote {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--t-3);
+}
+.needNote code {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  color: var(--t-2);
+}
+.needState {
+  flex: none;
+  color: var(--t-2);
+}
+.needEnd {
+  display: inline-flex;
+  justify-content: flex-end;
+  min-width: 32px;
+  padding-right: 4px;
+}
+.needTick {
+  margin-right: 6px;
+  color: var(--ok-ink);
+}
+.needLink {
+  font-size: 12.5px;
+}
+@container (max-width: 640px) {
+  .needs li {
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    row-gap: 0;
+    padding-block: 6px;
+  }
+  .needNote {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .needEnd {
+    grid-column: 3;
+    grid-row: 1 / 3;
+  }
+}
+
+/* ---- the card opened into the window ---- */
+
+.card[data-open] {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
+  overflow: hidden;
+  border-radius: 0;
+  animation: none;
+}
+/* its head, the card's width still, at the window's top */
+.card[data-open] .head {
+  align-self: center;
+  width: min(880px, 100%);
+  padding-top: 18px;
+}
+/* its paper past the window's edges, so its corners are never seen there, and gone */
+.card[data-open] .paper {
+  inset: -32px;
+  border-radius: 0;
+  opacity: 0;
+}
+/* A still copy of what was on the card, or of a piece of it, over the card while a page morphs. */
+.ghost {
+  position: absolute;
+  z-index: 3;
+  margin: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  pointer-events: none;
+}
+.ghost,
+.ghost * {
+  animation: none !important;
+  transition: none !important;
+}
+.ghost > header,
+.ghost > .paper {
+  visibility: hidden;
+}
+
+/* ---- the arrival ---- */
+
+.arrival {
+  container-type: inline-size;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  width: 100%;
+  min-height: 0;
+  padding: 8px 32px 28px;
+  overflow-y: auto;
+}
+.arriving .arrival {
+  padding: 0;
+}
+.arrivalHead {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  text-align: center;
+}
+.mark {
+  margin-bottom: 6px;
+}
+.arrivalTitle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: clamp(44px, 6.4vw, 72px);
+}
+.welcome {
+  font-size: 0.36em;
+  font-weight: 550;
+  letter-spacing: -0.015em;
+  color: var(--t-3);
+  animation: blur-in 440ms linear 160ms backwards;
+}
+.arrivalLine {
+  max-width: 460px;
+  margin: 4px 0 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.arriving .eyebrow,
+.arriving .arrivalLine {
+  animation: blur-in 440ms linear 200ms backwards;
+}
+
+/* the ways in */
+.doors {
+  display: grid;
+  grid-template-columns: repeat(var(--doors), minmax(0, 1fr));
+  gap: 14px;
+  width: min(860px, 100%);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.doors li {
+  display: flex;
+  min-width: 0;
+  animation: blur-in 440ms linear backwards;
+  animation-delay: calc(420ms + var(--i) * 70ms);
+}
+.door {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: none;
+  border-radius: 18px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--lift-2);
+  cursor: pointer;
+  transition:
+    transform var(--move) var(--ease-slide),
+    box-shadow var(--fast) var(--ease);
+}
+.door:hover {
+  transform: translateY(-4px);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-dialog);
+}
+.door:active {
+  transform: translateY(-1px) scale(0.99);
+}
+.door:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 3px;
+}
+.art {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 128px;
+  border-bottom: 1px solid var(--line);
+  background: radial-gradient(120% 90% at 50% 120%, var(--n-4) 0%, transparent 70%), var(--n-1);
+}
+.doorText {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 16px 16px;
+}
+.doorTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+}
+.doorArrow {
+  flex: none;
+  color: var(--t-3);
+  transition:
+    transform var(--move) var(--ease-slide),
+    color var(--fast) var(--ease);
+}
+.door:hover .doorArrow,
+.door:focus-visible .doorArrow {
+  transform: translateX(4px);
+  color: var(--signal);
+}
+.doorLine {
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* a clone: your repositories fanned, spreading as you reach */
+.fan {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.fanCard {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: flex;
+  border-radius: 12px;
+  box-shadow: 0 0 0 3px var(--n-1);
+  transform: translate(-50%, -50%) translateX(calc(var(--i) * 24px)) rotate(calc(var(--i) * 7deg))
+    translateY(calc(var(--i) * var(--i) * 2px));
+  transition: transform var(--move) var(--ease-slide);
+}
+.door:hover .fanCard {
+  transform: translate(-50%, -50%) translateX(calc(var(--i) * 38px)) rotate(calc(var(--i) * 11deg))
+    translateY(calc(var(--i) * var(--i) * 4px - 6px));
+}
+/* a clone with no host's repositories to show: what comes down */
+.clone {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  color: var(--t-2);
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--lift-1);
+  transition: transform var(--move) var(--ease-slide);
+}
+.door:hover .clone {
+  transform: translateY(4px);
+}
+/* a folder there: its places, stacked, settling apart as you reach */
+.paths {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  width: 100%;
+  padding: 0 18px;
+}
+.path {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 44px);
+  padding: 5px 9px;
+  overflow: hidden;
+  border-radius: 7px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--t-2);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line);
+  transform: translateX(calc(var(--i) * 10px));
+  transition: transform var(--move) var(--ease-slide);
+}
+.door:hover .path {
+  transform: translateX(calc(var(--i) * 22px));
+}
+.path svg {
+  flex: none;
+  color: var(--t-3);
+}
+/* a new one: a blank, whose mark is drawn as you reach for it */
+.blank {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+}
+.blankPlus,
+.blankMark {
+  grid-area: 1 / 1;
+  display: grid;
+  place-items: center;
+  transition:
+    opacity var(--enter) var(--ease-out),
+    transform var(--move) var(--ease-slide);
+}
+.blankPlus {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  color: var(--t-3);
+  box-shadow: inset 0 0 0 1.5px var(--n-5);
+}
+.blankMark {
+  opacity: 0;
+  transform: scale(0.6) rotate(-20deg);
+}
+.door:hover .blankPlus {
+  opacity: 0;
+  transform: scale(1.3);
+}
+.door:hover .blankMark {
+  opacity: 1;
+  transform: none;
+}
+
+/* an older home: its update, in place of the ways in, one panel that stays put as it goes */
+/* The command, when it's opened, as wide as it needs to stay on two lines; the panel narrower, over it. */
+.updating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: min(720px, 100%);
+}
+.update {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  width: min(580px, 100%);
+  min-height: 84px;
+  padding: 16px 18px 16px 16px;
+  border-radius: 18px;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--lift-2);
+  animation: blur-in 440ms linear 360ms backwards;
+}
+.updateTile {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  color: var(--t-2);
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition:
+    color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease);
+}
+.update[data-state='failed'] .updateTile,
+.update[data-state='asking'] .updateTile {
+  color: var(--danger);
+  background: var(--danger-dim);
+}
+.updateText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.updateTitle {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+}
+.updateLine {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--t-3);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  text-wrap: pretty;
+}
+/* the press, or the steps under way, in the same place: the track as wide as the press it replaces */
+.updateEnd {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 140px;
+}
+.updateTrack {
+  width: 140px;
+}
+.updateActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* the command, folded away under it, for running it on the home by hand */
+.byHand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  animation: blur-in 440ms linear 460ms backwards;
+}
+.byHandTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.byHandFold {
+  align-self: stretch;
+}
+.byHandBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+}
+.byHandCommand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 8px 14px;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.updateUnsure {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--t-3);
+  text-wrap: pretty;
+}
+.command {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-1);
+}
+/* Each word whole, so a command wraps only at its spaces; one longer than the line breaks where it must. */
+.commandWord {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.updateCommand {
+  flex: 1;
+  min-width: 0;
+}
+
+/* what the home has, in a strip along the foot */
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  width: min(860px, 100%);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  animation: blur-in 440ms linear 640ms backwards;
+}
+.strip li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  max-width: 100%;
+  padding: 0 4px 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--t-2);
+  background: color-mix(in srgb, var(--paper) 78%, transparent);
+  box-shadow: 0 0 0 1px var(--line);
+  backdrop-filter: blur(6px);
+}
+.strip li[data-state='ready'] {
+  padding-right: 10px;
+}
+.strip li > svg {
+  flex: none;
+}
+.stripName {
+  white-space: nowrap;
+}
+.stripTick {
+  color: var(--ok-ink);
+}
+.stripState {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--t-3);
+}
+.strip li:not([data-state='ready']):not(:has(button)) {
+  padding-right: 10px;
+}
+/* a home that makes projects, older than setting it up from here: its update, under what it has */
+.behind {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: min(560px, 100%);
+  animation: blur-in 440ms linear 720ms backwards;
+}
+.behindLine {
+  margin: 0;
+  font-size: 13px;
+  color: var(--t-2);
+  text-align: center;
+  text-wrap: balance;
+}
+/* its press is a pill inside the pill, the same curve 4px in */
+.strip li button {
+  height: 22px;
+  padding-inline: 9px;
+  border-radius: 999px;
+}
+
+/* the narrowest window: the doors one under another, each a row */
+@container (max-width: 620px) {
+  .arrival {
+    gap: 24px;
+    padding-inline: 20px;
+  }
+  .doors {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .door {
+    border-radius: 14px;
+  }
+  .art {
+    display: none;
+  }
+  .doorText {
+    justify-content: center;
+  }
+  .update {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .updateEnd {
+    grid-column: 1 / -1;
+    justify-content: stretch;
+  }
+  .updateEnd > *,
+  .updateTrack {
+    flex: 1;
+    width: auto;
+  }
+}
+/* A short window: the mark goes, and the doors' pictures are lower. */
+@container welcome (max-height: 640px) {
+  .mark {
+    display: none;
+  }
+  .art {
+    height: 96px;
+  }
+}
+
+@keyframes blur-in {
+  from {
+    opacity: 0;
+    filter: blur(10px);
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* With motion reduced, nothing travels or grows: what comes in only fades. */
+@media (prefers-reduced-motion: reduce) {
+  .lift,
+  .door,
+  .fanCard,
+  .path,
+  .clone,
+  .doorArrow {
+    transition-property: opacity, color, box-shadow;
+  }
+  .door:hover,
+  .door:active {
+    transform: none;
+  }
+  .card,
+  .words,
+  .scene,
+  .figure,
+  .tools,
+  .needs li,
+  .welcome,
+  .name span,
+  .doors li,
+  .update,
+  .byHand,
+  .strip,
+  .arriving .eyebrow,
+  .arriving .arrivalLine {
+    animation-name: fade;
+  }
+}
+
+/*
+ * The update as a strip, in a section of Settings: the width of the sheet it sits on, flat on it as a row of settings
+ * is, with no card of its own and nothing arriving; the command folds open under it, from its left.
+ */
+.updating[data-layout='strip'] {
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+}
+.updating[data-layout='strip'] .update {
+  gap: 12px;
+  width: 100%;
+  min-height: 0;
+  padding: 12px 12px 12px 14px;
+  border-radius: 12px;
+  background: var(--sunk);
+  box-shadow: none;
+  animation: none;
+}
+.updating[data-layout='strip'] .updateTile {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--paper);
+}
+.updating[data-layout='strip'] .updateTitle {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.updating[data-layout='strip'] .updateLine {
+  font-size: 12.5px;
+}
+.updating[data-layout='strip'] .updateEnd {
+  min-width: 0;
+}
+.updating[data-layout='strip'] .byHand {
+  align-items: flex-start;
+  padding-left: 14px;
+  animation: none;
+}
+.updating[data-layout='strip'] .updateUnsure {
+  text-align: left;
+}

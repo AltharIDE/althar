@@ -62,14 +62,33 @@ export interface HostedRepository {
   readonly pushed: string | null
   /** Named like the project. */
   readonly like: boolean
+  /** Archived on its host: listed after the rest, to clone, said so in place of when it was pushed. */
+  readonly archived?: boolean
   /** Where it is on this computer already, when it is: added, not cloned. */
   readonly here: string | null
+  /** Where else it is, said in place of when it was pushed: one of your projects on another computer. */
+  readonly from?: string
+  /** Its host's mark, where its host isn't one of those offered. */
+  readonly brand?: Brand
+}
+
+/** A host that lists fewer repositories than its account has: a token made for some of them, or an app installed on some. */
+export interface SetupLimited {
+  /** The host, by its id among those offered. */
+  readonly host: string
+  readonly by: 'token' | 'app'
+  /** Where it is let reach more; null where that isn't known. */
+  readonly url: string | null
+  /** The one owner a token is for, whose repositories it was given some or all of: an organization's are out of its reach. */
+  readonly owner: string | null
 }
 
 export interface ProjectSetupText {
   ways: string
   clone: string
   cloneFrom: (hosts: string) => string
+  /** Where no host is offered: a clone by its address alone. */
+  cloneAnywhere: string
   folder: string
   folderNote: string
   fresh: string
@@ -90,6 +109,10 @@ export interface ProjectSetupText {
   reading: string
   readFailed: (host: string) => string
   tryAgain: string
+  archived: string
+  /** A host's list is short of what its account has, by what limits it. */
+  limited: (host: string, by: SetupLimited['by'], owner: string | null) => string
+  widen: (by: SetupLimited['by']) => string
   privately: string
   drop: string
   choose: string
@@ -110,6 +133,7 @@ export const projectSetupText: ProjectSetupText = {
   ways: 'Where its code comes from',
   clone: 'Clone',
   cloneFrom: (hosts) => `From ${hosts}`,
+  cloneAnywhere: 'From its address',
   folder: 'A folder',
   folderNote: `On ${device.this}`,
   fresh: 'Start empty',
@@ -130,6 +154,14 @@ export const projectSetupText: ProjectSetupText = {
   reading: 'Reading your repositories…',
   readFailed: (host) => `${host}’s repositories couldn’t be read.`,
   tryAgain: 'Try again',
+  archived: 'Archived',
+  limited: (host, by, owner) =>
+    by === 'app'
+      ? `Only the repositories Althar’s ${host} app is installed on are listed.`
+      : owner === null
+        ? `Only the repositories your ${host} token was given are listed.`
+        : `Your ${host} token reaches only what it was given of ${owner}’s repositories.`,
+  widen: (by) => (by === 'app' ? 'Install it on more' : 'Give it more'),
   privately: 'Private',
   drop: 'Drop a folder here',
   choose: 'Choose a folder…',
@@ -289,7 +321,7 @@ export function SetupWays({
     {
       id: 'clone',
       title: t.clone,
-      note: t.cloneFrom(listOr(from.map((host) => host.name))),
+      note: from.length === 0 ? t.cloneAnywhere : t.cloneFrom(listOr(from.map((host) => host.name))),
       art: (
         <span className={s.wayMarks}>
           {hosts.map((host) => (
@@ -433,6 +465,8 @@ export function SetupRepositories({
   repositories,
   failed = [],
   onRetry,
+  limited = [],
+  onWiden,
   query,
   onQuery,
   pasted,
@@ -450,11 +484,16 @@ export function SetupRepositories({
   /** The hosts whose repositories couldn't be read, by id. */
   failed?: readonly string[]
   onRetry?: () => void
+  /** The hosts that list fewer than their account has: said under the list, with where each is let reach more. */
+  limited?: readonly SetupLimited[]
+  /** Where a host is let reach more was asked for: its page opens, and its list is read again. */
+  onWiden?: (limited: SetupLimited) => void
   query: string
   onQuery: (query: string) => void
   /** A repository a pasted URL names: shown alone, in place of those found. */
   pasted?: HostedRepository | null
-  chosen: string | null
+  /** The one chosen, or each of several: a row pressed again where several can be leaves it out. */
+  chosen: string | readonly string[] | null
   onChoose: (id: string) => void
   onConnect: (host: string) => void
   /** A host being connected, in place: its walk, in the room the list had. */
@@ -480,7 +519,11 @@ export function SetupRepositories({
             (only === 'all' || one.host === only) &&
             words.every((word) => `${one.owner}/${one.name} ${one.description ?? ''}`.toLowerCase().includes(word)),
         )
-  const shown = [...listed.filter((one) => one.like), ...listed.filter((one) => !one.like)]
+  const shown = [
+    ...listed.filter((one) => one.like && one.archived !== true),
+    ...listed.filter((one) => !one.like && one.archived !== true),
+    ...listed.filter((one) => one.archived === true),
+  ]
   const hostOf = (id: string) => hosts.find((host) => host.id === id)
   const rows = () => Array.from(list.current?.querySelectorAll<HTMLButtonElement>('[data-row]') ?? [])
   const onField = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -501,9 +544,12 @@ export function SetupRepositories({
     }
   }
   const failedNames = failed.flatMap((id) => hostOf(id)?.name ?? [])
+  const picked = chosen === null ? [] : typeof chosen === 'string' ? [chosen] : chosen
+  // With no host connected, repositories listed are from elsewhere (your projects on another computer): the hosts are offered beside them.
+  const listing = connected.length > 0 || (repositories ?? []).length > 0
   const body = (() => {
     if (connecting !== undefined && connecting !== null) return <div className={s.walk}>{connecting}</div>
-    if (connected.length === 0 && (pasted === undefined || pasted === null))
+    if (!listing && (pasted === undefined || pasted === null))
       return (
         <div className={s.connectHosts} style={{ minHeight: height }}>
           {hosts.map((host, at) => (
@@ -540,7 +586,8 @@ export function SetupRepositories({
       <ul ref={list} className={s.repoList} style={{ height }} aria-label={t.ways}>
         {shown.map((one) => {
           const host = hostOf(one.host)
-          const on = chosen === one.id
+          const mark = host?.brand ?? one.brand
+          const on = picked.includes(one.id)
           const act = on ? t.chosen : one.here === null ? t.cloneRow : t.add
           return (
             <li key={one.id}>
@@ -554,7 +601,7 @@ export function SetupRepositories({
                 onKeyDown={onRow}
               >
                 <span className={s.repoMark} aria-hidden="true">
-                  {host !== undefined && <BrandMark brand={host.brand} size={20} />}
+                  {mark !== undefined && <BrandMark brand={mark} size={20} />}
                 </span>
                 <span className={s.repoMain}>
                   <span className={s.repoName}>
@@ -573,12 +620,19 @@ export function SetupRepositories({
                     )}
                     {one.here !== null ? (
                       <span className={s.mono}>{t.hereNote(one.here)}</span>
+                    ) : one.from !== undefined && !(on && landing != null) ? (
+                      <span className={s.from} title={one.from}>
+                        <Icon name="computer" size={11} />
+                        {one.from}
+                      </span>
                     ) : on && landing != null ? (
                       // Keyed by the place, so a place changed lands again.
                       <span key={landing} className={cx(s.mono, s.landing)} title={landing}>
                         <Icon name="folder" size={11} />
                         {landing}
                       </span>
+                    ) : one.archived === true ? (
+                      <span>{t.archived}</span>
                     ) : (
                       one.pushed !== null && <span>{one.pushed}</span>
                     )}
@@ -609,7 +663,7 @@ export function SetupRepositories({
               onChange={(event) => onQuery(event.target.value)}
               onKeyDown={onField}
               aria-label={t.find}
-              placeholder={connected.length === 0 ? t.findUnconnected : t.find}
+              placeholder={listing ? t.find : t.findUnconnected}
               spellCheck={false}
               autoComplete="off"
             />
@@ -622,7 +676,7 @@ export function SetupRepositories({
               options={[{ value: 'all', label: t.all }, ...connected.map((host) => ({ value: host.id, label: host.name }))]}
             />
           )}
-          {connected.length > 0 && away.length > 0 && (
+          {listing && away.length > 0 && (
             <Menu
               label={t.connectHost}
               trigger={
@@ -646,6 +700,20 @@ export function SetupRepositories({
           {t.readFailed(listOr(failedNames))} {onRetry !== undefined && <LinkButton onClick={onRetry}>{t.tryAgain}</LinkButton>}
         </Problem>
       )}
+      {!walking &&
+        limited.flatMap((one) => {
+          const host = hostOf(one.host)
+          if (host === undefined || !host.connected) return []
+          return [
+            <p key={one.host} className={s.limited}>
+              <Icon name="info" size={13} />
+              <span>
+                {t.limited(host.name, one.by, one.owner)}{' '}
+                {one.url !== null && onWiden !== undefined && <LinkButton onClick={() => onWiden(one)}>{t.widen(one.by)}</LinkButton>}
+              </span>
+            </p>,
+          ]
+        })}
     </div>
   )
 }

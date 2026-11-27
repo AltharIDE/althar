@@ -133,6 +133,15 @@ describe('the buttons on a task’s lead, as tools', () => {
         yield* titles(one.threadId),
         "The coordinator changed the lead to Fake claude-code's default model: codex is out. It takes over from its next turn.",
       )
+      // Its message goes to the lead as passed on, never shown as something the person said.
+      const given = yield* sql<{
+        body: string
+      }>`SELECT body FROM user_inputs WHERE thread_id = ${one.threadId} AND body LIKE '%Carry on from the sketch.%'`
+      assert.lengthOf(given, 1)
+      assert.lengthOf(
+        yield* sql`SELECT id FROM thread_items WHERE thread_id = ${one.threadId} AND kind = 'user_message' AND content LIKE '%Carry on from the sketch.%'`,
+        0,
+      )
       // A lead changes its own task's lead too, on the person's word: from its next turn.
       assert.match(
         yield* callTool(lead, 'change_lead', { lead: { agent: 'claude-code' }, why: 'the person asked' }),

@@ -1,6 +1,6 @@
 import { configureNetwork, disableNetwork } from './network'
 import { issuePairing, listConnectionDevices, revokeConnectionDevice } from './pairing'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { Cause, Effect, Option } from 'effect'
 
@@ -37,6 +37,10 @@ export interface HostIO extends ServiceCommands {
   readonly notifySocket?: string | undefined
   readonly updateLocked?: string | undefined
   readonly releaseSigningKey?: string | undefined
+  /** The native worker binary a release carries, as the release workflow built it. */
+  readonly workerBinary?: string | undefined
+  /** What the worker's sandbox needs beside Codex's package, built for the release (bundle.ts `workerTools`). */
+  readonly workerTools?: string | undefined
   readonly updates?: ControllerDependencies & SetupDependencies
 }
 
@@ -167,7 +171,10 @@ ${readable}`,
       case 'pair': {
         const configured = yield* configuredHome(options)
         const invitation = yield* issuePairing(configured)
-        return yield* out(invitation, `Home: ${invitation.homeId}\nPairing code (single use, expires in five minutes):\n${invitation.code}`)
+        return yield* out(
+          invitation,
+          `Home: ${invitation.homeId}\nPairing code (single use, expires in five minutes):\n${invitation.code}\nFor a phone, show this link as a QR; its camera opens it:\n${invitation.link}`,
+        )
       }
       case 'devices': {
         const page = yield* listConnectionDevices(options)
@@ -201,13 +208,28 @@ ${readable}`,
       case 'package-release': {
         const result = yield* update(() =>
           packageRelease(options, {
-            source: io.updates?.source ?? { entry: io.entry, node: io.node, version: HOST_VERSION },
+            source: io.updates?.source ?? {
+              entry: io.entry,
+              node: io.node,
+              version: HOST_VERSION,
+              ...(io.workerBinary === undefined || io.workerBinary === '' ? {} : { worker: io.workerBinary }),
+              ...(io.workerTools === undefined || io.workerTools === '' ? {} : { workerTools: io.workerTools }),
+              // With a worker to carry, its own release too, from the build beside this one (vite.worker.config.ts).
+              ...(io.workerBinary === undefined || io.workerBinary === ''
+                ? {}
+                : { workerEntry: join(dirname(io.entry), 'worker', 'althar-worker.js') }),
+            },
             signingKey: io.releaseSigningKey,
             ...(io.updates?.assemble === undefined ? {} : { assemble: io.updates.assemble }),
             ...(io.updates?.execute === undefined ? {} : { execute: io.updates.execute }),
           }),
         )
-        return yield* out(result, `Signed host release assembled: ${result.archive}`)
+        return yield* out(
+          result,
+          result.worker === undefined
+            ? `Signed host release assembled: ${result.archive}`
+            : `Signed host and worker releases assembled: ${result.archive}, ${result.worker.archive}`,
+        )
       }
       case 'setup':
         return yield* update(() => setupHome(options, io, io.out, dependencies))

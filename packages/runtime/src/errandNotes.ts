@@ -317,6 +317,37 @@ const linksIn = (line: string, steps: ReadonlyArray<SaidStep>): ReadonlyArray<No
   return links
 }
 
+/** One merge an errand still has to make: its pull request as people say it (#1224), or its task's name while it has none. */
+export interface MergeLeft {
+  readonly label: string
+  readonly url: string | null
+  /** Its task, where it has one: what tells it from another merge of the same name until its pull request is known. */
+  readonly task: string | null
+  /** What it waits for, as "once its checks pass"; empty where it waits on nothing. */
+  readonly once: string
+}
+
+/**
+ * What an errand that only merges still has to merge, in order; null for an errand that does anything else, whose lines
+ * stand as they are. A step with no pull request to name goes by its task's name, else its own words.
+ */
+export const mergesLeft = (
+  steps: ReadonlyArray<{
+    readonly step: SaidStep
+    readonly done: boolean
+    readonly task: { readonly id: string; readonly title: string | null } | null
+  }>,
+): ReadonlyArray<MergeLeft> | null => {
+  if (steps.length === 0 || steps.some(({ step }) => step.tool !== 'merge_pull_request')) return null
+  return steps
+    .filter(({ done }) => !done)
+    .map(({ step, task }) => {
+      const link = labelOf(subject(step.target))
+      const label = link?.label ?? task?.title ?? stepWords(step).replace(/^Merge\s+(?:the\s+)?/i, '')
+      return { label, url: link?.url ?? null, task: task?.id ?? null, once: waitsWords(step) }
+    })
+}
+
 /** How many steps the kept line names before it counts the rest. */
 const NAMED_MOST = 3
 
@@ -434,6 +465,35 @@ export const heldNote = (
 export const calledOffNote = (steps: ReadonlyArray<SaidStep>, reason: string | null, byPerson: boolean): StepNote => {
   const line = compose('Errand called off', inOrder(steps, false), byPerson ? '' : plainReason(reason))
   return { ...line, links: linksIn(line.title, steps) }
+}
+
+/** What has happened to one of a held errand's steps, as the host shows it now: "v0.9.0 is tagged already", "#957 is open". */
+export interface Happened {
+  readonly said: string
+  readonly links: ReadonlyArray<NoteLink>
+}
+
+/**
+ * A held errand that closed by itself, since what it waited on has happened: done, where every step left was done already;
+ * else closed, where the next step's wait came while Althar couldn't watch for it, so that step and those after it are the
+ * person's to ask for again.
+ */
+export const settledNote = (
+  done: ReadonlyArray<Happened>,
+  left?: { readonly steps: ReadonlyArray<SaidStep>; readonly happened: Happened },
+): StepNote => {
+  // A merge said done already isn't said again as what the next step waited for.
+  const again = left !== undefined && done.some((one) => one.said.startsWith(left.happened.said))
+  const said = [...done, ...(left === undefined || again ? [] : [left.happened])]
+  const what = said.map((one) => one.said).join('; ')
+  const title = fit(
+    left === undefined
+      ? `Errand done: ${what}`
+      : `Errand closed: ${what}, which Althar couldn’t watch for. Ask again to ${inOrder(left.steps, false)}.`,
+  )
+  const links: Array<NoteLink> = []
+  for (const link of said.flatMap((one) => one.links)) if (!links.some((own) => own.label === link.label)) links.push(link)
+  return { title, links: links.filter((link) => title.includes(link.label)) }
 }
 
 /** An errand the person set going again: what it goes on with. */

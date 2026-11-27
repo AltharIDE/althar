@@ -42,6 +42,7 @@ import type { Ledger } from '@althar/persistence-sqlite'
 import { contained } from './Failures'
 import { type CliTool, Connectors } from './Config'
 import { NotFound } from './errors'
+import { forkOf } from './forks'
 import { git, namedRemotes } from './git'
 import { reachedRemote } from './sshHosts'
 import { Instance } from './Instance'
@@ -102,6 +103,16 @@ export class OtherAccount extends Schema.TaggedError<OtherAccount>()('OtherAccou
   login: Schema.String,
   /** Who the connection signs in as. */
   expected: Schema.String,
+}) {}
+
+/**
+ * A browser sign-in that reaches none of the projects' repositories its account's working connection reaches: that
+ * connection's sign-in stays, rather than one that would lose them.
+ */
+export class WouldLoseReach extends Schema.TaggedError<WouldLoseReach>()('WouldLoseReach', {
+  product: Schema.String,
+  message: Schema.String,
+  install: Schema.NullOr(Schema.String),
 }) {}
 
 /** The keychain keeps no token for a connection, or none Althar can read. */
@@ -192,7 +203,13 @@ export type SignInStart =
 export type SignInState =
   | { readonly state: 'waiting' }
   | { readonly state: 'done'; readonly connectionId: string }
-  | { readonly state: 'ended'; readonly reason: 'denied' | 'expired' | 'failed'; readonly message: string }
+  | {
+      readonly state: 'ended'
+      readonly reason: 'denied' | 'expired' | 'failed'
+      readonly message: string
+      /** Where Althar's app is installed, where that is what the sign-in lacked. */
+      readonly install?: string
+    }
 
 /** What the keychain holds for a connection. */
 const Stored = Schema.Union([
@@ -346,7 +363,12 @@ export class Connections extends Context.Service<
     /** Which of a service's products answers at an address. */
     findServer(service: Service, typed: string): Effect.Effect<Found, unknown>
     /** Asks the service what a connection can do. */
-    check(connectionId: string): Effect.Effect<Check, unknown>
+    check(connectionId: string, project?: string): Effect.Effect<Check, unknown>
+    /**
+     * Why the host refused a push to a repository with a connection's sign-in, as far as it says when asked again: the
+     * account's role there, the sign-in itself while the account may push, or null where the host doesn't establish which.
+     */
+    pushCause(connectionId: string, path: ReadonlyArray<string>): Effect.Effect<'role' | 'token' | null>
     /**
      * Removes the connection once nothing it reads for is under way: what
      * reads through it with `whileThere` then ends first, and none starts after.
@@ -897,6 +919,9 @@ export class Connections extends Context.Service<
             ORDER BY workspace_key IS NULL LIMIT 1`
           const kept = workspace === null ? {} : { workspaceKey: workspace.key, workspaceName: workspace.name }
           const where = workspace === null ? {} : { workspace: workspace.key }
+          // A browser sign-in over a connection that works by another sign-in replaces it only where it loses nothing.
+          if (existing !== undefined && existing.state === 'ready' && input.auth !== 'token' && existing.auth !== input.auth)
+            yield* keepsReach(existing, { product: input.product, webUrl, apiUrl, credential, auth: input.auth })
           const id = existing?.id ?? (yield* newId(Ids.connection))
           const credentialRef = existing?.credentialRef ?? id
           const movedOnFrom = input.still === undefined ? Effect.succeed(false) : movedOn(input.still)
@@ -966,6 +991,63 @@ export class Connections extends Context.Service<
           return toInfo(yield* rowOf(id))
         })
 
+      /**
+       * Fails where a new sign-in doesn't reach a repository of the projects' on its instance that the connection it would
+       * replace reaches: an organisation that refuses Althar's app keeps the token it was connected with.
+       */
+      /** Paths as a sentence names them: a, b and 2 more. */
+      const listed = (paths: ReadonlyArray<string>) =>
+        paths.length <= 3
+          ? paths.length === 1
+            ? (paths[0] ?? '')
+            : `${paths.slice(0, -1).join(', ')} and ${paths.at(-1) ?? ''}`
+          : `${paths.slice(0, 2).join(', ')} and ${paths.length - 2} more`
+
+      const keepsReach = (
+        existing: Row,
+        fresh: {
+          readonly product: Product
+          readonly webUrl: string
+          readonly apiUrl: string
+          readonly credential: Credential
+          readonly auth: ConnectionInfo['auth']
+        },
+      ) =>
+        Effect.gen(function* () {
+          const repositories = yield* repositoriesAt(fresh.product, fresh.webUrl)
+          if (repositories.length === 0) return
+          const reachIn = (report: { readonly lines: ReadonlyArray<AccessLine> }) => report.lines.find((one) => one.need === 'reach')
+          const now = yield* accessOf(fresh.product, fresh.webUrl, fresh.apiUrl, fresh.credential, fresh.auth, repositories)
+          if (reachIn(now)?.state === 'ok') return
+          const before = yield* credential(existing.id).pipe(Effect.option)
+          if (Option.isNone(before)) return
+          const was = yield* accessOf(existing.product, existing.webUrl, existing.apiUrl, before.value, existing.auth, repositories)
+          // Repository by repository where both checks say each; else by the whole, all reached before and not now.
+          const lost =
+            now.reached !== undefined && was.reached !== undefined
+              ? was.reached.filter((path) => !now.reached?.includes(path))
+              : reachIn(was)?.state === 'ok'
+                ? repositories.map((path) => path.join('/'))
+                : []
+          if (lost.length === 0) return
+          const reason = reachIn(now)?.reason
+          const owners = new Set(lost.map((path) => (path.split('/')[0] ?? '').toLowerCase()))
+          const missing = reason?.kind === 'not_installed' && owners.has(reason.owner.toLowerCase()) ? reason : null
+          return yield* new WouldLoseReach({
+            product: fresh.product,
+            message:
+              missing !== null
+                ? `Althar isn’t installed on ${missing.owner}, so your connection keeps the sign-in it had. Install it there, then try again.`
+                : `This sign-in can’t reach ${listed(lost)}, which your connection reaches, so it keeps the sign-in it had.`,
+            install: missing?.url ?? null,
+          })
+        }).pipe(
+          Effect.catchIf(
+            (error) => !(error instanceof WouldLoseReach),
+            () => Effect.void,
+          ),
+        )
+
       /*
        * Sign-ins under way, by flow id. One that ends is kept a while for its
        * window to read, then let go: a window closed meanwhile never cancels it.
@@ -981,18 +1063,25 @@ export class Connections extends Context.Service<
         const flow = flows.get(flowId)
         if (flow === undefined) return
         flow.state =
-          error instanceof SignInEnded
-            ? { state: 'ended', reason: error.reason, message: error.reason === 'denied' ? 'Sign-in was declined.' : 'The code expired.' }
-            : {
+          error instanceof WouldLoseReach
+            ? {
                 state: 'ended',
                 reason: 'failed',
-                message:
-                  error instanceof ConnectorFailed
-                    ? error.message
-                    : error instanceof OtherAccount
-                      ? `That signed in as ${error.login}, not ${error.expected}.`
-                      : 'Sign-in didn’t finish.',
+                message: error.message,
+                ...(error.install === null ? {} : { install: error.install }),
               }
+            : error instanceof SignInEnded
+              ? { state: 'ended', reason: error.reason, message: error.reason === 'denied' ? 'Sign-in was declined.' : 'The code expired.' }
+              : {
+                  state: 'ended',
+                  reason: 'failed',
+                  message:
+                    error instanceof ConnectorFailed
+                      ? error.message
+                      : error instanceof OtherAccount
+                        ? `That signed in as ${error.login}, not ${error.expected}.`
+                        : 'Sign-in didn’t finish.',
+                }
       }
 
       /** Runs a sign-in to its end in the background, recording how it went. */
@@ -1178,8 +1267,8 @@ export class Connections extends Context.Service<
       /** Each repository of every project, with its stored remotes, and where it is on this device. */
       const bindings = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        return yield* sql<{ project: string; remotes: string; path: string | null }>`
-          SELECT p.name AS project, b.remote_fingerprints AS remotes, l.path
+        return yield* sql<{ project: string; remotes: string; path: string | null; changeTarget: string | null }>`
+          SELECT p.name AS project, b.remote_fingerprints AS remotes, l.path, b.change_target
           FROM repository_bindings b JOIN projects p ON p.id = b.project_id
           LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
           WHERE b.detached_at IS NULL AND p.archived_at IS NULL
@@ -1263,7 +1352,16 @@ export class Connections extends Context.Service<
                 const reachedUrls = yield* Effect.forEach(remotes, (remote) =>
                   Effect.map(reachedRemote(remote.url, knows), (url) => ({ name: remote.name, url })),
                 )
-                return { project: binding.project, path: binding.path, remotes: reachedUrls }
+                // Where its work is pushed: origin (a fork's own), else its first remote; and where the project sends branches to the
+                // repository it was forked from, that one too, as publishing does.
+                const origin = reachedUrls.find((remote) => remote.name === 'origin') ?? reachedUrls[0]
+                const fork =
+                  binding.changeTarget === 'upstream_branch'
+                    ? forkOf(remotes.flatMap((r) => (r.name === null ? [] : [{ name: r.name, url: r.url }])))
+                    : null
+                const upstream = fork === null ? undefined : reachedUrls.find((remote) => remote.name === fork.upstream.remote)
+                const pushes = [origin, upstream].flatMap((remote) => (remote === undefined ? [] : [remote.url]))
+                return { project: binding.project, path: binding.path, remotes: reachedUrls, pushes }
               }),
             { concurrency: 4 },
           )
@@ -1286,7 +1384,10 @@ export class Connections extends Context.Service<
             )
           }
           const candidates = [...new Map(known.filter((at) => fits(at.product)).map((at) => [`${at.product} ${at.webUrl}`, at])).values()]
-          const places = new Map<string, { place: Place & { repositories: Array<string> }; paths: Array<string> }>()
+          const places = new Map<
+            string,
+            { place: Place & { repositories: Array<string> }; paths: Array<string>; pushes: Array<ReadonlyArray<string>> }
+          >()
           for (const binding of read)
             for (const remote of binding.remotes) {
               const ref = parseRemote(remote.url)
@@ -1297,10 +1398,13 @@ export class Connections extends Context.Service<
               const entry = places.get(key) ?? {
                 place: { product: at.product, webUrl: at.webUrl, project: binding.project, remote: remote.name, repositories: [] },
                 paths: [],
+                pushes: [],
               }
               // The repository's path as its code host knows it: under the instance's own path, as its page reads it.
-              const path = pageOf(at.product, at.webUrl, ref.path).path.join('/')
+              const page = pageOf(at.product, at.webUrl, ref.path).path
+              const path = page.join('/')
               if (!entry.place.repositories.includes(path)) entry.place.repositories.push(path)
+              if (binding.pushes.includes(remote.url) && !entry.pushes.some((one) => one.join('/') === path)) entry.pushes.push(page)
               if (binding.path !== null && !entry.paths.includes(binding.path)) entry.paths.push(binding.path)
               places.set(key, entry)
             }
@@ -1335,6 +1439,7 @@ export class Connections extends Context.Service<
         credential: Credential,
         auth: ConnectionInfo['auth'],
         repositories: ReadonlyArray<ReadonlyArray<string>>,
+        pushes?: ReadonlyArray<ReadonlyArray<string>>,
       ) =>
         Effect.gen(function* () {
           const info = infoOf(product)
@@ -1366,6 +1471,7 @@ export class Connections extends Context.Service<
             credential,
             auth,
             repositories,
+            ...(pushes === undefined ? {} : { pushes }),
             ...(connectors.appSlug === undefined ? {} : { appSlug: connectors.appSlug }),
           })
         })
@@ -1567,18 +1673,48 @@ export class Connections extends Context.Service<
         }
       })
 
-      const check = (connectionId: string) =>
+      /** The projects' repositories on an instance, each once. */
+      const repositoriesAt = (product: Product, webUrl: string) =>
+        Effect.map(placesOf(false), (found) => {
+          const repositories = found
+            .map((entry) => entry.place)
+            .filter((place) => place.product === product && place.webUrl === webUrl)
+            .flatMap((place) => place.repositories.map((path) => path.split('/')))
+          return [...new Map(repositories.map((path) => [path.join('/'), path])).values()]
+        })
+
+      const pushCause = (connectionId: string, path: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          const row = yield* rowOf(connectionId)
+          const now = yield* credential(connectionId)
+          const report = yield* accessOf(row.product, row.webUrl, row.apiUrl, now, row.auth, [path], [path])
+          const said = report.lines
+            .find((line) => line.need === 'push')
+            ?.repositories?.find((one) => one.path.toLowerCase() === path.join('/').toLowerCase())
+          // A role, where the host said the account may only read; the sign-in, where it said the account may push and git
+          // still refused it; anything else isn't established.
+          if (said?.reason?.kind === 'role' && said.accountPush === false) return 'role' as const
+          if (said?.reason?.kind === 'no_push' && said.accountPush === true) return 'token' as const
+          return null
+        })
+
+      const check = (connectionId: string, project?: string) =>
         Effect.gen(function* () {
           const row = yield* rowOf(connectionId)
           const info = infoOf(row.product)
           const kept = yield* stored(row).pipe(Effect.mapError(refusedFor(row)))
           const now = yield* credential(connectionId).pipe(Effect.mapError(refusedFor(row)))
-          const places = (yield* placesOf(false)).map((entry) => entry.place)
-          const repositories = places
-            .filter((place) => place.product === row.product && place.webUrl === row.webUrl)
-            .flatMap((place) => place.repositories.map((path) => path.split('/')))
+          // Its remotes by name, as git has them: which of them a project's work is pushed to, and which it only reads.
+          const here = (yield* placesOf(true)).filter(
+            (entry) =>
+              entry.place.product === row.product &&
+              entry.place.webUrl === row.webUrl &&
+              (project === undefined || entry.place.project === project),
+          )
+          const repositories = here.flatMap((entry) => entry.place.repositories.map((path) => path.split('/')))
           const unique = [...new Map(repositories.map((path) => [path.join('/'), path])).values()]
-          const report = yield* accessOf(row.product, row.webUrl, row.apiUrl, now, row.auth, unique)
+          const pushes = [...new Map(here.flatMap((entry) => entry.pushes).map((path) => [path.join('/'), path])).values()]
+          const report = yield* accessOf(row.product, row.webUrl, row.apiUrl, now, row.auth, unique, pushes)
           if (report.account?.workspace !== undefined && report.account.id === row.accountId)
             yield* learnWorkspace(row, report.account.workspace)
           return {
@@ -1783,7 +1919,8 @@ export class Connections extends Context.Service<
         places: provide(Effect.map(placesOf(false), (found) => found.map((entry) => entry.place))),
         guide: (service) => provide(guide(service)),
         findServer: (service, typed) => provide(findServer(service, typed)),
-        check: (connectionId) => provide(check(connectionId)),
+        check: (connectionId, project) => provide(check(connectionId, project)),
+        pushCause: (connectionId, path) => provide(pushCause(connectionId, path)).pipe(Effect.orElseSucceed(() => null)),
         remove: (connectionId, actorId) =>
           provide(
             Effect.uninterruptibleMask((restore) => {

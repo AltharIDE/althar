@@ -19,6 +19,7 @@ import {
   EdgeMini,
   EdgePlaces,
   EdgeSpot,
+  fewerOf,
   Icon,
   KeepAwake,
   LinkButton,
@@ -38,6 +39,7 @@ import {
   HelpImprove,
   Storage,
   TaskFolders,
+  taskFoldersText,
   UpdateReady,
   Problem,
 } from '@althar/ui'
@@ -45,13 +47,19 @@ import {
 import altharFace from '../../../../resources/faces/althar-ai.svg'
 import type { AccentSource, Appearance } from '../../../main/appPreferences'
 import { SYSTEM_SOUND } from '../../../main/notify'
+import { canCall } from '../../data/client'
 import { type StoragePlace, useServices } from '../../data/services'
 import { agentLineOf, brandOf, canPick, pinnedOf } from '../../shared/agents'
 import { systemAccentState } from '../../shared/accent'
 import { appIcons } from '../../shared/appIcons'
+import { useAppVersion } from '../../shared/appVersion'
+import { LAST_WITHOUT_HOME_SETTINGS } from '../../../homes'
+import { behindText, HomeBehind } from '../homes/HomeBehind'
+import { useHomeName } from '../homes/useHomes'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
 import { useEditorPictures, useEditorsRead } from '../../shared/OpenIn'
+import { usePlaces } from '../../shared/usePlaces'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { useSounds } from '../../shared/useSounds'
 import { CHANGELOG, COMMUNITY, WEBSITE } from '../../shared/links'
@@ -64,10 +72,13 @@ import { type ConnectionsModel, useConnections } from '../connections/useConnect
 import { AgentProblem, openGuide, StartError } from '../start/StartView'
 import type { StartModel } from '../start/useStart'
 import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
+import { ComputersSection } from './ComputersSection'
 import { ModelsView } from './ModelsView'
 import { QuickCards } from './QuickCards'
 import { ChangedBy } from './ChangedBy'
-import { GROUPS, type Section, type SettingsFocus, sectionText } from './sections'
+import { groupsFor, type Section, type SectionGroup, type SettingsFocus, sectionText } from './sections'
+import { type SettingsHome, useSettingsHome } from './home'
+import { HomeSettings } from './HomeSettings'
 import s from './Settings.module.css'
 import { text } from './text'
 import { useDictationSettings } from './useDictationSettings'
@@ -109,6 +120,8 @@ export interface SettingsPageProps {
   focus?: SettingsFocus
   /** Opens a task, by its thread: one whose folder shows under Work on this computer. */
   onTask?: (threadId: string) => void
+  /** About Althar's What's new: Althar's own page, in the window. Without it, the notes in the browser. */
+  onWhatsNew?: () => void
   /**
    * An agent to sign in again, by its id, as a signed-out agent's error asks:
    * its tab opens, with its sign-in started, once while the page shows.
@@ -118,12 +131,32 @@ export interface SettingsPageProps {
   account?: string
   /** An agent whose tab opens, nothing started: one that isn't installed, where its Install is. */
   agent?: string
+  /** The computer opened out in Computers, as the tab's address says it: the home, or a worker by its id. */
+  worker?: string
+  /** Opens a computer out in Computers, or none: all of them. */
+  onComputer?: (id: string | null) => void
 }
 
-export function SettingsPage({ start, section, onSection, focus, onTask, signIn, account: meant, agent: shown }: SettingsPageProps) {
+export function SettingsPage({
+  start,
+  section,
+  onSection,
+  focus,
+  onTask,
+  onWhatsNew,
+  signIn,
+  account: meant,
+  agent: shown,
+  worker,
+  onComputer,
+}: SettingsPageProps) {
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
+  const { client } = useServices()
+  const catalog = canCall(client, 'GetAgentCatalog')
+  // An older home doesn't let this window sign its agents in: a link to an agent's sign-in opens its tab, with its update.
+  const signsIn = canCall(client, 'StartAccountSignIn')
   // Here, and not in the agents' section, so a sign-in lasts from one section to another.
   const accounts = useAccountSignIn(start)
   // Here too, so a choice still being kept outlasts a look at another section; where Althar shows is asked again as its section opens.
@@ -134,7 +167,7 @@ export function SettingsPage({ start, section, onSection, focus, onTask, signIn,
   if ((signIn ?? shown) !== undefined && (signIn ?? shown) !== asked) setAsked(signIn ?? shown)
   // Started once the agents are read again as the page opens: a read already under way would take a Terminal sign-in as done.
   const [openedAt] = useState(start.checkedAt)
-  const wanted = start.checkedAt > openedAt ? agents.find((agent) => agent.id === signIn) : undefined
+  const wanted = signsIn && start.checkedAt > openedAt ? agents.find((agent) => agent.id === signIn) : undefined
   useEffect(() => {
     if (wanted === undefined) return
     if (wanted.installed && wanted.problem === null) {
@@ -155,6 +188,14 @@ export function SettingsPage({ start, section, onSection, focus, onTask, signIn,
     'code-hosts': connections.list?.connections.some((connection) => connection.state === 'reauth_required') === true,
   }
   const open = sectionText[section]
+  const home = useSettingsHome()
+  const navItem = (id: Section) => ({
+    id,
+    title: sectionText[id].title,
+    icon: sectionText[id].icon,
+    ...(yours[id] === true ? { yours: true } : {}),
+  })
+  const navGroup = (group: SectionGroup) => ('sections' in group ? { ...group, sections: group.sections.map(navItem) } : group.map(navItem))
   return (
     <SettingsLayout
       section={section}
@@ -163,19 +204,7 @@ export function SettingsPage({ start, section, onSection, focus, onTask, signIn,
         <>
           <QuickCards side preferences={preferences} sounds={sounds.list} onSection={onSection} />
           <Failed when={preferences.failed} />
-          <SettingsNav
-            label={text.settings}
-            groups={GROUPS.map((group) =>
-              group.map((id) => ({
-                id,
-                title: sectionText[id].title,
-                icon: sectionText[id].icon,
-                ...(yours[id] === true ? { yours: true } : {}),
-              })),
-            )}
-            value={section}
-            onChange={(next) => onSection(next)}
-          />
+          <SettingsNav label={text.settings} groups={groupsFor(home).map(navGroup)} value={section} onChange={(next) => onSection(next)} />
         </>
       }
     >
@@ -186,14 +215,21 @@ export function SettingsPage({ start, section, onSection, focus, onTask, signIn,
         accounts={accounts}
         connections={connections}
         looks={looks}
+        home={home}
         {...(asked === undefined ? {} : { asked })}
         {...(onTask === undefined ? {} : { onTask })}
+        {...(onWhatsNew === undefined ? {} : { onWhatsNew })}
         lit={focus === 'task-folders'}
         onFreeUp={() => onSection('this-mac', 'task-folders')}
+        computer={worker ?? null}
+        onComputer={onComputer ?? (() => onSection('computers'))}
       />
-      <div hidden={section !== 'agents'}>
-        <AgentCatalogSection start={start} active={section === 'agents'} />
-      </div>
+      {/* More agents, where the home lets this window read them: another computer's home doesn't, so they aren't offered. */}
+      {catalog && (
+        <div hidden={section !== 'agents'}>
+          <AgentCatalogSection start={start} active={section === 'agents'} />
+        </div>
+      )}
     </SettingsLayout>
   )
 }
@@ -210,46 +246,83 @@ function SectionBody({
   accounts,
   connections,
   looks,
+  home,
   asked,
   onTask,
+  onWhatsNew,
   lit,
   onFreeUp,
+  computer,
+  onComputer,
 }: {
   section: Section
   start: StartModel
   accounts: AccountSignInModel
   connections: ConnectionsModel
   looks: Looks
+  /** The home the window is on, whose sections are its own. */
+  home: SettingsHome
   /** The agent the person was sent here to sign in again. */
   asked?: string
   onTask?: (threadId: string) => void
+  onWhatsNew?: () => void
   /** The task folders' row comes into view and lights for a moment: the person was sent there to free space. */
   lit: boolean
   /** Sends the person to the task folders' row, from About's storage. */
   onFreeUp: () => void
+  /** The computer opened out in Computers. */
+  computer: string | null
+  onComputer: (id: string | null) => void
 }) {
+  const { client } = useServices()
   switch (section) {
     case 'agents':
       return <AgentsSection start={start} accounts={accounts} {...(asked === undefined ? {} : { asked })} />
     case 'mcp-servers':
-      return <ServersSection start={start} />
+      // A home's own, where it shows them to its window; an older one offers its update in their place.
+      return home.remote && !canCall(client, 'GetAgentTools') ? (
+        <HomeBehind line={behindText.servers} since={LAST_WITHOUT_HOME_SETTINGS} />
+      ) : (
+        <ServersSection start={start} {...(home.remote ? { whose: `${home.name}’s` } : {})} />
+      )
     case 'skills':
-      return <SkillsSection start={start} />
+      return home.remote && !canCall(client, 'ListSkills') ? (
+        <HomeBehind line={behindText.skills} since={LAST_WITHOUT_HOME_SETTINGS} />
+      ) : (
+        <SkillsSection start={start} {...(home.remote ? { whose: `${home.name}’s` } : {})} />
+      )
     case 'code-hosts':
-      return <ConnectionsView model={connections} columns />
+      return <CodeHostsSection model={connections} />
+    case 'computers':
+      return (
+        <ComputersSection
+          start={start}
+          opened={computer}
+          onOpen={onComputer}
+          onTask={onTask}
+          // A home's finished tasks' folders are on its disk: under it, with its agents at once.
+          {...(home.remote ? { folders: <HomeFolders home={home.name} lit={lit} onTask={onTask} /> } : {})}
+        />
+      )
     case 'this-mac':
-      return <ThisMacSection lit={lit} {...(onTask === undefined ? {} : { onTask })} />
+      return <ThisMacSection home={home} lit={lit} {...(onTask === undefined ? {} : { onTask })} />
     case 'tasks':
       return (
-        <>
+        <HomeSettings>
           <TasksSection />
+          {/* A home's automations are its own: paused here, with how its tasks go, rather than with this computer's. */}
+          {home.remote && <PauseAutomations />}
           <SettingGroup title={presetsText.title} headingLevel={2}>
             <PresetsSection agents={(start.status?.agents ?? []).filter(canPick)} />
           </SettingGroup>
-        </>
+        </HomeSettings>
       )
     case 'pull-requests':
-      return <ReviewsSection connections={connections} />
+      return (
+        <HomeSettings>
+          <ReviewsSection connections={connections} />
+        </HomeSettings>
+      )
     case 'notifications':
       return <NotificationsSection />
     case 'appearance':
@@ -264,7 +337,14 @@ function SectionBody({
         </>
       )
     case 'about':
-      return <AboutSection start={start} onFreeUp={onFreeUp} />
+      return (
+        <AboutSection
+          start={start}
+          // This computer's storage is measured by its own runtime, which a home's window doesn't reach: it shows here only.
+          {...(home.remote ? {} : { onFreeUp })}
+          {...(onWhatsNew === undefined ? {} : { onWhatsNew })}
+        />
+      )
   }
 }
 
@@ -272,6 +352,17 @@ function SectionBody({
 function Failed({ when, children = text.failed }: { when: boolean; children?: string }) {
   if (!when) return null
   return <Problem className={s.failed}>{children}</Problem>
+}
+
+/**
+ * The code hosts and trackers. On another computer's home, its code hosts alone, connected there from here: its trackers stay
+ * the person's own window's. An older home that can't connect one from here offers its update in their place.
+ */
+function CodeHostsSection({ model }: { model: ConnectionsModel }) {
+  const { client } = useServices()
+  if (client.connection === undefined) return <ConnectionsView model={model} columns />
+  if (!canCall(client, 'ConnectToken')) return <HomeBehind line={behindText.hosts} />
+  return <ConnectionsView model={model} only="hosts" />
 }
 
 /* ---- the agents ------------------------------------------------------------------- */
@@ -294,6 +385,12 @@ const tabOf = (agent: AgentStatus): AgentTab => {
 /** The agents, one at a time by their tabs: each one's accounts, and the models its work may use; or downloading one that isn't here. */
 function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts: AccountSignInModel; asked?: string }) {
   const [agentId, setAgentId] = useState<string | null>(null)
+  // The agents of the home the window is on: this computer's, or another's, by its name; on an older one, shown only, with its
+  // update in place of signing them in.
+  const { name: where } = useHomeName()
+  const { client } = useServices()
+  const signsIn = canCall(client, 'StartAccountSignIn')
+  const installs = canCall(client, 'InstallAgent')
   // Looking for an agent again, after the person installed it themselves: the agents are read afresh, sign-ins too.
   const [checking, setChecking] = useState(false)
   const checkAgain = () => {
@@ -314,46 +411,53 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
     return (
       <>
         <StartError model={start} />
-        <p className={s.quiet}>{text.connecting}</p>
+        <p className={s.quiet}>{text.connecting(where)}</p>
       </>
     )
   const brand = brandOf(chosen.id)
   return (
-    <AgentTabs value={chosen.id} onValueChange={setAgentId} className={s.agents}>
-      <AgentTabList label={text.agents} agents={agents.map(tabOf)} text={{ away: `not on ${device.this}` }} />
-      <StartError model={start} />
-      {/* What its work may use, beside its accounts, once it is on this computer and can say. */}
-      <AgentTabPanel
-        agent={tabOf(chosen)}
-        headingLevel={2}
-        {...(chosen.installed ? { aside: <ModelsView key={chosen.id} agent={chosen} /> } : {})}
-      >
-        {chosen.problem !== null ? (
-          <AgentProblem why={chosen.problem} model={start} />
-        ) : chosen.id === 'copilot-direct' || (chosen.installed && chosen.download?.installing !== true) ? (
-          <AgentAccounts agent={chosen} start={start} signIn={accounts} />
-        ) : (
-          <AgentInstall
-            name={chosen.name}
-            text={{ missing: text.agentHere }}
-            {...(brand === undefined ? {} : { brand })}
-            {...(chosen.download === null ? {} : { size: chosen.download.size })}
-            {...(pinnedOf(chosen) === undefined ? {} : { pinned: pinnedOf(chosen) })}
-            state={
-              chosen.download?.installing === true
-                ? { kind: 'installing' }
-                : start.installFailed[chosen.id] === undefined
-                  ? { kind: 'idle' }
-                  : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
-            }
-            onInstall={() => void start.install(chosen.id)}
-            {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
-            onCheck={checkAgain}
-            checking={checking}
-          />
-        )}
-      </AgentTabPanel>
-    </AgentTabs>
+    <>
+      {/* Once, over every agent: an older home's agents show here, and sign in once it's updated. */}
+      {!signsIn && <HomeBehind line={behindText.agents} />}
+      <AgentTabs value={chosen.id} onValueChange={setAgentId} className={s.agents}>
+        <AgentTabList label={text.agents} agents={agents.map(tabOf)} text={{ away: `not on ${where}` }} />
+        <StartError model={start} />
+        {/* What its work may use, beside its accounts, once it is on this computer and can say. */}
+        <AgentTabPanel
+          agent={tabOf(chosen)}
+          headingLevel={2}
+          {...(chosen.installed ? { aside: <ModelsView key={chosen.id} agent={chosen} /> } : {})}
+        >
+          {chosen.problem !== null ? (
+            <AgentProblem why={chosen.problem} model={start} />
+          ) : chosen.id === 'copilot-direct' || (chosen.installed && chosen.download?.installing !== true) ? (
+            <>
+              <AgentAccounts agent={chosen} start={start} signIn={accounts} readOnly={!signsIn} />
+            </>
+          ) : (
+            <AgentInstall
+              name={chosen.name}
+              text={{ missing: (name: string) => text.agentHere(name, where) }}
+              {...(brand === undefined ? {} : { brand })}
+              {...(chosen.download === null ? {} : { size: chosen.download.size })}
+              {...(pinnedOf(chosen) === undefined ? {} : { pinned: pinnedOf(chosen) })}
+              state={
+                chosen.download?.installing === true
+                  ? { kind: 'installing' }
+                  : start.installFailed[chosen.id] === undefined
+                    ? { kind: 'idle' }
+                    : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
+              }
+              // Downloaded where the home lets this window: another computer's home is told its guide instead.
+              {...(installs ? { onInstall: () => void start.install(chosen.id) } : {})}
+              {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
+              onCheck={checkAgain}
+              checking={checking}
+            />
+          )}
+        </AgentTabPanel>
+      </AgentTabs>
+    </>
   )
 }
 
@@ -362,11 +466,19 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
 /** The system lets Althar open at login: a Mac, and Windows. */
 const opensAtLogin = platform === 'darwin' || platform === 'win32'
 
-function ThisMacSection({ lit, onTask }: { lit: boolean; onTask?: (threadId: string) => void }) {
+/**
+ * How Althar works on this computer. In a window on another computer's home, only what is this computer's own: keeping
+ * it awake, the bar's load, opening at login and dictation; the home's agents at once and task folders are under
+ * Computers, and its automations under Tasks.
+ */
+function ThisMacSection({ home, lit, onTask }: { home: SettingsHome; lit: boolean; onTask?: (threadId: string) => void }) {
   const { preferences, set, failed } = usePreferences()
   const atOnce = useAgentsAtOnce()
+  const places = usePlaces(!home.remote)
   const paused = useAutomationsPaused()
   const folders = useTaskFolders(onTask)
+  const own = !home.remote
+  const words = text.atOnce(home.name)
   return (
     <>
       <SettingList>
@@ -377,18 +489,20 @@ function ThisMacSection({ lit, onTask }: { lit: boolean; onTask?: (threadId: str
           onBatteryChange={(on) => set('awakeOnBattery', on)}
           text={{ title: text.awakeTitle, note: text.awakeNote }}
         />
-        {atOnce !== null && (
+        {own && atOnce !== null && (
           <AgentsAtOnce
             count={atOnce.atOnce.count}
             own={atOnce.atOnce.own !== null}
             machine={atOnce.atOnce.machine}
             most={MOST_AT_ONCE}
             onChange={atOnce.set}
-            text={{ note: text.atOnceNote, mark: text.atOnceMark, value: text.atOnceValue }}
+            fewer={places === null ? null : fewerOf(places)}
+            text={words}
           />
         )}
+        {/* The bar's load is the home's the window is on: named by it. */}
         <SettingSwitch
-          title={text.loadTitle}
+          title={text.loadTitle(home.name)}
           glyph={<Icon name="load" size={15} />}
           checked={preferences.showLoad}
           onChange={(on) => set('showLoad', on)}
@@ -402,7 +516,7 @@ function ThisMacSection({ lit, onTask }: { lit: boolean; onTask?: (threadId: str
             onChange={(on) => set('openAtLogin', on)}
           />
         )}
-        {paused !== null && (
+        {own && paused !== null && (
           <SettingSwitch
             title={text.pauseAllTitle}
             note={text.pauseAllNote}
@@ -412,28 +526,66 @@ function ThisMacSection({ lit, onTask }: { lit: boolean; onTask?: (threadId: str
           />
         )}
         {/* When finished tasks' folders go, and what of this computer's disk they take (ADR-056). */}
-        {folders !== null && (
-          <TaskFolders
-            wait={folders.wait}
-            onWait={folders.setWait}
-            disk={folders.disk}
-            goes={folders.goes}
-            held={folders.held}
-            onCleanUp={folders.cleanUp}
-            onRemove={folders.remove}
-            {...(folders.open === undefined ? {} : { onOpen: folders.open })}
-            measuring={folders.measuring}
-            freed={folders.freed}
-            busy={folders.busy}
-            {...(folders.error === null ? {} : { error: folders.error })}
-            lit={lit}
-          />
-        )}
+        {own && folders !== null && <Folders folders={folders} lit={lit} />}
       </SettingList>
-      <Failed when={failed || atOnce?.failed === true || paused?.failed === true} />
+      <Failed when={failed || (own && (atOnce?.failed === true || paused?.failed === true))} />
       <SettingGroup title={text.dictation} headingLevel={2}>
         <DictationSection />
       </SettingGroup>
+    </>
+  )
+}
+
+/** When finished tasks' folders go, and what of the disk they take: this computer's, or the home's, named. */
+function Folders({ folders, lit, home }: { folders: NonNullable<ReturnType<typeof useTaskFolders>>; lit: boolean; home?: string }) {
+  return (
+    <TaskFolders
+      wait={folders.wait}
+      onWait={folders.setWait}
+      disk={folders.disk}
+      goes={folders.goes}
+      held={folders.held}
+      {...(folders.cleanUp === undefined ? {} : { onCleanUp: folders.cleanUp })}
+      {...(folders.remove === undefined ? {} : { onRemove: folders.remove })}
+      listed={folders.listed}
+      {...(folders.open === undefined ? {} : { onOpen: folders.open })}
+      measuring={folders.measuring}
+      freed={folders.freed}
+      busy={folders.busy}
+      {...(folders.error === null ? {} : { error: folders.error })}
+      lit={lit}
+      {...(home === undefined ? {} : { text: { ask: { ...taskFoldersText.ask, unpushed: (n: number) => text.keptOn(home, n) } } })}
+    />
+  )
+}
+
+/** A home's finished tasks' folders, on its disk, under it in Computers. */
+function HomeFolders({ home, lit, onTask }: { home: string; lit: boolean; onTask: ((threadId: string) => void) | undefined }) {
+  const folders = useTaskFolders(onTask)
+  if (folders === null) return null
+  return (
+    <SettingList>
+      <Folders folders={folders} lit={lit} home={home} />
+    </SettingList>
+  )
+}
+
+/** Pausing a home's automations, with how its tasks go. */
+function PauseAutomations() {
+  const paused = useAutomationsPaused()
+  if (paused === null) return null
+  return (
+    <>
+      <SettingList>
+        <SettingSwitch
+          title={text.pauseAllTitle}
+          note={text.pauseAllNote}
+          glyph={<Icon name="hold" size={15} />}
+          checked={paused.on}
+          onChange={paused.set}
+        />
+      </SettingList>
+      <Failed when={paused.failed} />
     </>
   )
 }
@@ -763,6 +915,26 @@ function BrowserSection() {
 
 /* ---- about ------------------------------------------------------------------------ */
 
+/** Where this computer's Althar keeps its data, and how much each place takes: from its own runtime. */
+function StorageRows({ onFreeUp }: { onFreeUp: () => void }) {
+  const storage = useStorage()
+  return (
+    <Storage
+      places={PLACES.map((place) => ({
+        id: place,
+        title: text.storage[place],
+        path: storage.paths[place] ?? '',
+        figure: storage.figures[place],
+        ...(storage.problems[place] === undefined ? {} : { problem: storage.problems[place] }),
+      }))}
+      onShow={(id) => storage.show(id as StoragePlace)}
+      onMeasureAgain={storage.measureAgain}
+      freeUp={{ id: 'worktrees', onFreeUp }}
+      text={{ show: text.storage.show }}
+    />
+  )
+}
+
 /**
  * Which Althar this is, with its release's notes; a newer one, once it is
  * ready to install; Report a problem (DEV-61), where the app can report;
@@ -770,12 +942,13 @@ function BrowserSection() {
  * each with a switch of its own, both off, and staying off here, while
  * DO_NOT_TRACK is set where it started.
  */
-function AboutSection({ start, onFreeUp }: { start: StartModel; onFreeUp: () => void }) {
+function AboutSection({ start, onFreeUp, onWhatsNew }: { start: StartModel; onFreeUp?: () => void; onWhatsNew?: () => void }) {
   const update = useUpdate()
   const { preferences, set, failed } = usePreferences()
-  const { host } = useServices()
-  const storage = useStorage()
-  const version = start.status?.appVersion
+  const { client, host } = useServices()
+  // This app's, on whichever home the window is: a home's runtime says its own release.
+  const own = useAppVersion()
+  const version = client.connection === undefined ? (own ?? start.status?.appVersion) : own
   const report = host.reportProblem
   return (
     <>
@@ -786,22 +959,12 @@ function AboutSection({ start, onFreeUp }: { start: StartModel; onFreeUp: () => 
         checking={update.checking}
         website={WEBSITE}
         notes={CHANGELOG}
+        {...(onWhatsNew === undefined ? {} : { onNotes: onWhatsNew })}
         community={COMMUNITY}
         {...(report === undefined ? {} : { onReport: () => report({ kind: 'asked', from: 'settings' }) })}
       />
-      <Storage
-        places={PLACES.map((place) => ({
-          id: place,
-          title: text.storage[place],
-          path: storage.paths[place] ?? '',
-          figure: storage.figures[place],
-          ...(storage.problems[place] === undefined ? {} : { problem: storage.problems[place] }),
-        }))}
-        onShow={(id) => storage.show(id as StoragePlace)}
-        onMeasureAgain={storage.measureAgain}
-        freeUp={{ id: 'worktrees', onFreeUp }}
-        text={{ show: text.storage.show }}
-      />
+      {/* This computer's storage, measured by its own runtime: in its own window, where freeing space goes to its task folders. */}
+      {onFreeUp !== undefined && <StorageRows onFreeUp={onFreeUp} />}
       <HelpImprove
         usage={preferences.usageData}
         onUsage={(on) => set('usageData', on)}

@@ -1,4 +1,4 @@
-import { createPrivateKey, X509Certificate } from 'node:crypto'
+import { createHash, createPrivateKey, X509Certificate } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import { isAbsolute, join, relative, sep } from 'node:path'
@@ -72,13 +72,18 @@ export const networkFiles = (options: Pick<HostOptions, 'profile' | 'worktrees'>
         if (parsed.raw.length > TLS_CERTIFICATE_MAX_BYTES)
           throw new HostError({ code: 'InvalidConfig', message: 'Use a TLS leaf certificate of at most 4 KiB for pairing.' })
         if (!parsed.checkPrivateKey(createPrivateKey(key))) throw invalid()
+        const tlsCertificate = parsed.raw.toString('base64url')
+        const networkFingerprint = createHash('sha256')
+          .update(JSON.stringify([origin, config.address, config.port, tlsCertificate]))
+          .digest('hex')
         return {
           config: { ...config, origin },
           certificate,
           key,
           approvalKeys,
           tlsKeyPin: tlsPublicKeyPin(certificate),
-          tlsCertificate: parsed.raw.toString('base64url'),
+          tlsCertificate,
+          networkFingerprint,
         }
       } catch (error) {
         key.fill(0)

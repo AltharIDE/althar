@@ -193,10 +193,20 @@ describe('Codex’s plan, asked of its app-server', () => {
         assert.strictEqual(accountOf(yield* usage.now(true), 'codex').windows.length, 1)
         answer = { kind: 'failed', message: 'Not signed in with ChatGPT.' }
         const view = accountOf(yield* usage.now(true), 'codex')
-        assert.deepStrictEqual(view.fault, { kind: 'sign_in_again', message: 'Not signed in with ChatGPT.' })
+        assert.deepStrictEqual(view.fault, { kind: 'sign_in_again', message: 'Signed out. Sign in again to read usage.' })
         assert.strictEqual(view.windows.length, 1)
+        // Its sign-in expired, as ChatGPT says it: one short line, never the address, the status or the body it answered.
+        answer = {
+          kind: 'failed',
+          message:
+            'failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized; content-type=text/plain; body={ "error": { "code": "token_expired" } }',
+        }
+        assert.deepStrictEqual(accountOf(yield* usage.now(true), 'codex').fault, {
+          kind: 'sign_in_again',
+          message: 'Signed out. Sign in again to read usage.',
+        })
         answer = { kind: 'failed', message: 'Codex stopped before it answered.' }
-        assert.strictEqual(accountOf(yield* usage.now(true), 'codex').fault?.kind, 'unreachable')
+        assert.deepStrictEqual(accountOf(yield* usage.now(true), 'codex').fault?.kind, 'unreachable')
       }).pipe(Effect.provide(layer))
     }),
   )
@@ -288,7 +298,7 @@ describe('Claude Code’s plan, read from its endpoint and heard from its sessio
         reply = { kind: 'fault', fault: 'expired', message: 'Its sign-in has expired.' }
         const view = accountOf(yield* usage.now(true), 'claude-code')
         assert.strictEqual(view.fault?.kind, 'expired')
-        assert.include(view.fault?.message ?? '', 'renews it the next time it runs on this account')
+        assert.include(view.fault?.message ?? '', 'renews it on its next run')
         assert.deepStrictEqual(
           view.windows.map((window) => window.usedPercent),
           [30],
@@ -1128,9 +1138,10 @@ describe('OpenCode Go, a plan with limits on an OpenCode account', () => {
     Effect.gen(function* () {
       const view = openCode(yield* (yield* PlanUsage).now(true))
       assert.deepInclude(view, { paidBy: 'plan', plan: 'OpenCode Go' })
-      assert.deepStrictEqual(view.fault, { kind: 'unreachable', message: 'OpenCode couldn’t read Go’s usage: timed out.' })
+      // In a short line of Althar's own: OpenCode's own words go to the log.
+      assert.deepStrictEqual(view.fault, { kind: 'unreachable', message: 'No reply. Tries again soon.' })
       // Never read before: why is all it has to show, so its row still says Go is there.
-      assert.strictEqual(view.noReading, 'OpenCode couldn’t read Go’s usage: timed out.')
+      assert.strictEqual(view.noReading, 'No reply. Tries again soon.')
     }).pipe(
       Effect.provide(
         withUsage({

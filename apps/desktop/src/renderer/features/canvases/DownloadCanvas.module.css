@@ -1,0 +1,14 @@
+/* A download that failed: why, and Try again. */
+.failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 260px;
+}
+.failed p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-1);
+}

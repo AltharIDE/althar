@@ -11,17 +11,12 @@ const LIMIT = 4
 /** A preview is a native, private browser surface. Its session knows exactly one live run. */
 export const workerPreviews = (connect: (owner: BrowserWindow, signal: AbortSignal) => Promise<Electron.MessagePortMain>) => {
   const windows = new Map<string, BrowserWindow>()
-  return (owner: BrowserWindow, address: string): boolean => {
-    const target = workerPreviewTarget(address)
-    if (target === null) return false
-    const id = `${owner.webContents.id}:${target.host}`
-    const existing = windows.get(id)
-    if (existing !== undefined) {
-      existing.show()
-      existing.focus()
-      return true
-    }
-    if (windows.size >= LIMIT) return true
+  /** Asked for, not yet open: a second press while it opens is the same preview. */
+  const opening = new Set<string>()
+  /** The preview of one run, in a window of its own: an ordinary one, not the Althar window's child. */
+  const open = (owner: BrowserWindow, target: NonNullable<ReturnType<typeof workerPreviewTarget>>, id: string) => {
+    opening.delete(id)
+    if (owner.isDestroyed()) return
     const scope = Effect.runSync(Scope.make())
     const controller = new AbortController()
     const browser = session.fromPartition(`worker-preview:${randomUUID()}`)
@@ -59,8 +54,8 @@ export const workerPreviews = (connect: (owner: BrowserWindow, signal: AbortSign
       reply({ requestHeaders: { ...request.requestHeaders, [PREVIEW_HEADER]: local.secret } })
     })
     const preview = new BrowserWindow({
-      parent: owner,
-      title: 'Worker preview',
+      title: 'Preview',
+      backgroundColor: '#ffffff',
       width: 1_080,
       height: 740,
       autoHideMenuBar: true,
@@ -100,6 +95,22 @@ export const workerPreviews = (connect: (owner: BrowserWindow, signal: AbortSign
         if (!preview.isDestroyed()) await preview.loadURL(loopback.origin + target.path)
       })
       .catch(() => close())
+  }
+  return (owner: BrowserWindow, address: string): boolean => {
+    const target = workerPreviewTarget(address)
+    if (target === null) return false
+    const id = `${owner.webContents.id}:${target.host}`
+    const existing = windows.get(id)
+    if (existing !== undefined) {
+      existing.show()
+      existing.focus()
+      return true
+    }
+    if (opening.has(id) || windows.size + opening.size >= LIMIT) return true
+    opening.add(id)
+    // Not inside the Althar window's own window-open handler, which asked: a window made there, while that one is
+    // still answering its page, can take the app down with it.
+    setImmediate(() => open(owner, target, id))
     return true
   }
 }

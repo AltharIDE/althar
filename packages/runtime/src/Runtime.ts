@@ -12,7 +12,7 @@ import { AccountSignIns } from './AccountSignIns'
 import { Copilot } from './Copilot'
 import { Busy } from './Busy'
 import { Changes } from './Changes'
-import { Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
+import { Agents, Connectors, deviceSignInsOnly, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
 import { Connections } from './Connections'
 import { Connectivity } from './Connectivity'
 import { Installs, type InstallsOptions } from './Installs'
@@ -29,7 +29,9 @@ import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
 import { Overlaps } from './Overlaps'
 import { PageTools } from './PageTools'
+import { ComputerTools } from './ComputerTools'
 import { Canvases } from './Canvases'
+import { CanvasSaves } from './CanvasSaves'
 import { Elsewhere } from './Elsewhere'
 import { Situations } from './Situations'
 import { PlanUsage } from './PlanUsage'
@@ -100,6 +102,8 @@ export interface RuntimeLayerOptions extends RuntimeOptions {
  */
 export const layer = (options: RuntimeLayerOptions) => {
   const copilotClientId = options.copilotClientId ?? options.clientIds?.github
+  const clientIds =
+    options.loopbackSignIn === false && options.clientIds !== undefined ? deviceSignInsOnly(options.clientIds) : options.clientIds
   const store = Layer.mergeAll(Ledger.layer, Commands.layer).pipe(
     Layer.provideMerge(
       startupLayer(
@@ -147,7 +151,7 @@ export const layer = (options: RuntimeLayerOptions) => {
       Installs.layer({ root: options.agentsRoot, fetch: options.fetch, onDevice: options.onDevice, search: options.agentSearch }),
     ),
     Layer.provideMerge(options.secrets ?? Secrets.none('Althar keeps sign-ins in the app; it can open them, and this can’t.')),
-    Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds, options.fetch, options.githubApp)),
+    Layer.provideMerge(options.connectors ?? Connectors.live(clientIds, options.fetch, options.githubApp)),
   )
   // Each project's rules; each agent's accounts, whether each is signed in, and which are out of usage until their reset (ADR-012).
   // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.
@@ -223,13 +227,15 @@ export const layer = (options: RuntimeLayerOptions) => {
       Layer.mergeAll(
         startupLayer('coordinator', Coordinator.layer),
         TaskActions.layer,
-        // The settings, read and changed by the coordinator and leads as the person can (ADR-097).
-        SettingsTools.layer,
+        // The settings, read and changed by the coordinator and leads as the person can (ADR-097), the place for
+        // artifacts among them, through the canvases' own CanvasSaves (the one layer, built once).
+        SettingsTools.layer.pipe(Layer.provide(CanvasSaves.layer)),
         IntegrationTools.layer,
         // The page beside a conversation, read and driven by its lead and the coordinator (ADR-100).
         PageTools.layer,
+        ComputerTools.layer,
         // The project's canvases, drawn by its agents and commented on by the person (ADR-104).
-        Canvases.layer,
+        Canvases.layer.pipe(Layer.provideMerge(CanvasSaves.layer)),
         // What other tools left for a project's repositories, and bringing it in (Elsewhere.ts).
         Elsewhere.layer,
         MachineLoad.layer,

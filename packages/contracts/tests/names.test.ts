@@ -22,4 +22,9 @@ describe('a name made by a pattern', () => {
     expect(patternProblem('branch', '{{slug}}')).toMatch(/Braces go round a placeholder only/)
     expect(patternProblem('branch', '-{slug}')).toMatch(/Git doesn’t allow/)
   })
+
+  it('validates nested branch components', () => {
+    expect(patternProblem('branch', 'release.lock/{slug}')).toMatch(/No part can end in “\.lock”/)
+    expect(patternProblem('branch', 'release/-{slug}')).toBeNull()
+  })
 })

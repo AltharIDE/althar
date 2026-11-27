@@ -23,6 +23,24 @@ const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
 
 /** OpenSSH owns config, ProxyJump, host-key pinning and local authentication. No shell fragments are accepted. */
 export const sshArguments = (options: SshTarget, homeId?: string): ReadonlyArray<string> => {
+  if (homeId !== undefined && !Schema.is(HomeId)(homeId)) throw invalid()
+  return argumentsFor(
+    options,
+    homeId === undefined ? 'status --json' : `connect-stdio --home-id ${quote(homeId)} --client-api-version ${API_VERSION}`,
+  )
+}
+
+/**
+ * The home's own managed update, by the launcher and profile its connection runs: it checks for a release, applies it
+ * (restarting the home) and waits for the result, said as JSON (apps/host/README.md, Managed releases and updates).
+ */
+export const sshUpdateArguments = (options: SshTarget, allowIncompatible = false): ReadonlyArray<string> =>
+  argumentsFor(options, `update --apply${allowIncompatible ? ' --allow-incompatible' : ''} --wait --json`)
+
+/** What the home's installed release is, by the launcher and profile its connection runs: its version, API version and storage format, as JSON. */
+export const sshReleaseInfoArguments = (options: SshTarget): ReadonlyArray<string> => argumentsFor(options, 'release-info --json')
+
+const argumentsFor = (options: SshTarget, command: string): ReadonlyArray<string> => {
   if (
     !/^(?:[a-zA-Z0-9_][a-zA-Z0-9_.-]*@)?(?:[a-zA-Z0-9_][a-zA-Z0-9_.:-]*|\[[a-fA-F0-9:]+\])$/.test(options.target) ||
     options.target.length > 255
@@ -31,10 +49,8 @@ export const sshArguments = (options: SshTarget, homeId?: string): ReadonlyArray
   for (const path of [options.launcher, options.profile]) if (path !== undefined && (!path.startsWith('/') || !clean(path))) throw invalid()
   if (options.configFile !== undefined && (!isAbsolute(options.configFile) || !clean(options.configFile))) throw invalid()
   if (options.port !== undefined && (!Number.isSafeInteger(options.port) || options.port < 1 || options.port > 65535)) throw invalid()
-  if (homeId !== undefined && !Schema.is(HomeId)(homeId)) throw invalid()
   const program =
     options.launcher === undefined ? '"${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher"' : quote(options.launcher)
-  const command = homeId === undefined ? 'status --json' : `connect-stdio --home-id ${quote(homeId)} --client-api-version ${API_VERSION}`
   const script = `exec /bin/sh ${program} ${command}${options.profile === undefined ? '' : ` --profile ${quote(options.profile)}`}`
   // Expansion belongs to a known POSIX shell, not the account's possibly non-POSIX login shell.
   const remote = `exec /bin/sh -c ${quote(script)}`

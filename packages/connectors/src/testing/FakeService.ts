@@ -22,6 +22,7 @@ import type {
   IssueField,
   ListedChange,
   ListedRepository,
+  RepositoryReach,
   MergeMethod,
   MergeRules,
   NewHostRepository,
@@ -210,6 +211,8 @@ export interface FakeControls {
   ): Repository
   /** Where the account can make a repository, in place of itself alone, as `owners` says. */
   setOwners(owners: ReadonlyArray<RepositoryOwner>): void
+  /** Lists fewer than the account has, as a token made for some of them does, or all again (`null`): all unless said. */
+  limitReach(limited: RepositoryReach['limited']): void
   /** Every repository `createRepository` made, in order, as it was asked for. */
   readonly repositoriesMade: ReadonlyArray<NewHostRepository>
   /** Lets the account push to a repository, or no longer, as its owners would: it can until it is told otherwise. */
@@ -317,6 +320,8 @@ export interface FakeControls {
     status?: number,
     said?: { readonly message?: string; readonly after?: number },
   ): void
+  /** The next call to `method` is done on the host and its answer lost on the way back, as `unreachable`: `openChange` so far. */
+  loseAnswer(method: 'openChange'): void
   /** Every change opened, with every comment on it, Althar's included. */
   readonly changes: ReadonlyArray<ChangeRequest>
   /** The ids of the checks Althar ran again, in order. */
@@ -402,6 +407,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   /** How `repositories` lists each, by its path in lower case. */
   const listings = new Map<string, Pick<ListedRepository, 'description' | 'private' | 'pushedAt' | 'archived'>>()
   /** Where the account can make a repository: itself, as its product has it, unless a test says. */
+  let reach: RepositoryReach = { limited: null }
   let owners: ReadonlyArray<RepositoryOwner> = [
     product === 'bitbucket_cloud'
       ? { id: account.login, name: account.name ?? account.login, kind: 'workspace' }
@@ -537,6 +543,12 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         }),
       )
     })
+  const lostAnswers = new Set<string>()
+  /** What a call did, or, where a test lost its answer, the failure the caller sees instead. */
+  const answered = <A>(method: string, answer: A) => {
+    if (!lostAnswers.delete(method)) return Effect.succeed(answer)
+    return Effect.fail(new ConnectorFailed({ product, reason: 'unreachable', message: `The fake ${method}'s answer was lost` }))
+  }
   const missing = (what: string) => new ConnectorFailed({ product, reason: 'not_found', message: `No ${what}` })
   const changeNumbered = (number: number) => {
     const change = changes.find((candidate) => candidate.number === number)
@@ -701,7 +713,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
             forks.get(candidate.number) === change.from?.path.join('/') &&
             candidate.state === 'open',
         )
-        if (open !== undefined) return Effect.succeed(open)
+        if (open !== undefined) return answered('openChange', open)
         const number = changes.length + 1
         const opened: ChangeRequest = {
           id: `change-${number}`,
@@ -724,7 +736,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         repositoryOf.set(number, repository.id)
         upTo.set(number, historyOf(repository.id, change.target).at(-1) ?? '')
         if (change.from !== undefined) forks.set(number, change.from.path.join('/'))
-        return Effect.succeed(opened)
+        return answered('openChange', opened)
       }),
     change: (_repository, number, ask) =>
       Effect.andThen(called('change'), () => {
@@ -1137,6 +1149,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
             .toSorted((a, b) => (b.pushedAt ?? '').localeCompare(a.pushedAt ?? '')),
         ),
       ),
+    reach: () => Effect.andThen(called('reach'), () => Effect.succeed(reach)),
     owners: () => Effect.andThen(called('owners'), () => Effect.succeed(owners)),
     // As a host: in one of its owners alone, and never over one of that path already, whatever the case.
     createRepository: (asked) =>
@@ -1324,6 +1337,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       return repository
     },
     setOwners: (set) => void (owners = [...set]),
+    limitReach: (limited) => void (reach = { limited }),
     get repositoriesMade() {
       return [...made]
     },
@@ -1459,6 +1473,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         ...(retryAt === undefined ? {} : { retryAt }),
         ...(status === undefined ? {} : { status }),
       }),
+    loseAnswer: (method) => void lostAnswers.add(method),
     get reruns() {
       return reran
     },

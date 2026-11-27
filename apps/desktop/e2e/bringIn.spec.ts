@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
+import { isoAfter } from '@althar/testing'
 import { expect, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
@@ -28,6 +29,11 @@ const write = (path: string, body: string) => {
 }
 /** Claude Code's folder for a working folder. */
 const claudeFolder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, '-')
+/**
+ * When the conversations were had: an hour before the test, as work someone carried on recently, so the one brought in as an
+ * aside is a pill beside the coordinator's. Pinned to a day, it would fold into "N older" a week after it.
+ */
+const HOUR = 60 * 60 * 1000
 const session = (cwd: string, id: string, prompt: string, reply: string, title: string) =>
   [
     {
@@ -38,7 +44,7 @@ const session = (cwd: string, id: string, prompt: string, reply: string, title: 
       cwd,
       gitBranch: 'main',
       isSidechain: false,
-      timestamp: '2026-11-16T09:00:00.000Z',
+      timestamp: isoAfter(-HOUR),
       message: { role: 'user', content: prompt },
     },
     {
@@ -48,7 +54,7 @@ const session = (cwd: string, id: string, prompt: string, reply: string, title: 
       sessionId: id,
       cwd,
       isSidechain: false,
-      timestamp: '2026-11-16T09:00:08.000Z',
+      timestamp: isoAfter(-HOUR + 8000),
       message: { id: 'm1', role: 'assistant', content: [{ type: 'text', text: reply }] },
     },
     { type: 'ai-title', aiTitle: title, sessionId: id },
@@ -183,3 +189,90 @@ test('other tools’ worktrees, setup and conversations come in on the welcome, 
     await electronApp.close()
   }
 })
+
+test('a conversation brought in waits while Claude Code still has it open, and goes once it is closed', async () => {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-e2e-')))
+  const projects = join(home, 'Projects')
+  mkdirSync(projects)
+  const repo = repository(projects)
+  const id = '5f0c1a2b-0000-4000-8000-000000000003'
+  write(
+    join(home, '.claude', 'projects', claudeFolder(repo), `${id}.jsonl`),
+    session(repo, id, 'Why is the gyroscope fixture flaky?', 'It rounds too early.', 'Gyroscope fixture flaky'),
+  )
+  // Claude Code, still open on it in a terminal: a stand-in named as it is, run as `claude --resume <id>`.
+  write(join(home, 'bin', 'claude'), 'setInterval(() => undefined, 60_000)\n')
+  const terminal = spawn(process.execPath, [join(home, 'bin', 'claude'), '--resume', id], { stdio: 'ignore' })
+  const line = 'Claude Code still has this conversation open in another window. Close it there and send again.'
+
+  const { electronApp, page } = await launch(home)
+  // An aside's composer is a task's own, embedded: Reply, or while its lead works, to queue or steer.
+  const composer = page.getByRole('textbox', { name: /^(Reply|Add to the queue|Steer the lead)/ }).filter({ visible: true })
+  /** The conversation's column with its composer, at 1×. */
+  const shoot = async (name: string) => {
+    const box = await composer.boundingBox()
+    if (box === null) return
+    await still(page)
+    await page.screenshot({
+      path: `${SHOTS}/${name}.png`,
+      clip: { x: Math.max(0, box.x - 24), y: Math.max(0, box.y - 260), width: box.width + 48, height: box.height + 300 },
+      scale: 'css',
+    })
+  }
+  try {
+    await toFirstProject(page)
+    await chooseFolder(electronApp, repo)
+    await page.getByRole('button', { name: /Choose a folder/ }).click()
+    await expect(
+      page.getByRole('list', { name: 'Repositories for the project' }).getByRole('checkbox', { checked: true }).first(),
+    ).toBeVisible()
+    await page.getByRole('button', { name: /Make the project/ }).click()
+    await expect(page.getByRole('heading', { name: 'Already under way', level: 1 })).toBeVisible()
+    const card = page
+      .getByRole('region')
+      .filter({ has: page.getByRole('heading', { name: 'Already under way', level: 1 }) })
+      .first()
+    await card.getByRole('button', { name: 'What’s in Claude Code' }).click()
+    await card.getByRole('checkbox', { name: /Gyroscope fixture flaky/ }).click()
+    await page.getByRole('button', { name: 'Bring in 1 conversation' }).click()
+    await openMadeProject(page)
+    await page
+      .getByRole('tablist', { name: 'Conversations' })
+      .filter({ visible: true })
+      .getByRole('tab', { name: /Gyroscope fixture flaky/ })
+      .click()
+    // Read while it's open elsewhere: nothing holds reading back.
+    await expect(shown(page, 'It rounds too early.').first()).toBeVisible()
+
+    // Sent while it's open: not sent, the words back in the composer, and the line says which tool has it.
+    // A click waits until the window takes input, as `say` does.
+    await composer.click()
+    await composer.fill('Is it fixed now?')
+    await composer.press('Enter')
+    await expect(page.getByText(line).filter({ visible: true })).toBeVisible()
+    await expect(composer).toHaveValue('Is it fixed now?')
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: scheme })
+      await shoot(`open-elsewhere-${scheme}`)
+    }
+    await page.emulateMedia({ colorScheme: 'light' })
+
+    // Closed there, the same send goes.
+    await stop(terminal)
+    await composer.press('Enter')
+    await expect(shown(page, 'Is it fixed now?').first()).toBeVisible()
+    await expect(page.getByText(line).filter({ visible: true })).toHaveCount(0)
+    await expect(composer).toHaveValue('')
+    await shoot('open-elsewhere-closed')
+  } finally {
+    await stop(terminal)
+    await electronApp.close()
+  }
+})
+
+const stop = (child: ReturnType<typeof spawn>) =>
+  new Promise<void>((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve()
+    child.once('exit', () => resolve())
+    child.kill()
+  })

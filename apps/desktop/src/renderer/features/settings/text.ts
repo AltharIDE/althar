@@ -7,6 +7,12 @@ const capital = (words: string) => `${words.slice(0, 1).toUpperCase()}${words.sl
 /* What Althar's settings say, in the quick settings from the window's bar and on the Settings tab. */
 
 export const text = {
+  /** Under Remove, on a home over SSH that runs an older Althar, which lets no window but its own manage workers. */
+  olderHome: (home: string) => `${home} runs an older Althar: update it to remove its workers from here.`,
+  /** Add a worker… asked before the home's workers could be read: what was read decides how one is added. */
+  workersUnread: (home: string) => `Althar couldn’t read ${home}’s workers, so it can’t add one yet.`,
+  workersAgain: 'Try again',
+  workersCancel: 'Cancel',
   /** The gear at the end of the window's bar, which every screen has: Althar's, not a project's. */
   gear: 'Althar settings',
   /** The quick settings, as a screen reader names them. */
@@ -17,8 +23,8 @@ export const text = {
   all: 'All settings',
   allKbd: chord(keys.mod, keys.shift, ','),
   agents: 'Agents',
-  connecting: `Looking at the agents on ${device.this}…`,
-  agentHere: (name: string) => `${name} isn’t on ${device.this}`,
+  connecting: (where: string) => `Looking at the agents on ${where}…`,
+  agentHere: (name: string, where: string) => `${name} isn’t on ${where}`,
   version: (version: string) => `Althar ${version}`,
   /** Report a problem (DEV-61), in the quick settings' foot and About Althar. */
   report: 'Report a problem',
@@ -49,22 +55,26 @@ export const text = {
   /* Work on this computer. */
   awakeTitle: `Keep ${device.this} awake while work runs`,
   awakeNote: 'The display can still sleep.',
-  atOnceNote: (n: number, { count, memory, cores }: { count: number; memory: number; cores: number }) => {
-    if (n === count) return `Default for ${memory} GB and ${cores} cores`
-    if (n <= count) return 'Below the default'
-    if (n <= count + 2) return 'Tests may slow down'
-    return 'May run hot'
-  },
-  atOnceMark: ({ count }: { count: number }) => `${count} · ${device.this}`,
-  atOnceValue: (n: number, { count }: { count: number }) => (n === count ? `${n}, ${device.this}’s default` : String(n)),
-  loadTitle: `Show how hard ${device.this} works`,
+  /** How many agents work at once, each line naming the machine it's about: this Mac, or the home the window is on. */
+  atOnce: (where: string) => ({
+    note: (n: number, { count, memory, cores }: { count: number; memory: number; cores: number }) => {
+      if (n === count) return `Default for ${where}’s ${memory} GB and ${cores} cores`
+      if (n <= count) return 'Below the default'
+      if (n <= count + 2) return 'Tests may slow down'
+      return 'May run hot'
+    },
+    mark: ({ count }: { count: number }) => `${count} · ${where}`,
+    value: (n: number, { count }: { count: number }) => (n === count ? `${n}, ${where}’s default` : String(n)),
+  }),
+  /** The load in the window's bar: this computer's, or the home's the window is on. */
+  loadTitle: (where: string) => `Show how hard ${where} works`,
   atLoginTitle: 'Open Althar at login, in the background',
   atLoginNote: 'Off, automations run only while Althar is open.',
   pauseAllTitle: 'Pause all automations',
   pauseAllNote: 'Runs under way finish.',
   /* Tasks. */
   sendMidTurnTitle: 'When I send while an agent is working',
-  sendMidTurnNote: 'Enter does this one; the other is a click or ⌘Enter away.',
+  sendMidTurnNote: `Enter does this one; the other is a click or ${modKey('Enter')} away.`,
   sendMidTurnQueue: 'Queue it',
   sendMidTurnSteer: 'Steer the agent',
   /* Reviews and pull requests. */
@@ -120,8 +130,11 @@ export const text = {
   /* What couldn't be kept. */
   failed: 'That couldn’t be kept. Try again.',
   agentToolsOff: 'This Althar doesn’t read your agents’ settings, so their MCP servers and skills aren’t listed.',
-  serversUnread: 'Your agents’ MCP servers couldn’t be read.',
-  skillsUnread: 'Your skills couldn’t be read.',
+  /** Why the servers or skills couldn't be read, as the runtime said it, after whose they are: your agents', or a home's. */
+  serversUnread: (whose: string, why: string) => `${whose} MCP servers couldn’t be read: ${why.replace(/\.$/, '')}.`,
+  skillsUnread: (whose: string, why: string) => `${whose} skills couldn’t be read: ${why.replace(/\.$/, '')}.`,
+  /** A home's finished tasks keep their commits there. */
+  keptOn: (home: string, n: number) => `Its ${n === 1 ? 'commit stays' : 'commits stay'} on its branch, on ${home}.`,
   skillsOff: 'Skills aren’t set up in this copy of Althar, so each lead starts without them.',
   skillsFromFolder: 'A folder you imported',
   skillsCheck: 'Check for updates',

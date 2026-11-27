@@ -3,18 +3,18 @@ import { hostname, homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { API_VERSION } from '@althar/contracts'
-import { Context, Effect, Layer } from 'effect'
-import { Instance, listenLocalApi, listenNetworkApi, Projects, Runtime, services } from '@althar/runtime'
+import { Context, Effect, Layer, Scope } from 'effect'
+import { Instance, listenLocalApi, listenNetworkApi, Projects, Runtime, services, signInsOf } from '@althar/runtime'
 
-import metadata from '../package.json'
 import { configuredHome } from './configuration'
 import { HostError } from './errors'
 import type { HostOptions } from './options'
 import { initializeVault, openVault } from './vault'
-import { listenWorkers } from './workers'
+import { listenWorkers, openWorkers } from './workers'
 import { workerExecution } from './agentExecution'
+import { HOST_VERSION } from './version'
 
-export const HOST_VERSION = metadata.version
+export { HOST_VERSION } from './version'
 export type HostDependencies = Pick<
   Runtime.RuntimeLayerOptions,
   'agents' | 'connectors' | 'agentSearch' | 'agentConfigs' | 'usage' | 'fetch' | 'workers'
@@ -27,6 +27,13 @@ export interface HomeReady {
   readonly pid: number
   readonly workerPort?: number
 }
+
+/**
+ * Althar's own apps' public ids, as the build baked them unless the home's environment says otherwise: GitHub's and
+ * GitLab's for a sign-in whose code shows in the window and is typed in any browser, the GitHub App's slug for its install
+ * page, and Copilot's.
+ */
+const signIns = () => signInsOf(__ALTHAR_SIGN_IN__, process.env)
 
 const runtime = (options: HostOptions, secrets: Layer.Layer<import('@althar/runtime').Secrets>, dependencies: HostDependencies) => {
   const { maintenanceToken, ...runtimeDependencies } = dependencies
@@ -42,6 +49,9 @@ const runtime = (options: HostOptions, secrets: Layer.Layer<import('@althar/runt
     appVersion: HOST_VERSION,
     deviceName: hostname(),
     secrets,
+    ...signIns(),
+    // The person's browser is on another computer, so no sign-in comes back to the home's loopback address, as Linear's would.
+    loopbackSignIn: false,
     ...(maintenanceToken === undefined ? {} : { databaseMaintenanceToken: maintenanceToken }),
     ...runtimeDependencies,
   })
@@ -83,14 +93,34 @@ export const serveHome = (
       const options = yield* configuredHome(given)
       const vault = yield* openVault(options)
       let worker: Effect.Success<ReturnType<typeof listenWorkers>>
+      let homeId: string | undefined
+      const scope = yield* Effect.scope
       const context = yield* Layer.build(
         runtime(options, vault.secrets, {
           ...dependencies,
-          workers: dependencies.workers ?? workerExecution(() => worker?.agentWorkers),
+          workers:
+            dependencies.workers ??
+            workerExecution(
+              () => worker?.agentWorkers,
+              () => worker,
+              // The person adds a worker from a window: the home opens its worker port then, as its own authority.
+              () =>
+                Effect.gen(function* () {
+                  if (worker !== undefined) return worker
+                  if (homeId === undefined) return yield* Effect.fail('The home isn’t ready yet. Try again in a moment.')
+                  const opened = yield* openWorkers(options, homeId).pipe(
+                    Scope.provide(scope),
+                    Effect.mapError((error) => error.message),
+                  )
+                  worker = opened
+                  return opened
+                }),
+            ),
         }),
       )
       const instance = Context.get(context, Instance)
       const network = yield* readNetworkConfiguration(options.profile)
+      let networkFingerprint: string | undefined
       if (network !== undefined) {
         const files = yield* networkFiles(options, network)
         yield* Effect.gen(function* () {
@@ -104,9 +134,13 @@ export const serveHome = (
             ...(files.approvalKeys === undefined ? {} : { approvalCredentials: files.approvalKeys.credentials }),
           })
         }).pipe(Effect.provideContext(context), Effect.ensuring(Effect.sync(() => files.key.fill(0))))
+        networkFingerprint = files.networkFingerprint
       }
+      homeId = instance.homeId
+      // The home's own worker port falls back to a free one where it is taken; an operator's configured listener that
+      // can't start stops the home, as it always has, rather than leave it serving without the workers it was set up for.
       worker = yield* listenWorkers(options, instance.homeId)
-      const endpoint = yield* listenLocalApi(options.profile).pipe(Effect.provideContext(context))
+      const endpoint = yield* listenLocalApi(options.profile, networkFingerprint).pipe(Effect.provideContext(context))
       yield* ready({
         homeId: endpoint.homeId,
         hostDeviceId: instance.deviceId,

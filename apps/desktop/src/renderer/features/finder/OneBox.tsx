@@ -16,6 +16,7 @@ import {
   type Kind,
   KINDS_NAMED,
   needsYou,
+  questionWords,
   recent,
 } from './model'
 import { fold, wordsOf } from './match'
@@ -65,6 +66,7 @@ const SCOPES: ReadonlyArray<Scope> = [
 const BY_PREFIX = new Map(SCOPES.map((one) => [one.prefix, one]))
 const DOCUMENT_KINDS = new Set<Kind>(['task', 'pull', 'issue', 'said', 'note', 'conversation'])
 const documentKind = (kind: Kind): kind is SearchDocument['kind'] => DOCUMENT_KINDS.has(kind)
+const QUESTION_KINDS = ['said', 'note', 'issue', 'pull', 'task'] as const
 
 interface Section {
   readonly key: string
@@ -108,9 +110,14 @@ export function OneBox({
   const query = typed.trim()
   const scopedKinds = scope?.scope.kinds
   useLayoutEffect(() => {
+    if (asking) {
+      const text = questionWords(query).join(' ')
+      onSearch?.({ text, kinds: text === '' ? [] : QUESTION_KINDS, matchAny: true })
+      return
+    }
     const kinds = placing ? (['task'] as const) : scopedKinds?.filter(documentKind)
     onSearch?.({ text: query, ...(kinds === undefined ? {} : { kinds }) })
-  }, [onSearch, query, scopedKinds, placing])
+  }, [onSearch, query, scopedKinds, placing, asking])
 
   /* ——— What happens after the next draw: a morph needs where things stood before it and where they stand after ——— */
   const after = useRef<(() => void) | null>(null)
@@ -247,7 +254,7 @@ export function OneBox({
     query,
     context,
     asking
-      ? { kinds: ['said', 'note', 'issue', 'pull', 'task'], inside: 1, fuzzy: false, any: true }
+      ? { kinds: QUESTION_KINDS, inside: 1, fuzzy: false, any: true }
       : scope === null
         ? {}
         : { kinds: scope.scope.kinds, inside: scope.scope.inside, fuzzy: scope.scope.id !== 'said' && scope.scope.id !== 'notes' },

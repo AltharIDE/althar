@@ -1,4 +1,4 @@
-import type { ProjectWorker } from '@althar/contracts'
+import type { ProjectWorker, WorkerGrant, WorkerReadiness } from '@althar/contracts'
 import type { AgentRequestFailed, AgentStartFailed, Transport } from '@althar/provider-adapters'
 import type {
   WorkerFile,
@@ -71,8 +71,58 @@ export interface CapturedWorkerCheckout {
   readonly index: string
 }
 
+/** A worker the home enrolled, as the home's own list of them has it: connected now or not, what it runs and reported. */
+export interface EnrolledWorkerState {
+  readonly workerId: string
+  readonly connected: boolean
+  /** Running a task, or holding one's workspace after dropping out mid-run: a worker runs one at a time. */
+  readonly busy: boolean
+  /** What it reported last, while that is current. */
+  readonly capacity?: ProjectWorker['capacity']
+  /** The agents it can run, by id, for any project. */
+  readonly providers: ReadonlyArray<string>
+  /** The projects it may work on. */
+  readonly projectIds: ReadonlyArray<string>
+  /** The task workspace its run holds, connected or not, from its start until it says that run ended. */
+  readonly workspaceId?: string
+  /** As the person added it, and the SSH address it was set up at, where it was. */
+  readonly name?: string
+  readonly ssh?: string
+  /** Of `providers`, those signed in on it, where it says. */
+  readonly signedIn?: ReadonlyArray<string>
+  /** The Althar release it runs, where it says. */
+  readonly release?: string
+  /** What its own check found, where it has checked. */
+  readonly readiness?: WorkerReadiness
+  /** It works on whatever project it is given: the home's grants say which. */
+  readonly anyProject?: boolean
+}
+
+/**
+ * Adding workers, where the home is its own authority for them (ADR-103): signing a worker's own key, a one-time code
+ * for a machine without SSH, and the projects each works on. Each opens the home's worker port first where it isn't
+ * open yet, without a restart. Fails with words to show.
+ */
+export interface WorkerAdmin {
+  readonly add: (input: {
+    readonly publicKey: Uint8Array
+    readonly name: string
+    readonly ssh: string | null
+  }) => Effect.Effect<WorkerGrant, string>
+  readonly code: (name: string) => Effect.Effect<{ readonly code: string; readonly expiresAt: number }, string>
+  readonly assign: (workerId: string, projectIds: ReadonlyArray<string>) => Effect.Effect<void, string>
+}
+
 export interface WorkerExecutionPlatform {
   readonly list: (projectId: string) => ReadonlyArray<ProjectWorker>
+  /** Every worker the home enrolled, connected or not, in the order they were; null while it isn't listening for workers. */
+  readonly enrolled?: () => ReadonlyArray<EnrolledWorkerState> | null
+  /** Takes a worker out of this home for good: its certificate is no longer accepted. Fails with words to show. */
+  readonly revoke?: (workerId: string) => Effect.Effect<void, string>
+  /** Adding workers, where the home does that itself; none where an operator enrolls them by command. */
+  readonly admin?: WorkerAdmin
+  /** Whether it adds workers itself now: it listens as its own authority, or doesn't listen yet. */
+  readonly adds?: () => boolean
   readonly startCommand?: (input: AssignedCommand) => Effect.Effect<WorkerManagedProcess, AgentStartFailed, Scope.Scope>
   readonly readFile?: (
     input: Pick<AssignedCommand, 'workerId' | 'projectId' | 'worktree'> & { readonly path: string },

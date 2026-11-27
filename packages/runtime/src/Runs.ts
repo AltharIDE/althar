@@ -1,3 +1,4 @@
+import type { PlaceTo, TaskPlaced } from './taskPlaces'
 import { readGoal } from './threadGoals'
 import { createHash } from 'node:crypto'
 import { type CheckoutAnswer, type MessageSender, PLANS_AND_REVIEWS, ShipRoute } from '@althar/contracts'
@@ -13,7 +14,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { NotConnected } from './Connections'
 import { Connectivity } from './Connectivity'
 import { envelope } from './envelope'
-import { NoChangeToOpen, NotFound } from './errors'
+import { NoChangeToOpen, NotFound, PushRefused } from './errors'
 import { evidenceForReview } from './evidence'
 import { externalWaitOf } from './externalWaits'
 import { keptGoing } from './Failures'
@@ -77,7 +78,7 @@ import { makeRunShipping } from './runShipping'
 import { makeRunTools } from './runTools'
 import { Sessions } from './Sessions'
 import { type GiveUp, watchStalls } from './Stalls'
-import type { StandIn } from './standIn'
+import { type StandIn, standInOf } from './standIn'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer } from './ToolServer'
 import { stuckWhyOf, summarize } from './words'
@@ -87,7 +88,6 @@ export {
   type Place,
   PlanParameters,
   PlanStep,
-  RESTART_GRACE,
   type ReviewerChange,
   type StuckAnswer,
   type StuckInfo,
@@ -97,7 +97,6 @@ export {
   type TeamChanged,
   beforeFirstStep,
   checkoutWaitOf,
-  endingOf,
   mayPass,
   planWaits,
   reviewerChange,
@@ -322,6 +321,17 @@ export class Runs extends Context.Service<
     }): Effect.Effect<Moved, unknown>
     /** Calls off a move that waits: the task stays where it works. */
     dropMove(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
+    /**
+     * Moves a running task between the home and its workers, or between workers (taskPlaces.ts): between its lead's turns,
+     * with its work, and its lead started afresh there, on the model picked for there where its own isn't offered.
+     */
+    place(input: {
+      readonly envelope: CommandEnvelope
+      readonly taskId: string
+      readonly to: PlaceTo
+      readonly lead?: { readonly model?: string; readonly effort?: string }
+      readonly fromLastTurn?: boolean
+    }): Effect.Effect<TaskPlaced, unknown>
     /**
      * Points a running task at another branch to work toward (a task is a conversation plus parts, "Changing the branch a
      * task works toward"), or its default with null: between its lead's turns, the person's word waiting for one under way;
@@ -983,12 +993,18 @@ export class Runs extends Context.Service<
           if (published._tag === 'Failure') {
             const error = Cause.findErrorOption(published.cause)
             const notConnected = Option.isSome(error) && error.value instanceof NotConnected
+            // The host refused the connection's sign-in for the push: said by whose and where, and put right in Settings.
+            const refused =
+              Option.isSome(error) &&
+              error.value instanceof PushRefused &&
+              error.value.signIn !== undefined &&
+              (error.value.why === 'forbidden' || error.value.why === 'denied')
             return yield* stuck(
               run,
               { id: attemptId },
               {
                 step: 'publish',
-                why: notConnected ? 'not_connected' : 'failed_to_start',
+                why: notConnected ? 'not_connected' : refused ? 'push_refused' : 'failed_to_start',
                 detail: summarize(published.cause) || null,
                 agentId: null,
                 round: 0,
@@ -1506,12 +1522,14 @@ export class Runs extends Context.Service<
           const { implement, review: plannedReview } = yield* stepsOf(on.run)
           const planned = on.step === 'review' ? plannedReview : implement
           const other = yield* otherStepOf(on.run, on.step === 'review' ? 'review' : 'implement')
+          // One standing in on another model than the step's own: the step's own model comes first, its own lead included.
+          const own = planned?.model != null && failed.model !== null && !(yield* limits.sameModel)(planned, failed)
           return yield* limits.free({
             besides: [failed.agentId],
             projectId: on.run.projectId,
-            from: failed,
+            from: own ? planned : failed,
             ...(planned === undefined ? {} : { planned }),
-            ...(other === undefined ? {} : { other }),
+            ...(other === undefined ? {} : { other, ...(on.step === 'review' ? { reviewing: true } : {}) }),
           })
         })
 
@@ -2410,15 +2428,30 @@ export class Runs extends Context.Service<
           }
           // Another agent for the plan's lead, out or nearly out as it starts, only stands in for it: the plan's lead takes the
           // task back once it has usage again (standIn.ts), as one handed on while it runs does.
-          const standsIn = instead === undefined || implement === undefined ? undefined : yield* standInForPlan(run, implement)
+          const startingOn = { agentId: instead?.agentId ?? auto?.agentId ?? wanted, model: auto?.model ?? chosen }
+          // Started again on what the thread's last session was on, as after a restart, a stand-in still stands in.
+          const standsIn =
+            instead === undefined || implement === undefined
+              ? yield* standingAgain(run.threadId, startingOn)
+              : yield* standInForPlan(run, implement)
           return yield* sessions.start({
             threadId: run.threadId,
-            agentId: instead?.agentId ?? auto?.agentId ?? wanted,
-            ...((auto?.model ?? chosen) === null ? {} : { model: (auto?.model ?? chosen) as string }),
+            agentId: startingOn.agentId,
+            ...(startingOn.model === null ? {} : { model: startingOn.model }),
             ...(thinks === null ? {} : { effort: thinks }),
             ...(startingAccountId === undefined ? {} : { accountId: startingAccountId }),
             ...(standsIn === undefined ? {} : { standsIn }),
           })
+        })
+
+      /** Who the thread's last session stood in for, where it was on the agent and model starting now, and still does. */
+      const standingAgain = (threadId: string, on: { readonly agentId: string; readonly model: string | null }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [last] = yield* sql<{ id: string; agentId: string; model: string | null }>`
+            SELECT id, agent_id, model FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+          if (last === undefined || last.agentId !== on.agentId || (on.model !== null && last.model !== on.model)) return undefined
+          return Option.getOrUndefined(yield* standInOf(last.id, limits.sameModel))
         })
 
       /**
@@ -2483,7 +2516,7 @@ export class Runs extends Context.Service<
         stuck,
         usageLimitOfRun,
       })
-      const { answerCheckout, checkoutWakes, checkoutsEvery, lookAtCheckouts, moving, placeFirst, workToward, worksInOf } =
+      const { answerCheckout, checkoutWakes, checkoutsEvery, lookAtCheckouts, moving, place, placeFirst, workToward, worksInOf } =
         yield* makeRunCheckouts({ busy, changes, currentRun, instance, notYetStopped, sessions, stepsOf, stuck, waitForPlace })
 
       yield* Effect.forkScoped(
@@ -3082,6 +3115,16 @@ export class Runs extends Context.Service<
             ).pipe(Effect.tap(() => Queue.offer(checkoutWakes, undefined))),
           ),
         workToward: (input) => provide(workToward(input)),
+        place: (input) =>
+          provide(
+            place({
+              taskId: input.taskId,
+              to: input.to,
+              ...(input.lead === undefined ? {} : { lead: input.lead }),
+              ...(input.fromLastTurn === true ? { fromLastTurn: true } : {}),
+              actorId: input.envelope.actorId,
+            }),
+          ).pipe(Effect.tap(() => Queue.offer(checkoutWakes, undefined))),
         dropMove: (input) =>
           provide(
             Effect.gen(function* () {

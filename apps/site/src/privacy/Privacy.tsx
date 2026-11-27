@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 
 import { LINKS } from '../content/facts'
 import { Footer } from '../shared/footer/Footer'
-import { Nav } from '../shared/Nav'
+import { SiteNav } from '../shared/Bar'
 import { Night, night as n, Readout, Window } from '../shared/night/Night'
 import s from './Privacy.module.css'
 
@@ -16,7 +16,7 @@ import s from './Privacy.module.css'
  */
 
 /** When this page last changed. */
-const UPDATED = '8 Nov 2026'
+const UPDATED = '22 Nov 2026'
 
 interface Part {
   id: string
@@ -52,17 +52,19 @@ const PARTS: Part[] = [
           else:
         </p>
         <ul className={s.ul}>
-          <li>Althar opened, and updated from a version</li>
-          <li>The first project made, and each project after, with how many repositories</li>
-          <li>An agent signed in, by its name: Claude Code, Codex</li>
-          <li>A task started and settled: how, which agent and model family, in how many steps, and roughly how long it took</li>
-          <li>An ask answered, and by whom: you or the coordinator</li>
-          <li>An agent’s account reaching its usage limit</li>
+          <li>Althar started, whether it opened a window, and which version it updated from</li>
+          <li>Setup steps shown and completed, how project creation went, and how many repositories each project has</li>
+          <li>An agent signed in or reached its usage limit, by agent kind</li>
+          <li>Tasks created, plans proposed or decided, and how work started, ended, merged or reopened</li>
+          <li>How the first agent turn on a task went, with the agent kind, model family, rough duration and failure category</li>
+          <li>Asks opened and answered, who answered them, and roughly how long they waited</li>
+          <li>A service connected, work imported, an automation set up or run, or a problem report successfully sent</li>
+          <li>How pairing and connections to other homes went, and when workers connected to or disconnected from the desktop home</li>
         </ul>
         <p>
-          Each carries Althar’s version, the system and the processor, and a random id made for this install. It never carries a path, a
-          repository’s or project’s name, a prompt, a message, what an agent wrote, a file or an account. The app drops anything else before
-          it sends.
+          Each carries Althar’s version, the system and the processor, and a random id that lets us count return visits to this install.
+          Usage events never carry paths, project or repository names, prompts, messages, agent output, files, account details or report
+          text.
         </p>
       </>
     ),
@@ -90,15 +92,14 @@ const PARTS: Part[] = [
     body: (
       <>
         <p>
-          Usage data and crash reports go to <a href="https://posthog.com">PostHog</a>, in the US, straight from the app. They are
-          anonymous: no profile is made of you, your address isn’t used to place you, and the install id is random, so nothing ties them to
-          you or your machine.
+          Usage data and crash reports go to <a href="https://posthog.com">PostHog</a>, in the US, straight from the app. PostHog keeps
+          person profiles off and doesn’t use your IP address to look up your location. The same random install id also appears in a problem
+          report when you choose to send one.
         </p>
         <p>
           Each has its own switch in Settings, and the first screen shows the crash reports one. With either off, the app sends nothing for
           it. Both stay off while <code>DO_NOT_TRACK</code> is set, and builds you make yourself never send either.
         </p>
-        <p>Because nothing names you, we can’t find your events to delete them. Turning the switch off stops new ones.</p>
       </>
     ),
   },
@@ -180,7 +181,7 @@ const PARTS: Part[] = [
 export function Privacy() {
   return (
     <div className={s.page}>
-      <Nav />
+      <SiteNav />
 
       <main id="main" tabIndex={-1}>
         <Night head>

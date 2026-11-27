@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
-import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
+import { SOCKET_CALLS } from '@althar/contracts'
+import { act, cleanup, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 
@@ -10,8 +11,8 @@ import { ManageHomes } from '../src/renderer/features/homes/ManageHomes'
 import { HomeOpening } from '../src/renderer/features/homes/HomeOpening'
 import { HomeReport } from '../src/renderer/features/homes/HomeReport'
 import { homeProblem, homesUi, keyOf, livenessOf, openedAgo, useHomeState, useHomesOverview } from '../src/renderer/features/homes/useHomes'
-import { hostForHome, receiveHomeConnection } from '../src/renderer/data/homeConnection'
-import { fakeClient, fakeHost, home as snapshot, project } from './fixtures'
+import { foldersOnHome, hostForHome, receiveHomeConnection } from '../src/renderer/data/homeConnection'
+import { fakeClient, fakeHost, home as snapshot, project, remoteConnection } from './fixtures'
 import { servicesFor, withServices } from './render'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { reads } from '../src/renderer/data/reads'
@@ -42,7 +43,7 @@ const overview: HomesOverview = {
     local: { live: true, list: [{ id: 'prj_althar', name: 'althar', ink: 'clay', working: 0, yours: 0 }] },
     [home.homeId]: { live: true, list: [{ id: 'prj_ledger', name: 'ledger', ink: 'moss', working: 2, yours: 1 }] },
   },
-  opened: { [home.id]: Date.now() - 40 * 60_000 },
+  opened: {},
 }
 const fixture = () => {
   const listeners = new Set<(state: HomeState) => void>()
@@ -55,6 +56,7 @@ const fixture = () => {
     connect: vi.fn(async () => {}),
     save: vi.fn(async () => {}),
     open: vi.fn(async () => {}),
+    openNew: vi.fn(async () => {}),
     rename: vi.fn(async () => {}),
     change: vi.fn(async () => {}),
     forget: vi.fn(async () => {}),
@@ -76,6 +78,7 @@ const fixture = () => {
     },
     onOpen: () => () => {},
     onProject: () => () => {},
+    onNewProject: () => () => {},
   } satisfies HomesHost
   return {
     homes,
@@ -237,24 +240,24 @@ it('connects the first home from a visible chip, and names a remote home in its 
       <HomeConnections host={{ ...fakeHost(), homes: at.homes }} />
     </>,
   )
-  await userEvent.click(await screen.findByRole('button', { name: 'Homes' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Computers' }))
   await userEvent.click(await screen.findByRole('menuitem', { name: 'Connect a home…' }))
   // A first home opens on what a home is.
   expect(await screen.findByRole('dialog', { name: 'Your first home' })).not.toBeNull()
   await userEvent.click(screen.getByRole('button', { name: 'Not now' }))
   act(() => at.tell(overview))
-  expect(await screen.findByRole('button', { name: /Homes/ })).not.toBeNull()
+  expect(await screen.findByRole('button', { name: /Computers/ })).not.toBeNull()
   view.unmount()
   at.homes.state.mockResolvedValue(remote)
   render(<Chip homes={at.homes} />)
-  expect(await screen.findByRole('button', { name: 'My server, over SSH. Homes' })).not.toBeNull()
+  expect(await screen.findByRole('button', { name: 'My server, over SSH. Computers' })).not.toBeNull()
 })
 
 it('shows a dropped connection in the chip, readable, with an explicit Reconnect', async () => {
   const at = fixture()
   at.homes.state.mockResolvedValue(remote)
   render(<Chip homes={at.homes} />)
-  await screen.findByRole('button', { name: 'My server, over SSH. Homes' })
+  await screen.findByRole('button', { name: 'My server, over SSH. Computers' })
   act(() => at.emit({ ...remote, connection: 'disconnected', problem: 'Network closed' }))
   expect(await screen.findByText('Disconnected')).not.toBeNull()
   expect(screen.queryByRole('dialog')).toBeNull()
@@ -282,15 +285,15 @@ it('names a paired home in the chip and keeps an HTTPS disconnect explicit', asy
   at.homes.state.mockResolvedValue(state)
   at.homes.overview.mockResolvedValue({ ...overview, homes: [paired] })
   render(<Chip homes={at.homes} />)
-  expect(await screen.findByRole('button', { name: 'Secure server, connected. Homes' })).not.toBeNull()
+  expect(await screen.findByRole('button', { name: 'Secure server, connected. Computers' })).not.toBeNull()
   act(() => at.emit({ ...state, connection: 'disconnected', problem: 'Host stopped' }))
-  expect(await screen.findByRole('button', { name: 'Secure server, disconnected. Homes' })).not.toBeNull()
+  expect(await screen.findByRole('button', { name: 'Secure server, disconnected. Computers' })).not.toBeNull()
   expect(at.homes.reconnect).not.toHaveBeenCalled()
   await userEvent.click(screen.getByRole('button', { name: 'Reconnect' }))
   expect(at.homes.reconnect).toHaveBeenCalledOnce()
 })
 
-it('opens the chip’s menu from File › Homes… where there is a chip, and Connect a home where there is none', async () => {
+it('opens the chip’s menu from File › Computers… where there is a chip, and Connect a home where there is none', async () => {
   const at = fixture()
   at.homes.overview.mockResolvedValue({ ...overview, homes: [] })
   render(<HomeConnections host={{ ...fakeHost(), homes: at.homes }} />)
@@ -315,10 +318,24 @@ it('opens security key setup from the current paired home and says where it open
   const homes = { ...at.homes, enrollApprovalKey }
   const result = manage({ ...at, homes }, { ...overview, homes: [paired] }, here)
   await userEvent.click(await screen.findByRole('button', { name: 'Secure server, more' }))
-  await userEvent.click(await screen.findByRole('menuitem', { name: 'Set up a security key' }))
+  await userEvent.click(await screen.findByRole('menuitem', { name: 'Set up a security key…' }))
   expect(enrollApprovalKey).toHaveBeenCalledOnce()
-  expect(await screen.findByText('Security key setup is open in your browser.')).not.toBeNull()
+  expect(await screen.findByText('Finish setting up the key in your browser.')).not.toBeNull()
   expect(result.close).not.toHaveBeenCalled()
+})
+
+it('says why a security key couldn’t be set up, under the home, and tries again from there', async () => {
+  const at = fixture()
+  const enrollApprovalKey = vi.fn(async () => {}).mockRejectedValueOnce(new Error('The home didn’t answer.'))
+  const here: HomeState = { ...remote, current: { kind: 'https', home: paired } }
+  const homes = { ...at.homes, enrollApprovalKey }
+  manage({ ...at, homes }, { ...overview, homes: [paired] }, here)
+  await userEvent.click(await screen.findByRole('button', { name: 'Secure server, more' }))
+  await userEvent.click(await screen.findByRole('menuitem', { name: 'Set up a security key…' }))
+  expect((await screen.findByRole('alert')).textContent).toContain('The home didn’t answer.')
+  await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(enrollApprovalKey).toHaveBeenCalledTimes(2)
+  expect(await screen.findByText('Finish setting up the key in your browser.')).not.toBeNull()
 })
 
 it('shows each home by its projects, live while its window is connected, and opens one there', async () => {
@@ -331,6 +348,19 @@ it('shows each home by its projects, live while its window is connected, and ope
   await userEvent.click(within(dialog).getByRole('button', { name: /ledger/ }))
   expect(at.homes.open).toHaveBeenCalledExactlyOnceWith(home.id, 'prj_ledger')
   expect(close).toHaveBeenCalledOnce()
+})
+
+it('offers New project after each home’s projects, opening that home’s window on it', async () => {
+  const at = fixture()
+  const { close } = manage(at)
+  const dialog = await screen.findByRole('dialog', { name: 'Homes' })
+  const [here, there] = within(dialog).getAllByRole('button', { name: 'New project' })
+  await userEvent.click(there!)
+  await waitFor(() => expect(at.homes.openNew).toHaveBeenCalledExactlyOnceWith(home.id))
+  expect(close).toHaveBeenCalledOnce()
+  await userEvent.click(here!)
+  await waitFor(() => expect(at.homes.openNew).toHaveBeenLastCalledWith('local'))
+  expect(at.homes.open).not.toHaveBeenCalled()
 })
 
 it('manages paired homes by their origin and offers a new pairing instead of SSH edits', async () => {
@@ -351,6 +381,7 @@ it('shows a resting home’s projects quietly, as last read, with when it was la
   const at = fixture()
   manage(at, {
     ...overview,
+    opened: { [home.id]: Date.now() - 40 * 60_000 },
     windows: { local: 'local' },
     projects: {
       ...overview.projects,
@@ -511,6 +542,8 @@ it('reports the project snapshot and live attention counts, and sends only chang
   const { client } = fakeClient({
     listProjects: vi.fn(async () => ({ cursor: 3, projects: [{ ...project, working: 2 }, second] })),
     getHome: vi.fn(async () => snapshot({ calls: [call] })),
+    // Where their code is is told too: none here, for what this test is about.
+    getRepositories: vi.fn(async () => []),
   })
   const services = servicesFor(client, fakeHost({ homes: at.homes }))
   render(
@@ -536,6 +569,32 @@ it('reports the project snapshot and live attention counts, and sends only chang
   await waitFor(() =>
     expect(at.homes.report).toHaveBeenLastCalledWith([{ id: project.id, name: project.name, ink: project.ink, working: 3, yours: 1 }]),
   )
+})
+
+it('tells main where this computer’s projects’ code is, by each one’s page on its host, and nothing of another home’s', async () => {
+  const at = fixture()
+  const repositories = await fakeClient().client.getRepositories(project.id)
+  const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })) })
+  render(
+    <ServicesProvider value={servicesFor(client, fakeHost({ homes: at.homes }))}>
+      <HomeReport />
+    </ServicesProvider>,
+  )
+  const pages = repositories.flatMap((one) => (one.host?.url?.startsWith('https://') === true ? [one.host.url] : []))
+  expect(pages.length).toBeGreaterThan(0)
+  await waitFor(() => expect(at.homes.report.mock.lastCall?.[0]?.[0]?.remotes?.map((one: { url: string }) => one.url)).toEqual(pages))
+  cleanup()
+  // A window on another computer's home: its projects are there already, and their code isn't asked for.
+  const away = fixture()
+  const remote = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })), connection: remoteConnection() })
+  render(
+    <ServicesProvider value={servicesFor(remote.client, fakeHost({ homes: away.homes }))}>
+      <HomeReport />
+    </ServicesProvider>,
+  )
+  await waitFor(() => expect(away.homes.report).toHaveBeenCalled())
+  expect(away.homes.report.mock.lastCall?.[0]?.[0]?.remotes).toBeUndefined()
+  expect(remote.client.getRepositories).not.toHaveBeenCalled()
 })
 
 it('does not publish an unread project list, and reports an empty home without asking for a task snapshot', async () => {
@@ -802,7 +861,7 @@ it.each(['connecting', 'disconnected', 'connected'] as const)(
   },
 )
 
-it('offers setup for empty project shelves and uses the Connect a home action without opening a folder', async () => {
+it('offers New project on an empty shelf, opening that home’s window on its welcome, and Connect a home without a folder', async () => {
   const at = fixture()
   const connect = vi.fn()
   render(
@@ -814,8 +873,11 @@ it('offers setup for empty project shelves and uses the Connect a home action wi
       onConnect={connect}
     />,
   )
-  expect(screen.getByText('Add a project and it shows here.')).not.toBeNull()
-  expect(screen.getByText('Add a project on the host and it shows here.')).not.toBeNull()
+  expect(screen.getAllByText('No projects yet.')).toHaveLength(2)
+  const [here, there] = screen.getAllByRole('button', { name: 'New project' })
+  await userEvent.click(there!)
+  await waitFor(() => expect(at.homes.open).toHaveBeenCalledWith(home.id, undefined))
+  expect(here).toBeDefined()
   await userEvent.click(screen.getByRole('button', { name: 'Connect a home' }))
   expect(connect).toHaveBeenCalledOnce()
 })
@@ -842,7 +904,7 @@ it('keeps a stale home-menu selection from becoming an unhandled native rejectio
       <HomeConnections host={{ ...fakeHost(), homes: at.homes }} />
     </>,
   )
-  await userEvent.click(await screen.findByRole('button', { name: 'Homes' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Computers' }))
   await userEvent.click(await screen.findByRole('menuitem', { name: 'My server' }))
   await waitFor(() => expect(at.homes.open).toHaveBeenCalledExactlyOnceWith(home.id))
   expect(screen.queryByRole('menu')).toBeNull()
@@ -965,9 +1027,17 @@ it.each([false, true])('bounds startup when a runtime never sends its port (remo
   }
 })
 
-function RemoteStart() {
+function RemoteStart({ onNew = () => {} }: { onNew?: () => void }) {
   const model = useStart()
-  return <StartView model={model} accounts={useAccountSignIn(model)} onProject={() => {}} home={() => <p>Projects on the remote home</p>} />
+  return (
+    <StartView
+      model={model}
+      accounts={useAccountSignIn(model)}
+      onProject={() => {}}
+      onNew={onNew}
+      home={() => <p>Projects on the remote home</p>}
+    />
+  )
 }
 
 it.each([remote, { current: { kind: 'https' as const, home: paired }, connection: 'connected' as const }])(
@@ -983,11 +1053,13 @@ it.each([remote, { current: { kind: 'https' as const, home: paired }, connection
         apiVersion: 1,
         appVersion: 'test',
         position: { homeId: home.homeId, cursor: 0, checkpoint: null },
+        calls: SOCKET_CALLS,
       },
       listProjects: vi.fn(() => listed.promise),
     })
     const host = fakeHost({ homes: at.homes })
-    const services = servicesFor(client, host)
+    // As the window makes them on another computer's home: its folders are the home's.
+    const services = servicesFor(client, foldersOnHome(host, client))
     // A local welcome left on show must not replace the remote host’s first screen.
     welcome.begin()
     render(
@@ -996,17 +1068,19 @@ it.each([remote, { current: { kind: 'https' as const, home: paired }, connection
       </ServicesProvider>,
     )
     expect(screen.queryByText('Projects on the remote home')).toBeNull()
-    expect(screen.queryByRole('heading', { name: /No projects/ })).toBeNull()
+    expect(screen.queryByRole('heading', { name: /^This is/ })).toBeNull()
     await act(async () => listed.resolve({ cursor: 0, projects: [] }))
     const name = here.current.kind === 'local' ? '' : here.current.home.name
-    expect(await screen.findByRole('heading', { name: `No projects on ${name} yet` })).not.toBeNull()
+    expect(await screen.findByRole('heading', { name: `This is ${name}` })).not.toBeNull()
+    // What the home found on its own disk, never this computer's.
+    await waitFor(() => expect(client.findHomeFolders).toHaveBeenCalled())
     expect(host.findRepositories).not.toHaveBeenCalled()
     expect(host.pickFolders).not.toHaveBeenCalled()
     act(() => {
       services.cache.setQueryData(reads(client).projects().queryKey, { cursor: 1, projects: [project] })
     })
     expect(await screen.findByText('Projects on the remote home')).not.toBeNull()
-    expect(screen.queryByRole('heading', { name: /No projects/ })).toBeNull()
+    expect(screen.queryByRole('heading', { name: /^This is/ })).toBeNull()
   },
 )
 
@@ -1097,8 +1171,7 @@ it('identifies its own remote window and offers Connect even when projects are n
 it('distinguishes empty homes and live projects that are idle, running, or waiting on the person', async () => {
   const at = fixture()
   const { view } = manage(at, { ...overview, projects: { local: { live: true, list: [] }, [home.homeId]: { live: true, list: [] } } })
-  expect(screen.getByText('Add a project and it shows here.')).not.toBeNull()
-  expect(screen.getByText('Add a project on the host and it shows here.')).not.toBeNull()
+  expect(screen.getAllByText('No projects yet.')).toHaveLength(2)
   view.rerender(
     <ManageHomes
       homes={at.homes}
@@ -1187,7 +1260,7 @@ it('reports an empty home without reading its task activity', async () => {
   expect(client.getHome).not.toHaveBeenCalled()
 })
 
-it('opens local and saved homes from the menu, and reaches Manage and Connect from File › Homes', async () => {
+it('opens local and saved homes from the menu, and reaches Manage and Connect from File › Computers', async () => {
   const at = fixture()
   render(
     <>
@@ -1201,7 +1274,7 @@ it('opens local and saved homes from the menu, and reaches Manage and Connect fr
     })
     await screen.findByRole('menuitem', { name: /This computer/ })
   }
-  await screen.findByRole('button', { name: 'Homes' })
+  await screen.findByRole('button', { name: 'Computers' })
   await show()
   await userEvent.click(screen.getByRole('menuitem', { name: /This computer/ }))
   expect(at.homes.open).toHaveBeenCalledWith('local')
@@ -1222,12 +1295,12 @@ it('keeps a forgotten home in its own window’s menu while reconnecting and dis
   at.homes.state.mockResolvedValue({ ...remote, connection: 'connecting' })
   at.homes.overview.mockResolvedValue({ ...overview, homes: [], windows: {} })
   render(<Chip homes={at.homes} />)
-  await userEvent.click(await screen.findByRole('button', { name: 'My server, reconnecting. Homes' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'My server, reconnecting. Computers' }))
   expect(await screen.findByRole('menuitem', { name: /My server/ })).not.toBeNull()
   expect(screen.getByText('This window')).not.toBeNull()
   await userEvent.keyboard('{Escape}')
   act(() => at.emit({ ...remote, connection: 'disconnected', problem: 'SSH lost' }))
-  await userEvent.click(screen.getByRole('button', { name: 'My server, disconnected. Homes' }))
+  await userEvent.click(screen.getByRole('button', { name: 'My server, disconnected. Computers' }))
   await userEvent.click(await screen.findByRole('menuitem', { name: /Reconnect/ }))
   expect(at.homes.reconnect).toHaveBeenCalledOnce()
 })

@@ -61,14 +61,12 @@ describe('the window’s watch', () => {
     expect(heard).toEqual(['t1', 'i1'])
   })
 
-  it('puts plan usage in the cache as it comes, whole, tells whoever listens, and marks each model’s room to read again', async () => {
-    const { client, cache, feed, emit, read } = opened()
+  it('puts plan usage in the cache as it comes, whole, and tells whoever listens', async () => {
+    const { client, cache, feed, emit } = opened()
     const heard: Array<string> = []
     feed.listen((event) => heard.push(event._tag))
-    await cache.fetchQuery(read.modelRooms('p1'))
     const usage = planUsage([usageAccount({ accountName: 'side' })])
     emit({ _tag: 'PlanUsage', usage })
-    expect(cache.getQueryState(keys.modelRooms('p1'))?.isInvalidated).toBe(true)
     expect(cache.getQueryData(keys.planUsage)).toEqual(usage)
     emit({ _tag: 'PlanUsage', usage: planUsage() })
     expect(cache.getQueryData(keys.planUsage)).toEqual(planUsage())
@@ -86,6 +84,16 @@ describe('the window’s watch', () => {
     expect(client.getPlanUsage).toHaveBeenCalledTimes(1)
     // Off screen it is only marked, for its next visit.
     expect(cache.getQueryState(keys.planUsage)?.isInvalidated).toBe(true)
+  })
+
+  it('refreshes visible task folders when a project run ends', async () => {
+    const { client, cache, emit, read } = opened()
+    await cache.fetchQuery(read.folders())
+    const stop = new QueryObserver(cache, read.folders()).subscribe(() => undefined)
+    emit({ _tag: 'Launches', projectId: 'p1', launches: [] })
+    await settle()
+    expect(client.getTaskFolders).toHaveBeenCalledTimes(2)
+    stop()
   })
 
   // Off screen, these used to be read again too, on every card an agent's edit moved: every board the window ever opened,

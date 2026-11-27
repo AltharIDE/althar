@@ -124,62 +124,20 @@ export const HandingOver: Story = {
   },
 }
 
-/**
- * Account usage stays out of the picker, even if an older caller supplies it.
- */
-export const Room: Story = {
-  args: {
-    model: model('gpt-5.2-codex'),
-    pinned: [OPUS, model('gpt-5.2-codex'), model('gemini-3-pro')],
-    defaultOpen: true,
-    room: (x) =>
-      x.runtime === 'codex'
-        ? { left: 3, until: '14:00', account: null }
-        : x.runtime === OPUS.runtime
-          ? { left: 62, until: '17:00', account: 'Side' }
-          : null,
-  },
-  play: async ({ canvasElement }) => {
-    const page = within(document.body)
-    await expect(page.queryByText('Side · 62%')).toBeNull()
-    await expect(page.queryByText('3% · until 14:00')).toBeNull()
-    await expect(page.queryByText('no reading')).toBeNull()
-    await expect(within(canvasElement).queryByText('3% left · until 14:00')).toBeNull()
-  },
-}
-
-/** A low plan balance and account never enter the picker. */
+/** A row's name is whole beside its effort. */
 export const CrowdedRow: Story = {
   args: {
     model: OPUS,
     pinned: [OPUS, model('gpt-5.2-codex')],
     defaultOpen: true,
-    room: (x) => (x.runtime === 'codex' ? { left: 17, until: 'Sat 23:39', account: 'Main' } : undefined),
   },
   play: async () => {
     const row = within(document.body).getByRole('radio', { name: /GPT-5.2 Codex/ })
     const name = within(row).getByText('GPT-5.2 Codex')
-    await expect(within(row).queryByText(/Main|17%|Sat 23:39/)).toBeNull()
     await expect(name.clientWidth).toBeGreaterThan(0)
     await expect(name.scrollWidth).toBeLessThanOrEqual(name.clientWidth)
   },
 }
-
-/** Even low usage leaves the model chip alone. */
-const nearly = (left: number): Story => ({
-  args: {
-    model: model('gpt-5.2-codex'),
-    pinned: [OPUS, model('gpt-5.2-codex')],
-    room: () => ({ left, until: 'Mon 11:00', account: null }),
-  },
-  play: async ({ canvasElement }) => {
-    const said = left === 0 ? 'Out · until Mon 11:00' : `${left}% left · until Mon 11:00`
-    await expect(within(canvasElement).queryByText(said)).toBeNull()
-  },
-})
-export const TenPercentLeft: Story = nearly(10)
-export const ThreePercentLeft: Story = nearly(3)
-export const Out: Story = nearly(0)
 
 /** Claude Code offers six efforts: they share the row without spilling. */
 const SIX = { ...OPUS, efforts: ['Default', 'Low', 'Medium', 'High', 'Extra high', 'Max'] }
