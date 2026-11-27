@@ -53,6 +53,10 @@ message AgentHomeFrame {
     AgentManagedInput helper_skills_chunk = 16;
     AgentManagedInput helper_checkout_chunk = 17;
     AgentFileRequest file_request = 18;
+    // The person removed this worker from its home: it takes itself off its
+    // computer. Sent between runs, or instead of a hello to a worker the home
+    // removed while it was away.
+    AgentWorkerRemoved removed = 19;
   }
 }
 
@@ -514,3 +518,5 @@ message DiagnosticLog {
   uint32 offset = 3;
   bytes output = 4;
 }
+
+message AgentWorkerRemoved {}

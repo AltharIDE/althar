@@ -43,6 +43,29 @@ const verify = (bytes = signed(), extra: { minimumSequence?: number; installedVe
     installedVersion: extra.installedVersion ?? '0.1.0',
   })
 
+describe('a worker’s own release, beside the home’s', () => {
+  const policy = { keys: [publicKey], now, arch: 'x64' as const, minimumSequence: 2, installedVersion: '0.1.1' }
+  const worker = signed({ ...manifest, product: 'worker' })
+
+  it('is taken only where a worker’s is asked for, and a home’s only where a home’s is', () => {
+    expect(verifyRelease(worker, { ...policy, minimumSequence: 1, installedVersion: '0.1.0', product: 'worker' }).manifest.product).toBe(
+      'worker',
+    )
+    expect(() => verifyRelease(worker, { ...policy, minimumSequence: 1, installedVersion: '0.1.0' })).toThrow()
+    expect(() => verifyRelease(signed(), { ...policy, minimumSequence: 1, installedVersion: '0.1.0', product: 'worker' })).toThrow()
+    expect(() =>
+      verifyRelease(signed({ ...manifest, product: 'home' }), { ...policy, minimumSequence: 1, installedVersion: '0.1.0' }),
+    ).toThrow()
+  })
+
+  it('may be the very release installed only where a worker moves onto its own, and never an older one', () => {
+    expect(() => verifyRelease(worker, { ...policy, product: 'worker' })).toThrow()
+    expect(verifyRelease(worker, { ...policy, product: 'worker', sameRelease: true }).manifest.version).toBe('0.1.1')
+    expect(() => verifyRelease(worker, { ...policy, product: 'worker', sameRelease: true, minimumSequence: 3 })).toThrow()
+    expect(() => verifyRelease(worker, { ...policy, product: 'worker', sameRelease: true, installedVersion: '0.1.2' })).toThrow()
+  })
+})
+
 describe('authenticated host releases', () => {
   it('authenticates exact manifest bytes against an explicitly pinned Ed25519 key', () => {
     expect(verify().manifest).toEqual(manifest)

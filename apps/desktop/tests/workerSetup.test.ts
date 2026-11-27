@@ -1,14 +1,14 @@
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { expect, it, vi } from 'vitest'
 
-import { workerRelease } from '../src/main/homes/release'
+import { findRelease, findWorkerRelease, workerRelease } from '../src/main/homes/release'
 import type { Ran, RunOptions, SetupSystem } from '../src/main/homes/setup'
 import { forTheLog, workerSetups, type WorkerLog } from '../src/main/homes/workerSetup'
 import type { WorkerSetup } from '../src/workers'
 
 const now = Date.parse('2026-01-20T00:00:00.000Z')
-const signed = (version: string) => {
-  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+const signed = (version: string, extra: Record<string, unknown> = {}, pair = generateKeyPairSync('ed25519')) => {
+  const { privateKey, publicKey } = pair
   const manifest = {
     format: 1,
     version,
@@ -21,6 +21,7 @@ const signed = (version: string) => {
     arch: 'x64',
     archive: { url: 'https://example.test/a.tar.gz', sha256: 'b'.repeat(64), bytes: 40_000_000 },
     unpackedBytes: 120_000_000,
+    ...extra,
   }
   const payload = Buffer.from(JSON.stringify(manifest))
   const keyId = createHash('sha256')
@@ -37,6 +38,47 @@ const signed = (version: string) => {
 const asset = (name: string) => ({ name, browser_download_url: `https://x.test/${name}` })
 const listing = (...releases: Array<Record<string, unknown>>) =>
   vi.fn(async (url: string, _init?: unknown) => (new URL(url).host === 'api.github.com' ? Response.json(releases) : new Response('no')))
+
+it('installs a worker from its own release, beside the home’s; from one before workers had their own, from the home’s', async () => {
+  const signal = new AbortController().signal
+  const pair = generateKeyPairSync('ed25519')
+  const home = signed('0.3.0', {}, pair)
+  const worker = signed('0.3.0', { product: 'worker', archive: { url: 'https://x.test/w.tar.gz', sha256: 'd'.repeat(64), bytes: 9 } }, pair)
+  const releases = [
+    {
+      tag_name: 'host-v0.3.0',
+      draft: false,
+      prerelease: false,
+      assets: [asset('althar-host-linux-x64.json'), asset('althar-worker-linux-x64.json')],
+    },
+    { tag_name: 'host-v0.2.0', draft: false, prerelease: false, assets: [asset('althar-host-linux-x64.json')] },
+  ]
+  const serving = (listed: typeof releases) =>
+    vi.fn(async (url: string, _init?: unknown) =>
+      new URL(url).host === 'api.github.com'
+        ? Response.json(listed)
+        : new Response(url.endsWith('althar-worker-linux-x64.json') ? worker.envelope : home.envelope),
+    )
+  const source = (listed: typeof releases) => ({ keys: [home.pem], fetch: serving(listed), now: () => now })
+  expect(await findWorkerRelease('x64', source(releases), signal)).toMatchObject({ version: '0.3.0', url: 'https://x.test/w.tar.gz' })
+  // A home is never set up from a worker's release, nor the other way round where the worker's own is published.
+  expect(await findRelease('x64', source(releases), signal)).toMatchObject({ url: 'https://example.test/a.tar.gz' })
+  expect(await findWorkerRelease('x64', source(releases.slice(1)), signal)).toMatchObject({ url: 'https://example.test/a.tar.gz' })
+  const swapped = vi.fn(async (url: string, _init?: unknown) =>
+    new URL(url).host === 'api.github.com' ? Response.json(releases) : new Response(worker.envelope),
+  )
+  await expect(findRelease('x64', { keys: [home.pem], fetch: swapped, now: () => now }, signal)).rejects.toThrow(/failed its check/)
+  // A release of your own: the worker's where it is one, else the home's it names.
+  const own = (envelope: string) => ({
+    keys: [home.pem],
+    manifest: 'http://127.0.0.1:8080/r/m.json',
+    fetch: vi.fn(async () => new Response(envelope)),
+    now: () => now,
+  })
+  expect(await findWorkerRelease('x64', own(worker.envelope), signal)).toMatchObject({ url: 'https://x.test/w.tar.gz' })
+  expect(await findWorkerRelease('x64', own(home.envelope), signal)).toMatchObject({ url: 'https://example.test/a.tar.gz' })
+  await expect(findRelease('x64', own(worker.envelope), signal)).rejects.toThrow(/failed its check/)
+})
 
 it('says no release can add a worker where the newest host release came before workers, as host-v0.1.0 did', async () => {
   const signal = new AbortController().signal

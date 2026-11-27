@@ -143,6 +143,10 @@ export interface ComputersText {
   removeElsewhere: (home: string) => string
   removeTitle: (name: string) => string
   removeNote: (home: string) => string
+  /** For a worker its home set up: it takes itself off its computer. */
+  removeOff: (home: string) => string
+  /** For one of those offline now: when it does, and the line that does it there now. */
+  removeOffline: (home: string) => string
   removeConfirm: string
   cancel: string
   addTitle: (home: string) => string
@@ -220,6 +224,9 @@ export const computersText: ComputersText = {
   removeElsewhere: (home) => `From a paired device, this window can’t remove workers. A window on ${home} itself, or over SSH, can.`,
   removeTitle: (name) => `Remove ${name}?`,
   removeNote: (home) => `It gets no more tasks from ${home}, and its key isn’t accepted again. To bring it back, add it again.`,
+  removeOff: (home) =>
+    `It gets no more tasks from ${home}, and takes itself off its computer: its service, its checkouts and its releases. Its agents stay signed in there. To bring it back, add it again.`,
+  removeOffline: (home) => `It’s offline, so it does that once it next reaches ${home}. To do it now, run this on it:`,
   removeConfirm: 'Remove',
   cancel: 'Cancel',
   addTitle: (home) => `Add a worker to ${home}`,
@@ -256,6 +263,9 @@ export const computersText: ComputersText = {
 
 /** Out of reach, or out of room: said in the danger colour. */
 const troubled = (state: WorkerState) => state === 'offline' || state === 'full'
+
+/** What takes a worker its home set up off its computer, run there as its login (apps/worker/src/uninstall.rs). */
+export const UNINSTALL = '"${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program/current/althar-worker" uninstall'
 
 /** A computer's head: its round picture, the home's in ink and one out of reach in red; its name and a line; the way in. */
 function Head({
@@ -648,7 +658,7 @@ function WorkerSheet({
       {asking && (
         <Dialog
           title={t.removeTitle(worker.name)}
-          description={t.removeNote(home)}
+          description={worker.managed === true ? t.removeOff(home) : t.removeNote(home)}
           onClose={() => setAsking(false)}
           actions={
             <>
@@ -664,7 +674,17 @@ function WorkerSheet({
               </Button>
             </>
           }
-        />
+        >
+          {worker.managed === true && worker.state === 'offline' && (
+            <div className={s.leftToDo}>
+              <span className={s.addressHint}>{t.removeOffline(home)}</span>
+              <span className={s.lineToRun}>
+                <Code className={s.lineToRunText}>{UNINSTALL}</Code>
+                <CopyButton value={UNINSTALL} ghost />
+              </span>
+            </div>
+          )}
+        </Dialog>
       )}
     </div>
   )

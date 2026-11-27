@@ -61,6 +61,7 @@ it.live('keeps each repository’s own baseline and sends commands to the select
         connectPreview: () => assert.fail('No transport fixture needed'),
         connected: () => [],
         openTools: () => undefined,
+        remove: () => false,
         list: () => [
           {
             workerId: input.workerId,
@@ -334,6 +335,7 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
       connectPreview: () => assert.fail('No transport fixture needed'),
       connected: () => [],
       openTools: () => undefined,
+      remove: () => false,
       list: () => [{ workerId: input.workerId, busy: false, capabilities: [{ projectId: input.projectId, providerId: input.providerId }] }],
       start: async (id, placement, options) => {
         assert.strictEqual(id, input.workerId)

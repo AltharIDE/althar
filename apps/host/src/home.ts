@@ -6,15 +6,15 @@ import { API_VERSION } from '@althar/contracts'
 import { Context, Effect, Layer, Scope } from 'effect'
 import { Instance, listenLocalApi, listenNetworkApi, Projects, Runtime, services } from '@althar/runtime'
 
-import metadata from '../package.json'
 import { configuredHome } from './configuration'
 import { HostError } from './errors'
 import type { HostOptions } from './options'
 import { initializeVault, openVault } from './vault'
 import { listenWorkers, openWorkers } from './workers'
 import { workerExecution } from './agentExecution'
+import { HOST_VERSION } from './version'
 
-export const HOST_VERSION = metadata.version
+export { HOST_VERSION } from './version'
 export type HostDependencies = Pick<
   Runtime.RuntimeLayerOptions,
   'agents' | 'connectors' | 'agentSearch' | 'agentConfigs' | 'usage' | 'fetch' | 'workers'

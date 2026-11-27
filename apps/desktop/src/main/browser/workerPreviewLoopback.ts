@@ -129,6 +129,9 @@ export const workerPreviewLoopback = async (
       browser.destroy()
       return
     }
+    // Node takes its own error listener off an upgraded socket: until the pipeline below has one, an error here (the
+    // page going, a reset) would be uncaught in the main process, and take the app down.
+    browser.on('error', () => browser.destroy())
     browser.pause()
     const controller = new AbortController()
     browser.once('close', () => controller.abort())

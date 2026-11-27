@@ -23,6 +23,8 @@ export const ReleaseManifest = Schema.Struct({
   archive: Schema.Struct({ url: Schema.String, sha256: Hash, bytes: Natural.check(Schema.isLessThanOrEqualTo(MAX_ARCHIVE_BYTES)) }),
   unpackedBytes: Natural.check(Schema.isLessThanOrEqualTo(MAX_UNPACKED_BYTES)),
   files: Natural.check(Schema.isLessThanOrEqualTo(50_000)),
+  /** What it is: a home's release, or a worker's own. A manifest from before workers had their own is a home's. */
+  product: Schema.optional(Schema.Literals(['host', 'worker'])),
 })
 export type ReleaseManifest = typeof ReleaseManifest.Type
 const Envelope = Schema.Struct({ format: Schema.Literal(1), keyId: Hash, payload: Schema.String, signature: Schema.String })
@@ -80,6 +82,13 @@ export interface ReleasePolicy {
   readonly arch: 'x64' | 'arm64'
   readonly minimumSequence: number
   readonly installedVersion: string
+  /** What it must be: a home's release unless said. */
+  readonly product?: 'host' | 'worker'
+  /**
+   * The same release may do: a worker installed from a home's release moving to the worker's own of that release, signed
+   * in the same run, so with the same sequence and version.
+   */
+  readonly sameRelease?: boolean
 }
 export interface VerifiedRelease {
   readonly id: string
@@ -112,8 +121,9 @@ export const verifyRelease = (bytes: Uint8Array, policy: ReleasePolicy): Verifie
   if (
     date(release.manifest.publishedAt) > policy.now + 300_000 ||
     date(release.manifest.expiresAt) <= policy.now ||
-    release.manifest.sequence <= policy.minimumSequence ||
-    compareVersions(release.manifest.version, policy.installedVersion) <= 0
+    (release.manifest.product ?? 'host') !== (policy.product ?? 'host') ||
+    release.manifest.sequence < policy.minimumSequence + (policy.sameRelease === true ? 0 : 1) ||
+    compareVersions(release.manifest.version, policy.installedVersion) < (policy.sameRelease === true ? 0 : 1)
   )
     throw rejected()
   return release

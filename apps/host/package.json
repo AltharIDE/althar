@@ -9,7 +9,7 @@
   },
   "type": "module",
   "scripts": {
-    "build": "vp build",
+    "build": "vp build && vp build --config vite.worker.config.ts",
     "release:smoke": "bun run build && node scripts/release-smoke.ts",
     "start": "node dist/althar-host.js",
     "check": "vp check",

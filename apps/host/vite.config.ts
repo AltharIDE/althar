@@ -19,7 +19,7 @@ export default defineConfig({
     coverage: {
       include: ['src/**/*.ts'],
       // Only process wiring; the command runner is covered directly and the built entry is exercised by process tests.
-      exclude: ['src/main.ts'],
+      exclude: ['src/main.ts', 'src/worker.ts'],
       reporter: ['text', 'html'],
       reportOnFailure: true,
       thresholds: { lines: 90, branches: 90 },
