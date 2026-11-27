@@ -65,14 +65,14 @@ export const FromItsMaker: Story = {
   args: {
     name: 'Google Antigravity',
     brand: Brand.Antigravity,
-    size: '115 MB',
+    size: '125 MB',
     pinned: { from: 'Google', version: '1.3.0' },
     onInstall: fn(),
-    onHelp: fn(),
+    onCheck: fn(),
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText(/Google Antigravity 1\.3\.0, from Google, about 115 MB/)).toBeInTheDocument()
+    await expect(c.getByText(/Google Antigravity 1\.3\.0, from Google, about 125 MB/)).toBeInTheDocument()
     await expect(c.queryByText(/GitHub/)).toBeNull()
   },
 }
