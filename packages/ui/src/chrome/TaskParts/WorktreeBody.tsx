@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, useId, useRef, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { Button } from '../../primitives/Button/Button'
@@ -75,8 +75,11 @@ export interface WorktreeBodyProps {
   folder: string | null
   place?: string
   files: ReadonlyArray<WorktreeFile>
-  /** Points it at another branch; without it, the branch it goes into is only said. */
-  onToward?: (branch: string) => void
+  /**
+   * Points it at another branch; without it, the branch it goes into is only said. The form closes at the press, its
+   * name kept; what it answers with is why it was refused, and the form opens again with the name and that, at the field.
+   */
+  onToward?: (branch: string) => Promise<string | null> | void
   /** What working toward another does for this task, in one line. */
   towardNote?: string
   text?: Partial<WorktreeBodyText>
@@ -86,17 +89,31 @@ export function WorktreeBody({ branch, target, folder, place, files, onToward, t
   const t = { ...worktreeBodyText, ...text }
   const [toward, setToward] = useState(false)
   const [typed, setTyped] = useState('')
+  const [refused, setRefused] = useState<string | null>(null)
   const [listed, setListed] = useState(false)
+  const targetRef = useRef<HTMLButtonElement>(null)
+  const refusedId = useId()
   const added = files.reduce((sum, one) => (one.binary === true ? sum : sum + one.add), 0)
   const removed = files.reduce((sum, one) => (one.binary === true ? sum : sum + one.del), 0)
   const lines = added + removed
+  const close = () => {
+    setToward(false)
+    targetRef.current?.focus()
+  }
   const go = (event: FormEvent) => {
     event.preventDefault()
     const name = typed.trim()
     if (name === '' || onToward === undefined) return
-    onToward(name)
-    setTyped('')
-    setToward(false)
+    setRefused(null)
+    close()
+    void Promise.resolve(onToward(name)).then((why) => {
+      if (why === undefined || why === null) {
+        setTyped((now) => (now.trim() === name ? '' : now))
+        return
+      }
+      setRefused(why)
+      setToward(true)
+    })
   }
 
   return (
@@ -108,14 +125,20 @@ export function WorktreeBody({ branch, target, folder, place, files, onToward, t
             {branch !== null && <Middle text={branch} keep={14} className={s.branch} />}
             {(target !== null || onToward !== undefined) && <Icon name="arrow" size={11} className={s.arrow} />}
             {onToward === undefined ? (
-              target !== null && <code className={s.target}>{target}</code>
+              target !== null && (
+                <span className={s.target} title={target}>
+                  <code>{target}</code>
+                </span>
+              )
             ) : (
               <button
+                ref={targetRef}
                 type="button"
                 className={s.target}
                 aria-expanded={toward}
+                {...(target === null ? {} : { title: target })}
                 {...(target === null ? {} : { 'aria-label': t.changeTarget(target) })}
-                onClick={() => setToward((open) => !open)}
+                onClick={() => (toward ? setToward(false) : setToward(true))}
               >
                 {target === null ? <span>{t.towardOther}</span> : <code>{target}</code>}
                 <Icon name={toward ? 'chevronU' : 'chevronD'} size={10} />
@@ -146,21 +169,33 @@ export function WorktreeBody({ branch, target, folder, place, files, onToward, t
               size="default"
               placeholder={t.towardField}
               aria-label={t.towardField}
+              data-own-escape=""
+              invalid={refused !== null}
+              {...(refused === null ? {} : { 'aria-describedby': refusedId })}
               value={typed}
               ref={(node) => node?.focus()}
               spellCheck={false}
-              onChange={(event) => setTyped(event.target.value)}
+              onChange={(event) => {
+                setTyped(event.target.value)
+                setRefused(null)
+              }}
               onKeyDown={(event) => {
                 if (event.key !== 'Escape') return
                 event.stopPropagation()
-                setToward(false)
+                close()
               }}
             />
             <Button size="small" variant="signal" type="submit" disabled={typed.trim() === ''}>
               {t.towardIt}
             </Button>
           </div>
-          {towardNote !== undefined && <p className={s.note}>{towardNote}</p>}
+          {refused !== null ? (
+            <p id={refusedId} className={s.refused} role="alert">
+              {refused}
+            </p>
+          ) : (
+            towardNote !== undefined && <p className={s.note}>{towardNote}</p>
+          )}
         </form>
       )}
 

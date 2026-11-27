@@ -121,6 +121,33 @@ describe('a task’s parts', () => {
     await waitFor(() => expect(client.workToward).toHaveBeenCalledWith(base.task.id, 'release/0.8.0'))
   })
 
+  it('opens a refused branch again at its field, with the name kept and why, and Escape closes the field before the parts', async () => {
+    const working = snapshot({ task: { ...base.task, worktree: '/tmp/w/api', branch: 'althar/add-a-retry', phase: 'ready' } })
+    const { client } = fakeClient({ getThread: vi.fn(async () => working) })
+    vi.spyOn(client, 'workToward').mockRejectedValueOnce(
+      new ApiError({ reason: 'BranchNotFound', message: 'release/9 isn’t a branch of api.' }),
+    )
+    withServices(<Task />, client)
+    const popover = await parts()
+    await userEvent.click(popover.getByRole('button', { name: /^Worktree/ }))
+    const target = await popover.findByRole('button', { name: /Work toward/ })
+    await userEvent.click(target)
+    await userEvent.type(await popover.findByRole('textbox', { name: 'Another branch to work toward' }), 'release/9')
+    await userEvent.click(popover.getByRole('button', { name: 'Work toward it' }))
+    // Refused: the field is back with what was typed, and why, there rather than at the composer.
+    expect(await popover.findByRole('alert')).toHaveProperty('textContent', 'release/9 isn’t a branch of api.')
+    const field = popover.getByRole('textbox', { name: 'Another branch to work toward' })
+    expect(field).toHaveProperty('value', 'release/9')
+    // The first Escape closes the field, focus back on the target; the second closes the parts.
+    field.focus()
+    await userEvent.keyboard('{Escape}')
+    expect(popover.queryByRole('textbox', { name: 'Another branch to work toward' })).toBeNull()
+    expect(document.activeElement).toBe(popover.getByRole('button', { name: /Work toward/ }))
+    expect(screen.getByRole('dialog', { name: 'This task’s parts' })).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'This task’s parts' })).toBeNull())
+  })
+
   it('runs an outside author’s pull request only as far as the person says, and the team’s at once', async () => {
     const review = {
       product: 'github' as const,

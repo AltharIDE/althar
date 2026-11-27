@@ -1347,7 +1347,7 @@ export function TaskView({
           dropMove: () => void model.dropMove(),
           // Back where it runs: the move that waited is called off.
           dropPlace: () => void model.moveTo(snapshot.task.workerId ?? 'home'),
-          workToward: (branch) => void model.workToward(branch),
+          workToward: (branch) => model.workToward(branch),
         }
       : {}),
     ...(snapshot.task.helpers === undefined ? {} : { stopHelper: (helper: string) => void model.stopHelper(helper) }),

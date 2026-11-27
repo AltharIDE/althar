@@ -46,8 +46,17 @@ export const partsText = {
   /** The branch a running task works toward, changed (a task is a conversation plus parts). */
   towardField: 'Another branch to work toward',
   towardIt: 'Work toward it',
-  /** What working toward another branch does, said for this task: whether its branch is pushed decides. */
-  towardNote: (pushed: boolean) => (pushed ? 'Its commits go to a new pull request into it.' : 'Its branch moves onto it.'),
+  /**
+   * What working toward another branch does, said for this task as its runtime decides it: an open pull request it
+   * follows can't change its history, so its commits go to a fresh branch and a new pull request; without one, its
+   * branch is rebased onto it. A task with some repositories of each says both.
+   */
+  towardNote: (open: 'all' | 'none' | 'some') =>
+    open === 'all'
+      ? 'Its commits go to a new pull request into it.'
+      : open === 'none'
+        ? 'Its branch moves onto it.'
+        : 'With an open pull request, its commits go to a new one into it; without, its branch moves onto it.',
   files: (n: number) => (n === 0 ? 'No changes' : `${n} ${n === 1 ? 'file' : 'files'} changed`),
   branch: 'Branch',
   where: 'Where',
@@ -166,8 +175,8 @@ export interface PartsActions {
   readonly dropMove?: () => void
   /** Calls off a move between the home and a worker that waits for its lead's turn. */
   readonly dropPlace?: () => void
-  /** Points the running task at another branch to work toward. */
-  readonly workToward?: (branch: string) => void
+  /** Points the running task at another branch to work toward: why it was refused, or null. */
+  readonly workToward?: (branch: string) => Promise<string | null>
   /** Stops a helper its lead started. */
   readonly stopHelper?: (helper: string) => void
   /** Ships one of its several changes, by name, with what waits beneath it. */
@@ -183,6 +192,12 @@ const draftsIn = (items: ReadonlyArray<ThreadItem>) =>
   items.flatMap((item) => (item.kind === 'review_draft' && item.content.state === 'pending' ? [item.content] : []))
 
 const SHOWN = 5
+
+/** Whether its repositories have an open pull request it follows: what decides what working toward another branch does. */
+const openOf = (task: ThreadSnapshot['task']): 'all' | 'none' | 'some' => {
+  const open = task.changes.some((change) => change.state === 'open')
+  return !open ? 'none' : task.here.length === 0 ? 'all' : 'some'
+}
 
 /** The branch a worktree started from, as the branch it goes into: origin/main is main. */
 const baseOf = (ref: string | null) => (ref === null || ref === '' ? null : ref.replace(/^(refs\/remotes\/)?origin\//, ''))
@@ -236,9 +251,7 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
           folder={task.workerId == null ? task.worktree : null}
           {...(task.workerId == null ? {} : { place: workerNameOf(task.workerId) })}
           files={task.files}
-          {...(act.workToward === undefined
-            ? {}
-            : { onToward: act.workToward, towardNote: t.towardNote(task.here.some((one) => one.remote?.pushed === true)) })}
+          {...(act.workToward === undefined ? {} : { onToward: act.workToward, towardNote: t.towardNote(openOf(task)) })}
         />
       ),
       actions: [

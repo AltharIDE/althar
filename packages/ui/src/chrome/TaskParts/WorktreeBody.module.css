@@ -66,6 +66,7 @@
 .target {
   display: inline-flex;
   flex: none;
+  min-width: 0;
   align-items: center;
   gap: 3px;
   max-width: 45%;
@@ -78,12 +79,13 @@
   color: var(--t-1);
 }
 
-.target span {
+.target > span {
   font: 12px/1 var(--font);
   color: var(--t-2);
 }
 
 .target code {
+  min-width: 0;
   overflow: hidden;
   font: inherit;
   text-overflow: ellipsis;
@@ -138,6 +140,13 @@ button.target[aria-expanded='true'] {
 
 .towardRow > button {
   flex: none;
+}
+
+.refused {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--danger);
 }
 
 .note {

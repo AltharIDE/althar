@@ -32,7 +32,7 @@ const PARTS: ReadonlyArray<TaskPartModel> = [
         target="main"
         folder="/Users/balazs/Charrette/althar/changelog-entry-for-0-10-0-led-by-your-own-host/althar"
         files={FILES}
-        onToward={fn()}
+        onToward={fn(async () => null)}
         towardNote="Its commits go to a new pull request into it."
       />
     ),
@@ -174,6 +174,43 @@ export const AWorktreeOpened: Story = {
     await expect(body.getAllByRole('listitem')).toHaveLength(21)
     await userEvent.click(body.getByRole('button', { name: /Work toward another branch/ }))
     await expect(body.getByText('Its commits go to a new pull request into it.')).toBeVisible()
+  },
+}
+
+/** A long branch it goes into, in a narrow window: it shortens in its chip, whole on hover; and a refused branch, back at its field. */
+export const AWorktreeLongTarget: Story = {
+  args: {
+    parts: [
+      {
+        id: 'worktree',
+        icon: 'folder',
+        name: 'Worktree',
+        detail: '2 files changed',
+        body: (
+          <WorktreeBody
+            branch="althar/retry"
+            target="release/0.10.0-hotfix-for-the-long-branch-names"
+            folder="~/Charrette/althar/retry"
+            files={FILES.slice(0, 2)}
+            onToward={async (branch) => `${branch} isn’t a branch of althar.`}
+            towardNote="Its branch moves onto it."
+          />
+        ),
+        actions: [{ label: 'See the changes', onClick: fn(), variant: 'signal', kbd: '⌘D', end: true }],
+      },
+    ],
+  },
+  globals: { viewport: { value: 'mobile1' } },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /Parts, 1/ }))
+    const body = within(document.body)
+    await userEvent.click(body.getByRole('button', { name: 'Worktree' }))
+    const target = body.getByRole('button', { name: /Work toward another branch/ })
+    await expect(target).toHaveAttribute('title', 'release/0.10.0-hotfix-for-the-long-branch-names')
+    await userEvent.click(target)
+    await userEvent.type(body.getByRole('textbox', { name: 'Another branch to work toward' }), 'release/9')
+    await userEvent.click(body.getByRole('button', { name: 'Work toward it' }))
+    await expect(await body.findByRole('alert')).toHaveTextContent('release/9 isn’t a branch of althar.')
   },
 }
 

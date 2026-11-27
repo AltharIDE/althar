@@ -42,7 +42,7 @@ describe('a task’s parts where it has little or several kinds of work', () => 
       binary: at === 0,
       uncommitted: at < 2,
     }))
-    const workToward = vi.fn(),
+    const workToward = vi.fn(async () => null),
       removeFolder = vi.fn(),
       open = vi.fn(),
       seeChanges = vi.fn()
@@ -77,6 +77,42 @@ describe('a task’s parts where it has little or several kinds of work', () => 
     await userEvent.type(screen.getByRole('textbox'), ' release/next ')
     await userEvent.click(screen.getByRole('button', { name: 'Work toward it' }))
     expect(workToward).toHaveBeenCalledWith('release/next')
+  })
+
+  it.each([
+    {
+      said: 'a followed pull request open',
+      changes: [change({ state: 'open' })],
+      here: [],
+      note: 'Its commits go to a new pull request into it.',
+    },
+    {
+      said: 'its branch pushed, with no pull request',
+      changes: [],
+      here: [
+        {
+          repository: 'api',
+          name: 'api',
+          branch: 'althar/retry',
+          head: null,
+          remote: { name: 'origin', branch: 'althar/retry', pushed: true, ahead: 0, newPullRequest: null },
+        },
+      ],
+      note: 'Its branch moves onto it.',
+    },
+    {
+      said: 'one repository with a pull request open and one without',
+      changes: [change({ state: 'open' })],
+      here: [{ repository: 'web', name: 'web', branch: 'althar/retry', head: null }],
+      note: 'With an open pull request, its commits go to a new one into it; without, its branch moves onto it.',
+    },
+  ])('says what working toward another branch does with $said', async ({ changes, here, note }) => {
+    const part = partsOf(thread({ changes, here }), { ...actions(), workToward: vi.fn(async () => null) }).find(
+      (one) => one.id === 'worktree',
+    )
+    render(<>{part?.body}</>)
+    await userEvent.click(screen.getByRole('button', { name: /Work toward/ }))
+    expect(screen.getByText(note)).toBeTruthy()
   })
 
   it.each([
