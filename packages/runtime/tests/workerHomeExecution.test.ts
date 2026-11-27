@@ -8,6 +8,7 @@ import type { AgentWorkerPool, WorkerAgentProcess } from '@althar/worker-protoco
 import { assert, it } from '@effect/vitest'
 import { Deferred, Effect, Fiber } from 'effect'
 
+import type { WorkerGrant } from '../src/workerHome/codes'
 import { workerExecution } from '../src/workerHome/execution'
 import { workerTestDirectory as temporary } from './workerTestFiles'
 import { repository } from './support'
@@ -495,5 +496,72 @@ it.live('lists the home’s enrolled workers, connected or not, and takes one ou
     )
     assert.isNull(off.enrolled?.())
     assert.strictEqual(yield* Effect.flip(off.revoke!(online)), 'This home takes no workers.')
+    // A ledger that fails with nothing to say says so in Althar's words.
+    const silent = workerExecution(
+      () => undefined,
+      () => ({
+        workers: () => [],
+        revoke: () => {
+          // oxlint-disable-next-line no-throw-literal -- what a ledger might throw that isn't an Error.
+          throw 'gone'
+        },
+      }),
+    )
+    assert.strictEqual(yield* Effect.flip(silent.revoke!(offline)), 'Could not remove the worker.')
+  }),
+)
+
+it.effect('adds a worker only where the home is its authority, and says what its enrollment couldn’t do', () =>
+  Effect.gen(function* () {
+    const grant = { homeId: 'home_a', workerId: 'wrk_a' } as unknown as WorkerGrant
+    const byCertificates = workerExecution(
+      () => undefined,
+      () => ({ workers: () => [], revoke: () => {} }),
+      () => Effect.fail('closed'),
+    )
+    // Listening by its operator's certificates: it adds none itself.
+    assert.isFalse(byCertificates.adds?.())
+    assert.strictEqual(
+      yield* Effect.flip(byCertificates.admin!.add({ publicKey: new Uint8Array(), name: 'box', ssh: null })),
+      'This home takes workers by its operator’s certificates.',
+    )
+    const failing = (thrown: unknown) =>
+      workerExecution(
+        () => undefined,
+        () => ({
+          workers: () => [],
+          revoke: () => {},
+          managed: {
+            enroll: () => {
+              throw thrown
+            },
+            code: () => Promise.reject(thrown),
+            assign: () => {
+              throw thrown
+            },
+          },
+        }),
+        () => Effect.fail('closed'),
+      )
+    assert.isTrue(failing(new Error('No room')).adds?.())
+    assert.strictEqual(
+      yield* Effect.flip(failing(new Error('No room')).admin!.add({ publicKey: new Uint8Array(), name: 'box', ssh: null })),
+      'No room',
+    )
+    assert.strictEqual(yield* Effect.flip(failing('gone').admin!.code('box')), 'The home couldn’t do that.')
+    assert.strictEqual(yield* Effect.flip(failing('gone').admin!.assign('wrk_a', [])), 'The home couldn’t do that.')
+    // Not listening yet: it opens its port for the first worker, and adds through it.
+    const opening = workerExecution(
+      () => undefined,
+      () => undefined,
+      () =>
+        Effect.succeed({
+          workers: () => [],
+          revoke: () => {},
+          managed: { enroll: () => grant, code: async () => ({ code: 'c', expiresAt: 1 }), assign: () => {} },
+        }),
+    )
+    assert.isTrue(opening.adds?.())
+    assert.strictEqual(yield* opening.admin!.add({ publicKey: new Uint8Array(), name: 'box', ssh: null }), grant)
   }),
 )
