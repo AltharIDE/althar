@@ -68,6 +68,7 @@ export const WINDOW_ACTIONS = {
   // Calls that wait on the person.
   answer: { person: 'answers an agent’s permission request: an agent never answers one itself' },
   answerStuck: { tool: 'answer_stuck_step' },
+  fixWithCoordinator: { person: 'asks the coordinator to fix what stops a step’s agent on this computer; the coordinator itself fixes it' },
   answerCheckout: { person: 'lets a Local task take their own checkout' },
   move: { person: 'moves a running task into or out of their own checkout: only they say when it switches' },
   dropMove: { person: 'calls off a move into or out of their own checkout' },

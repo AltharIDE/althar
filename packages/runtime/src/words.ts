@@ -2,7 +2,14 @@ import { basename, dirname } from 'node:path'
 
 import { MESSAGE_FILES } from '@althar/contracts'
 import { products } from '@althar/connectors'
-import { closingErrorLine, closingFailureOf, firstErrorLine, type StartFailure, startFailureOf } from '@althar/provider-adapters'
+import {
+  closingErrorLine,
+  closingFailureOf,
+  firstErrorLine,
+  localCauseOf,
+  type StartFailure,
+  startFailureOf,
+} from '@althar/provider-adapters'
 import { Cause, Option } from 'effect'
 
 import { thisDevice } from './device'
@@ -203,10 +210,13 @@ export const agentSaid = (error: unknown, whose?: Whose): string | undefined => 
       // Its class from its last lines alone, and the line said from them: what it wrote further up, an MCP server's 401 or a
       // hook's "command not found", is no reason it stopped.
       const said = own(closingErrorLine(stderr))
-      return (
-        classWords(closingFailureOf(stderr), '', said, whose) ??
-        (said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`))
-      )
+      const classWord = classWords(closingFailureOf(stderr), '', said, whose)
+      if (classWord !== undefined) return classWord
+      // A reason on this computer in the error it stopped on, such as `ENOTDIR` above its stack: kept in its own words,
+      // which the step's call reads again for the path in the way (DEV-285). What it warned of further up is no reason.
+      const local = localCauseOf(closingErrorLine(stderr))
+      if (local !== undefined) return sentence(`The agent stopped: ${own(local.said)}`)
+      return said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`)
     }
     case 'AgentRequestFailed': {
       const message = text(error, 'message')

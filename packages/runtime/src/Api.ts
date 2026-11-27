@@ -82,6 +82,7 @@ import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { storageSizes } from './StorageSizes'
 import { modelNamer } from './coordinatorNews'
 import { teamChanges, teamLine } from './teamWords'
+import { askToFix } from './startCause'
 import { addItem } from './threads'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
@@ -2227,6 +2228,25 @@ export const handlers = apiLayer(
                 attentionId,
                 answer,
                 sender,
+              })
+            }),
+          ),
+        ),
+      FixWithCoordinator: ({ commandId, attentionId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('attention.fix_with_coordinator', { attentionId }, commandId)
+              const asked = yield* Effect.provideContext(askToFix(attentionId, said), folderStore)
+              yield* coordinator.say({
+                envelope: said,
+                threadId: asked.threadId,
+                body: asked.body,
+                disposition: 'after_current',
+                sender: { kind: 'internal' },
+                origin: 'news',
+                quiet: true,
               })
             }),
           ),

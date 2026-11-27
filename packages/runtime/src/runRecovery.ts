@@ -21,6 +21,7 @@ import type { Changes } from './Changes'
 import { NotConnected } from './Connections'
 import type { Connectivity } from './Connectivity'
 import { envelope } from './envelope'
+import { causeGone, causeKnown } from './startCause'
 import {
   AttentionClosed,
   type GitFailed,
@@ -46,6 +47,7 @@ import {
   type Place,
   type PlanParameters,
   type PlanStep,
+  CAUSE_GONE,
   RECONNECTED,
   RESTART_GRACE,
   type RoundBack,
@@ -1272,8 +1274,8 @@ export const makeRunRecovery = (dependencies: RunRecoveryDependencies) =>
         readonly model: string | null
       },
       placed = false,
-      /** Held for the connection, rather than a reset: how often its service had failed in a row. */
-      connection?: { readonly tries: number },
+      /** Held for the connection, rather than a reset: how often its service had failed in a row; or held for a local cause now gone. */
+      connection?: { readonly tries: number; readonly local?: true },
     ) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
@@ -1336,9 +1338,9 @@ export const makeRunRecovery = (dependencies: RunRecoveryDependencies) =>
             yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
               source: 'runtime',
               severity: 'info',
-              title: 'The connection is back.',
+              title: connection.local === true ? 'What stopped it is gone: carrying on.' : 'The connection is back.',
             })
-            yield* sessions.send({ envelope: resuming, threadId, body: RECONNECTED, quiet: true })
+            yield* sessions.send({ envelope: resuming, threadId, body: connection.local === true ? CAUSE_GONE : RECONNECTED, quiet: true })
             yield* sessions.wake(threadId)
             return yield* touchCard(held.taskId)
           }
@@ -1397,6 +1399,62 @@ export const makeRunRecovery = (dependencies: RunRecoveryDependencies) =>
         )
         // It waits for the connection now, rather than for a try again: its card says so.
         if (waited && hold.offline !== true) yield* touchCard(step.taskId)
+      })
+
+    /**
+     * A step that waits on the local cause another task's card asks about (DEV-285): it goes on once the cause is gone,
+     * as the checkout shows, or once that card is answered, by the person or the coordinator; else it looks again a
+     * while later.
+     */
+    const afterCause = (
+      step: {
+        readonly taskId: string
+        readonly projectId: string
+        readonly attemptId: string
+        readonly nodeKey: string
+        readonly iteration: number
+      },
+      hold: typeof Hold.Type,
+      local: NonNullable<typeof Hold.Type.local>,
+    ) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const gone = yield* causeGone(local.key, local.path)
+        const [card] = yield* sql<{ id: string }>`
+            SELECT id FROM attention_requests WHERE project_id = ${step.projectId} AND kind = 'stuck' AND state = 'open'
+              AND json_extract(payload, '$.cause.key') = ${local.key} LIMIT 1`
+        if (gone || card === undefined)
+          return yield* resumeHeld({ ...step, agentId: hold.heldFor, accountId: hold.account ?? null, model: hold.model ?? null }, false, {
+            tries: 0,
+            local: true,
+          })
+        const until = new Date(Date.parse(yield* timestamp) + Duration.toMillis(connectivity.every)).toISOString()
+        yield* sql.withTransaction(
+          Effect.gen(function* () {
+            const [still] = yield* sql<{ state: string; holdReason: string | null }>`
+                SELECT state, hold_reason FROM node_attempts WHERE id = ${step.attemptId}`
+            if (still?.state !== 'held' || still.holdReason !== 'agent_unavailable') return
+            yield* change('node_attempts', step.attemptId, { output: JSON.stringify({ ...hold, until } satisfies typeof Hold.Encoded) })
+          }),
+        )
+      })
+
+    /* When each card for a local cause was last looked at, so the checkout is looked at as often as a lost connection is. */
+    const causeLooked = new Map<string, number>()
+
+    /**
+     * A card for a local cause whose path is no longer in the way, such as the stray file someone removed: the step is
+     * tried again on its agent, as its card's "Try again" would, and the thread says so (DEV-285).
+     */
+    const lookAtCause = (card: { readonly id: string; readonly agentId: string; readonly key: string; readonly path: string }) =>
+      Effect.gen(function* () {
+        causeLooked.set(card.id, yield* Clock.currentTimeMillis)
+        if (!(yield* causeGone(card.key, card.path))) return
+        yield* answerStuck({
+          envelope: yield* envelope('attention.answer_stuck', { attentionId: card.id, causeGone: true }, undefined, instance.systemId),
+          attentionId: card.id,
+          answer: { kind: 'retry', agentId: card.agentId },
+        })
       })
 
     /** A message that waited for an agent's reset goes to it then: to its session, or, after a restart, to one started for it. */
@@ -1672,6 +1730,11 @@ export const makeRunRecovery = (dependencies: RunRecoveryDependencies) =>
           const hold = yield* decodeHold(step.output).pipe(contained('Runs.held', () => undefined))
           if (hold === undefined) continue
           const connection = step.holdReason === 'agent_unavailable'
+          // Waiting on a local cause, whatever the connection: looked at again when it is due.
+          if (connection && hold.local !== undefined) {
+            due.push({ key: step.attemptId, at: Date.parse(hold.until), run: afterCause(step, hold, hold.local) })
+            continue
+          }
           if (connection && !online) continue
           // Waiting for a reset, it goes on at once if its agent's account is not out of usage any more: the person reset it,
           // or a fresh reading shows room (Limits). A new step held for being nearly out, or handed over, waits for its time.
@@ -1708,6 +1771,20 @@ export const makeRunRecovery = (dependencies: RunRecoveryDependencies) =>
             ),
           })
         }
+        // A card for a local cause whose path the checkout can show: looked at now and then, and tried again once it's gone.
+        const causes = yield* sql<{ id: string; agentId: string | null; key: string | null; path: string | null }>`
+            SELECT id, json_extract(payload, '$.agentId') AS agent_id, json_extract(payload, '$.cause.key') AS key,
+              json_extract(payload, '$.cause.path') AS path
+            FROM attention_requests WHERE kind = 'stuck' AND state = 'open' AND json_extract(payload, '$.why') = 'local_cause'
+              AND json_extract(payload, '$.cause.path') IS NOT NULL`
+        for (const card of causes)
+          if (card.agentId !== null && card.key !== null && card.path !== null && causeKnown(card.key))
+            due.push({
+              key: `cause:${card.id}`,
+              at: (causeLooked.get(card.id) ?? 0) + Duration.toMillis(connectivity.every),
+              run: lookAtCause({ id: card.id, agentId: card.agentId, key: card.key, path: card.path }),
+            })
+        for (const id of causeLooked.keys()) if (!causes.some((card) => card.id === id)) causeLooked.delete(id)
         // A lead standing in for the one a usage limit stopped gives the thread back once that one has usage again (standIn.ts).
         const standing = yield* sql<{ sessionId: string; threadId: string; projectId: ProjectId }>`
             SELECT s.id AS session_id, s.thread_id, s.project_id FROM provider_sessions s

@@ -54,7 +54,12 @@ export const waitsWords = (agent: string, at: string, step?: string | null, left
  * window does.
  */
 export const reconnectsWords = (held: HeldForConnection, at: (iso: string) => string) =>
-  held.offline || held.next === null ? 'Waiting for the connection' : `${held.service} failed: trying again at ${at(held.next)}`
+  // Waiting on what stops its agent on this computer, as another task's card says it (DEV-285): never the provider's failure.
+  held.local !== undefined
+    ? `Can't start: ${held.local.replaceAll('`', '')}`
+    : held.offline || held.next === null
+      ? 'Waiting for the connection'
+      : `${held.service} failed: trying again at ${at(held.next)}`
 
 /**
  * What work waiting for a free agent waits for (ADR-032): every agent this

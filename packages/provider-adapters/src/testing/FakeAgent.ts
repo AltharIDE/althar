@@ -1,6 +1,7 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process'
 import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -13,6 +14,27 @@ import type { InProcessAgent } from '../AgentConnection'
 import { stopBackgroundMethod, type StopBackgroundResponse } from '../background'
 import { REFUSAL_META } from '../registry'
 import { recorded } from './recorded'
+
+/**
+ * What Codex keeps in its own log of a thread, as it does (`$CODEX_HOME/logs_2.sqlite`, the columns Althar reads): only
+ * where a test set `CODEX_HOME`.
+ */
+const codexLogs = (thread: string, body: string) => {
+  const home = process.env['CODEX_HOME']
+  if (home === undefined) return
+  const now = Date.now()
+  const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite')
+  const db = new DatabaseSync(join(home, 'logs_2.sqlite'))
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, ts_nanos INTEGER NOT NULL,
+      level TEXT NOT NULL, target TEXT NOT NULL, feedback_log_body TEXT, thread_id TEXT)`)
+    db.prepare(
+      `INSERT INTO logs (ts, ts_nanos, level, target, feedback_log_body, thread_id) VALUES (?, ?, 'WARN', 'codex_core::responses_retry', ?, ?)`,
+    ).run(Math.floor(now / 1000), (now % 1000) * 1_000_000, body, thread)
+  } finally {
+    db.close()
+  }
+}
 
 /** A program run to its end, as `git` is, without stopping whatever else runs in this process meanwhile. */
 const run = promisify(execFile)
@@ -342,9 +364,12 @@ export interface FakeAgentOptions {
    * prompt ends as the agents' did when theirs was (`recorded.ts`): offline
    * or given a server error, as Claude Code ends its turn, having used
    * nothing; `waits`, as Codex waits for the network, its turn not ending
-   * until the connection is back, when it carries on, or it is cancelled.
+   * until the connection is back, when it carries on, or it is cancelled;
+   * `local`, as Codex failed for a file in its way (DEV-285): its stream
+   * says it retries and then that it had an internal error, and only its
+   * log, under `CODEX_HOME`, says why.
    */
-  readonly connection?: () => 'offline' | 'server' | 'waits' | 'lost' | undefined
+  readonly connection?: () => 'offline' | 'server' | 'waits' | 'lost' | 'local' | undefined
   /**
    * Offer effort as OpenCode does: as a model's variants, with a `default`
    * that leaves it at its own. The small model has none, and a third, huge
@@ -2072,6 +2097,11 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         const said = down === 'offline' ? recorded.claude.offline : recorded.claude.serverError
         await update(said.retrying)
         return said.ended
+      }
+      if (down === 'local') {
+        codexLogs(params.sessionId, recorded.codex.local.log)
+        await update(recorded.codex.local.retrying)
+        return recorded.codex.local.ended
       }
       if (down === 'waits') {
         await update(recorded.codex.waiting)

@@ -420,3 +420,58 @@ describe('handing a step on to a model', () => {
     expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'claude-code', model: 'default', effort: 'high' })
   })
 })
+
+describe('an agent that something on this computer stops (DEV-285)', () => {
+  const local = stuck({
+    why: 'local_cause',
+    detail: '`~/projects/ai-teacher/.codex` is a file, not a folder.',
+    cause: { path: '~/projects/ai-teacher/.codex' },
+  })
+
+  const showLocal = (step: StuckStep, through = true) => {
+    const { client } = fakeClient()
+    const onFix = vi.fn(async () => through)
+    const onAnswer = vi.fn()
+    withServices(
+      <StuckCall
+        request={request(step)}
+        stuck={step}
+        agents={agents}
+        agentName={() => 'Codex'}
+        onAnswer={onAnswer}
+        onFixWithCoordinator={onFix}
+      />,
+      client,
+    )
+    return { onFix, onAnswer }
+  }
+
+  it('says the file in the way, with its path, and offers the coordinator’s fix first', async () => {
+    const { onFix } = showLocal(local)
+    const path = await screen.findByText('~/projects/ai-teacher/.codex')
+    expect(path.tagName).toBe('CODE')
+    expect(path.parentElement?.textContent).toBe("Codex can't start: ~/projects/ai-teacher/.codex is a file, not a folder.")
+    // Never "OpenAI failed" nor a model to hand it to: no other model gets past a file on this computer.
+    expect(screen.queryByText(/failed|kept failing/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /another model/ })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: stuckWords.coordinator.fix }))
+    expect(onFix).toHaveBeenCalledWith('st1')
+    // Said at once, before the runtime answers, and not offered twice.
+    expect(screen.getByText(stuckWords.coordinator.asked)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: stuckWords.coordinator.fix })).toBeNull()
+  })
+
+  it('says the coordinator has it where it was asked already, and still lets the person try again', async () => {
+    showLocal({ ...local, cause: { ...local.cause, askedAt: '2026-11-24T12:00:00.000Z' } })
+    expect(await screen.findByText(stuckWords.coordinator.asked)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: stuckWords.coordinator.fix })).toBeNull()
+    expect(screen.getByRole('button', { name: /Try again/ })).toBeTruthy()
+  })
+
+  it('offers it again where asking didn’t go through', async () => {
+    showLocal(local, false)
+    await userEvent.click(await screen.findByRole('button', { name: stuckWords.coordinator.fix }))
+    expect(await screen.findByRole('button', { name: stuckWords.coordinator.fix })).toBeTruthy()
+    expect(screen.queryByText(stuckWords.coordinator.asked)).toBeNull()
+  })
+})

@@ -209,6 +209,17 @@ describe('why an agent couldn’t start or be reached (DEV-196)', () => {
     )
   })
 
+  it('keeps a reason on this computer that it stopped on in its own words, and says only that it stopped where it said nothing', () => {
+    const said = agentSaid(
+      exited(
+        "Error: ENOTDIR: not a directory, mkdir '/home/p/ai-teacher/.codex/sessions'\n    at async Object.mkdir (node:internal/fs/promises:858:10)",
+      ),
+    )
+    assert.match(said ?? '', /^The agent stopped: /)
+    assert.include(said, '/home/p/ai-teacher/.codex/sessions')
+    assert.strictEqual(agentSaid(exited('')), 'The agent stopped.')
+  })
+
   it('takes no class from what an agent that started wrote further up, or of an MCP server, a hook or a tool', () => {
     // An MCP server refused at start-up, far above why the agent stopped.
     assert.strictEqual(

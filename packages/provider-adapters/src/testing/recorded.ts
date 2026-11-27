@@ -103,6 +103,39 @@ export const recorded = {
         actions: [],
       }),
     } satisfies acp.SessionUpdate,
+    /**
+     * A reason on this computer, which its stream never names (DEV-285): in ai-teacher, `.codex` at the repository's
+     * root was a file. Its log said `sampling_error=failed to load workspace requirements: not a directory` on each of
+     * five tries; codex-acp 2.8.0 said it was retrying, then that Codex had an internal error. `log` is the line its
+     * log kept, its spans cut short.
+     */
+    local: {
+      retrying: {
+        sessionUpdate: 'session_info_update',
+        _meta: failure({
+          id: 'turn:error',
+          category: 'service',
+          severity: 'warning',
+          title: 'stream disconnected - retrying sampling request (1/5 in 206ms)...',
+          actions: [],
+        }),
+      } satisfies acp.SessionUpdate,
+      ended: {
+        stopReason: 'end_turn',
+        usage: null,
+        _meta: {
+          quota: { token_count: null, model_usage: [] },
+          ...failure({
+            id: 'turn:error',
+            category: 'service',
+            severity: 'error',
+            title: 'Codex encountered an internal error.',
+            actions: ['retry', 'new_session'],
+          }),
+        },
+      } satisfies acp.PromptResponse,
+      log: 'session_loop{thread_id=…}:turn{otel.name="session_task.turn"}: stream disconnected - retrying sampling request (5/5 in 3.219s)... retries=5 max_retries=5 sampling_error=failed to load workspace requirements: not a directory',
+    },
     /** Errors from the API host, retried five times, then given up on. */
     serverError: {
       retrying: {

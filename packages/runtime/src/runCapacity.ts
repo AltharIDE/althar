@@ -28,6 +28,7 @@ import {
   pauseWords,
 } from './runRecords'
 import type { Sessions } from './Sessions'
+import { diagnose } from './startCause'
 import { addItem } from './threads'
 
 export interface LimitedStep {
@@ -43,6 +44,8 @@ export interface LimitedStep {
 }
 
 export interface RunCapacityDependencies {
+  /** The Codex home an account's sessions run with, where its log says why a turn failed (DEV-285). */
+  readonly homeOf: (accountId: string | null) => Effect.Effect<string>
   readonly agentsHere: Agents['Service']
   readonly autoModels: AutoModels['Service']
   readonly carryOn: (
@@ -89,7 +92,7 @@ export interface RunCapacityDependencies {
     attempt: { readonly id: string } | null,
     asked: StuckInfo,
   ) => Effect.Effect<
-    void,
+    boolean,
     SqlError.SqlError | Schema.SchemaError | RowNotFound | RevisionConflict,
     SqlClient.SqlClient | Crypto.Crypto | Ledger
   >
@@ -101,6 +104,7 @@ export interface RunCapacityDependencies {
 export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
   const {
     agentsHere,
+    homeOf,
     autoModels,
     connectivity,
     going,
@@ -675,6 +679,39 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
     })
 
   /**
+   * Whether a step whose agent seemed to fail at its service failed for a reason on this computer instead (DEV-285): a
+   * file where it reads a folder, settings that don't parse. Then it needs the person, or the coordinator for them, with
+   * that reason, and isn't retried: `stopped` where this stopped it so, `already` where it was stopped or moved on
+   * meanwhile (the agent's warning and its turn's end both look into one failure), `no` where nothing here is the cause.
+   */
+  const stopsHere = (on: NonNullable<Effect.Success<ReturnType<typeof stepOn>>>, agentId: string, said: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const revisionOf = sql<{ revision: number }>`SELECT revision FROM node_attempts WHERE id = ${on.attemptId}`
+      const [before] = yield* revisionOf
+      const local = yield* diagnose({ taskId: on.run.taskId, agentId, deviceId: instance.deviceId, said, homeOf })
+      if (local === undefined) return 'no' as const
+      // Looking takes a while, Codex's log read in a thread of its own: a step that moved on meanwhile, held and carried
+      // on with the cause gone, isn't stopped for the turn that failed before.
+      const [after] = yield* revisionOf
+      if (after?.revision !== before?.revision) return 'already' as const
+      const stopped = yield* stuck(
+        on.run,
+        { id: on.attemptId },
+        {
+          step: on.step,
+          why: 'local_cause',
+          detail: local.words,
+          agentId,
+          round: on.iteration,
+          open: 0,
+          cause: { key: local.key, ...(local.path === undefined ? {} : { path: local.path }) },
+        },
+      )
+      return stopped ? ('stopped' as const) : ('already' as const)
+    })
+
+  /**
    * A step's turn failed on its connection or its service (ADR-060).
    * Where the service doesn't answer, the computer offline or the service
    * out of reach, the step waits for the connection, however long that
@@ -689,6 +726,8 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
     failure: string | null,
   ) =>
     Effect.gen(function* () {
+      // A reason on this computer, which no retry helps, stops it at once with that reason (DEV-285).
+      if ((yield* stopsHere(on, agentId, failure ?? '')) !== 'no') return
       const service = yield* serviceOf(agentId)
       const answers = yield* connectivity.answers(service?.url)
       const tries = (JSON.parse(on.output ?? '{}') as { tries?: number }).tries ?? 0
@@ -735,6 +774,11 @@ export const makeRunCapacity = (dependencies: RunCapacityDependencies) => {
       if (on === undefined || Option.isNone(live)) return
       looking.add(threadId)
       const look = Effect.gen(function* () {
+        // Retrying what fails on this computer, as Codex does five times a turn, never helps: the step stops for it (DEV-285).
+        // Its turn is stopped only where this stopped the step: one stopped meanwhile, as its turn ended, is left as it is.
+        const stops = yield* stopsHere(on, live.value.agentId, said)
+        if (stops === 'stopped') return yield* Effect.ignore(sessions.interrupt(threadId))
+        if (stops === 'already') return
         const service = yield* serviceOf(live.value.agentId)
         if (yield* connectivity.answers(service?.url)) return
         const tries = (JSON.parse(on.output ?? '{}') as { tries?: number }).tries ?? 0

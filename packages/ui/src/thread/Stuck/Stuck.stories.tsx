@@ -6,6 +6,7 @@ import { ModelBrowser } from '../../composer/ModelBrowser/ModelBrowser'
 import { MODEL_LIST, model, RUNTIMES, useModelPrefs } from '../../fixtures/models'
 import { STUCK } from '../../fixtures/stuck'
 import type { ModelInfo } from '../../primitives/Model/Model'
+import { Code } from '../../primitives/Code/Code'
 import { States, statesOn } from '../../storybook/States'
 import { ThreadFrame } from '../../storybook/ThreadFrame'
 import { Stuck, type StuckProps } from './Stuck'
@@ -446,6 +447,42 @@ export const WhyItCouldntStart: Story = {
       ]}
     />
   ),
+}
+
+/**
+ * Something on this computer stops its agent (DEV-285), as `.codex` at a repository's root, a file, stopped every Codex
+ * task of ai-teacher: no retry or other model gets past it, so it isn't tried again for the provider. The coordinator
+ * puts it right, first, from the card; once it is gone, the step goes on by itself.
+ */
+export const WhatStopsItHere: Story = {
+  // No other model gets past a file on this computer: none is offered.
+  render: (args) => <Stuck {...args} />,
+  args: {
+    ...asked,
+    step: 'Implement',
+    what: (
+      <>
+        Codex can't start: <Code>~/projects/ai-teacher/.codex</Code> is a file, not a folder.
+      </>
+    ),
+    fix: { label: 'Let the coordinator fix it', onFix: fn() },
+    onAgain: fn(),
+    primary: 'again',
+  },
+  play: async ({ canvasElement }) => {
+    const [first] = within(canvasElement).getAllByRole('button')
+    await expect(first).toHaveAccessibleName('Let the coordinator fix it')
+  },
+}
+
+/** Asked: the card says the coordinator has it, and still lets the person try again or stop. */
+export const WhatStopsItHereAsked: Story = {
+  render: WhatStopsItHere.render,
+  args: {
+    ...WhatStopsItHere.args,
+    fix: undefined,
+    said: 'The coordinator is looking into it. This step goes on by itself once the cause is gone.',
+  },
 }
 
 /** Not installed: Install opens the agent in Settings, where it is installed, then it is tried again. */

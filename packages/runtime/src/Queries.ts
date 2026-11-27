@@ -40,7 +40,7 @@ import {
   Unfurl,
   type TaskPhase,
   type ProjectList,
-  type StuckStep,
+  StuckStep,
   type TaskCard,
   type BlockerStanding,
   type TaskList,
@@ -130,6 +130,7 @@ import { spendingOf } from './Spending'
 import { timingsFrom } from './turnTimes'
 import { actionsOf, standingOf } from './Tasks'
 import { toolCallMoves } from './toolMoves'
+import { causeOf } from './startCause'
 import { stopSaid, suspendedOf } from './stopSaid'
 
 /*
@@ -434,6 +435,8 @@ const decodeAlways = Schema.decodeUnknownOption(AttentionRequest.fields.always)
 const allowedByOf = (rule: string | null | undefined) =>
   rule === null || rule === undefined ? undefined : Option.getOrUndefined(decodeAllowedBy(rule))?.[0]
 
+const isStuckWhy = Schema.is(StuckStep.fields.why)
+
 /** A step that needs the person, as its call's payload holds it. */
 export const stuckOf = (payload: unknown): StuckStep => {
   const step = text(payload, 'step')
@@ -449,25 +452,7 @@ export const stuckOf = (payload: unknown): StuckStep => {
   const provider = field(payload, 'provider')
   return {
     step: step === 'review' || step === 'settle' || step === 'publish' ? step : 'implement',
-    why:
-      why === 'no_report' ||
-      why === 'session_ended' ||
-      why === 'restarted' ||
-      why === 'round_limit' ||
-      why === 'not_connected' ||
-      why === 'usage_limit' ||
-      why === 'stalled' ||
-      why === 'looping' ||
-      why === 'over_budget' ||
-      why === 'refused' ||
-      why === 'transient' ||
-      why === 'signed_out' ||
-      why === 'sign_in_ended' ||
-      why === 'not_installed' ||
-      why === 'waiting_on_person' ||
-      why === 'push_refused'
-        ? why
-        : 'failed_to_start',
+    why: isStuckWhy(why) ? why : 'failed_to_start',
     detail: typeof detail === 'string' ? detail : null,
     agentId: typeof agentId === 'string' ? agentId : null,
     round: typeof round === 'number' ? round : 0,
@@ -484,6 +469,7 @@ export const stuckOf = (payload: unknown): StuckStep => {
     ...(typeof service === 'string' ? { service } : {}),
     ...(typeof model === 'string' ? { model } : {}),
     ...(typeof provider === 'string' ? { provider } : {}),
+    ...(why === 'local_cause' ? { cause: causeOf(field(payload, 'cause')) } : {}),
   }
 }
 
@@ -3175,13 +3161,14 @@ export class Queries extends Context.Service<
         const agentId = text(output, 'heldFor')
         if (agentId === '') return null
         const offline = field(output, 'offline') === true
-        const failure = field(output, 'failure')
+        const [failure, local] = [field(output, 'failure'), field(field(output, 'local'), 'words')]
         return {
           agentId,
           service: text(output, 'service') || agentId,
           offline,
           next: offline ? null : text(output, 'until') || null,
           failure: typeof failure === 'string' ? failure : null,
+          ...(typeof local === 'string' ? { local } : {}),
         }
       }
 
