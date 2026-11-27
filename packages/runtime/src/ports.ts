@@ -154,10 +154,6 @@ const listenersRan = (windows: boolean): Effect.Effect<{ readonly listening: Rea
     return { listening: listenersOfSs(ss.out ?? ''), ran: [lsof.ran, ss.ran] }
   })
 
-/** Every TCP port something on this machine listens on, with its process. */
-export const listeners = (windows = process.platform === 'win32'): Effect.Effect<ReadonlyArray<Listener>> =>
-  Effect.map(listenersRan(windows), (result) => result.listening)
-
 /** The processes that hold a file open: the one a background command's output goes to is held by its shell. Nothing where `lsof` can't say. */
 export const holding = (path: string): Effect.Effect<ReadonlyArray<number>> =>
   process.platform === 'win32'
