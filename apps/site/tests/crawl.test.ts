@@ -93,6 +93,8 @@ describe('what crawlers are given', () => {
         vi.doUnmock('../src/content/published')
       }
     }
+    // A day after the publish time, so the release is in the test's past.
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2020-01-03T09:15:00Z') })
     try {
       const coming = await pages(before)
       const written = coming.changelog.RELEASES[0]!
@@ -111,6 +113,7 @@ describe('what crawlers are given', () => {
       expect(json).toContain('"dateModified":"2020-01-02"')
       expect(json).not.toContain(`"datePublished":"${written.date}"`)
     } finally {
+      vi.useRealTimers()
       vi.resetModules()
     }
   })
