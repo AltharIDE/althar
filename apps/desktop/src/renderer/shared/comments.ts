@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
 
-import { lineCommentsText, type CommentFact, type ComposerComment } from '@althar/ui'
+import { lineCommentsText, putBack, type CommentFact, type ComposerComment } from '@althar/ui'
 
 import { DEVICES, isViewport, type Viewport } from '../../main/browser/devices'
 import { pickedOf, type Picked } from '../../main/browser/picked'
@@ -9,6 +9,7 @@ import { shownAddress } from '../../main/browser/addresses'
 import { elementLine, onLine, selectorLine, sized, sizeLine } from '../../main/browser/elementWords'
 import { CanvasAnchor, LINE_COMMENTS, LineComment, type Picture, type SentCanvasComment, type SentImage } from '@althar/contracts'
 import { draftCrop } from './draftCrops'
+import { draftHistory } from './drafts'
 import { pictureOf, type ReadImage, readImage, remember, type Shrink, sentOf, shrinkInWindow } from './images'
 
 /*
@@ -237,6 +238,41 @@ export const drop = (key: string, id: string) => {
   removeCrop(one.cropId)
 }
 
+/* Comments taken off a composer that may come back with Undo, by their crop: one whose crop was being read comes back with it read. */
+const away = new Map<string, GatheredComment>()
+
+/** Takes a comment off its composer, as a step Undo puts back where it was, its crop with it (`draftHistory`). */
+export const takeOff = (key: string, id: string) => {
+  const thread = threadOf(key)
+  const one = thread.shown.find((comment) => comment.id === id)
+  if (one === undefined) return
+  // Those before it, for it to come back after, whatever else comes and goes meanwhile.
+  const before = thread.all.slice(0, thread.all.indexOf(one)).map((comment) => comment.id)
+  const off = (comment: GatheredComment) => {
+    if (comment.cropId !== undefined) away.set(comment.cropId, comment)
+    drop(key, comment.id)
+  }
+  off(one)
+  let gone = one
+  draftHistory(key).push({
+    undo: () => {
+      const now = threadOf(key)
+      const back = gone.cropId === undefined ? gone : (away.get(gone.cropId) ?? gone)
+      if (back.cropId !== undefined) away.delete(back.cropId)
+      change(key, now, putBack(now.all, back, before))
+      // Its crop is kept again where it was, so the comment outlives a restart as it did before it went.
+      if (back.crop !== null && back.cropId !== undefined) void draftCrop.write(back.cropId, back.crop).catch(() => undefined)
+    },
+    redo: () => {
+      const there = threadOf(key).shown.find((comment) => comment.id === id)
+      if (there === undefined) return false
+      gone = there
+      off(there)
+      return true
+    },
+  })
+}
+
 /** The chips go at once. Their saved copies go when the runtime accepts them. */
 export const takeComments = (key: string, onlyDiff = false) => {
   const thread = threadOf(key)
@@ -337,6 +373,9 @@ const loadCrop = async (key: string, thread: ThreadComments, one: GatheredCommen
   if (captured !== undefined && crop !== null && thread.all.some((comment) => comment.cropId === id))
     await draftCrop.write(id, crop).catch(() => undefined)
   thread.reading.delete(id)
+  // Taken off while it was read: it comes back read, with Undo.
+  const taken = away.get(id)
+  if (taken !== undefined) away.set(id, { ...taken, crop, cropLost: crop === null })
   if (threads.get(key) !== thread || !thread.all.some((comment) => comment.cropId === id)) return
   // Crop availability is checked anew at launch, separately from the saved comment.
   thread.all = thread.all.map((comment) => (comment.cropId === id ? { ...comment, crop, cropLost: crop === null } : comment))

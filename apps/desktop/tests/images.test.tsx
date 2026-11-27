@@ -18,6 +18,7 @@ import {
   shrinkInWindow,
   text,
 } from '../src/renderer/shared/images'
+import { draftHistory, draftOf } from '../src/renderer/shared/drafts'
 import { sentWith, takesImages, useAttachments } from '../src/renderer/shared/useAttachments'
 import { models } from './fixtures'
 
@@ -212,6 +213,8 @@ describe('images in the thread', () => {
 
 describe('the images waiting in a composer', () => {
   const claude = { name: 'Claude Code', takes: true }
+  /** Words Undo would put back: none in these drafts. */
+  const put = () => undefined
   const codex = { name: 'Codex', takes: false }
 
   it('reads what is added, shows it, and sends it with the message, drawn from its own bytes', async () => {
@@ -246,6 +249,93 @@ describe('the images waiting in a composer', () => {
     act(() => result.current.props(claude).onAddFiles(many))
     expect(result.current.props(claude).images).toHaveLength(MESSAGE_IMAGES.count)
     expect(result.current.props(claude).fileNote).toBe(text.tooMany)
+  })
+
+  it('puts back an image and a file taken off where they were, as they were, with Undo, and takes them off again with Redo', async () => {
+    const attached = (name: string): Attached => ({ ok: true, grant: `grant-${name}`, name, kind: 'file', bytes: 10, entries: null })
+    const host = { attach: async (file: File) => attached(file.name), attachPasted: async () => [] }
+    const { result } = renderHook(() => useAttachments('thread:undo', host, asIs))
+    act(() =>
+      result.current
+        .props(claude)
+        .onAddFiles([fileOf(png(1, 1), 'a.png'), fileOf(png(2, 2), 'b.png'), fileOf(new Uint8Array([1]), 'notes.txt', 'text/plain')]),
+    )
+    await waitFor(() => expect(result.current.props(claude).images.every((one) => one.src !== undefined)).toBe(true))
+    await waitFor(() => expect(result.current.props(claude).files[0]?.reading).toBeUndefined())
+    const before = draftOf('thread:undo').images[0]
+    act(() => result.current.props(claude).onRemoveImage('image-1'))
+    act(() => result.current.props(claude).onRemoveFile('image-3'))
+    expect(result.current.props(claude).images.map((one) => one.name)).toEqual(['b.png'])
+    const history = draftHistory('thread:undo')
+    act(() => void history.undo(put))
+    expect(result.current.props(claude).files.map((one) => one.name)).toEqual(['notes.txt'])
+    act(() => void history.undo(put))
+    expect(result.current.props(claude).images.map((one) => one.name)).toEqual(['a.png', 'b.png'])
+    // The very one that went, its bytes and all.
+    expect(draftOf('thread:undo').images[0]).toBe(before)
+    act(() => void history.redo(put))
+    expect(result.current.props(claude).images.map((one) => one.name)).toEqual(['b.png'])
+    // Sent: none of it comes back into the next message.
+    act(() => result.current.clear())
+    expect(history.undo(put)).toBe(false)
+  })
+
+  /** A picture whose bytes come when the test says: `give` them, or `fail` with ones that aren't a picture. */
+  const later = (name: string) => {
+    let give: (bytes: Uint8Array) => void = () => undefined
+    const file = fileOf(png(1, 1), name)
+    const bytes = new Promise<Uint8Array>((resolve) => {
+      give = resolve
+    })
+    Object.defineProperty(file, 'arrayBuffer', { value: () => bytes.then((one) => one.buffer) })
+    Object.defineProperty(file, 'bytes', { value: () => bytes })
+    return { file, give: () => give(png(1, 1)), fail: () => give(new TextEncoder().encode('not a picture')) }
+  }
+
+  it('brings back as read an image taken off while it was read, whether Undo comes before its reading ends or after', async () => {
+    const { result } = renderHook(() => useAttachments('thread:reading', noFiles, asIs))
+    const first = later('first.png')
+    const second = later('second.png')
+    act(() => result.current.props(claude).onAddFiles([first.file, second.file]))
+    act(() => result.current.props(claude).onRemoveImage('image-1'))
+    act(() => result.current.props(claude).onRemoveImage('image-2'))
+    expect(result.current.props(claude).images).toEqual([])
+    const history = draftHistory('thread:reading')
+    // Read while it was away: it comes back read.
+    await act(async () => first.give())
+    act(() => void history.undo(put))
+    act(() => void history.undo(put))
+    expect(result.current.props(claude).images.map((one) => one.name)).toEqual(['first.png', 'second.png'])
+    expect(result.current.props(claude).images[0]?.src).toMatch(/^data:image\/png/)
+    // Back before its reading ended: it ends in place.
+    expect(result.current.props(claude).images[1]?.reading).toBe(true)
+    await act(async () => second.give())
+    await waitFor(() => expect(result.current.props(claude).images[1]?.src).toMatch(/^data:image\/png/))
+  })
+
+  it('brings one back after those before it that are still there, where one before it failed to read since', async () => {
+    const { result } = renderHook(() => useAttachments('thread:failing', noFiles, asIs))
+    const slow = later('slow.png')
+    act(() => result.current.props(claude).onAddFiles([slow.file, fileOf(png(1, 1), 'b.png'), fileOf(png(1, 1), 'c.png')]))
+    await waitFor(() => expect(result.current.props(claude).images.filter((one) => one.src !== undefined)).toHaveLength(2))
+    act(() => result.current.props(claude).onRemoveImage('image-2'))
+    await act(async () => slow.fail())
+    await waitFor(() => expect(result.current.props(claude).images.map((one) => one.name)).toEqual(['c.png']))
+    act(() => void draftHistory('thread:failing').undo(put))
+    expect(result.current.props(claude).images.map((one) => one.name)).toEqual(['b.png', 'c.png'])
+  })
+
+  it('has nothing to bring back of one whose reading failed after it was taken off, and goes on to the step before', async () => {
+    const { result } = renderHook(() => useAttachments('thread:lost', noFiles, asIs))
+    act(() => result.current.props(claude).onAddFiles([fileOf(png(1, 1), 'kept.png')]))
+    await waitFor(() => expect(result.current.props(claude).images[0]?.src).toBeDefined())
+    const broken = later('broken.png')
+    act(() => result.current.props(claude).onAddFiles([broken.file]))
+    act(() => result.current.props(claude).onRemoveImage('image-1'))
+    act(() => result.current.props(claude).onRemoveImage('image-2'))
+    await act(async () => broken.fail())
+    act(() => void draftHistory('thread:lost').undo(put))
+    expect(result.current.props(claude).images.map((one) => one.name)).toEqual(['kept.png'])
   })
 
   it('holds the message back while an image is still being read', () => {

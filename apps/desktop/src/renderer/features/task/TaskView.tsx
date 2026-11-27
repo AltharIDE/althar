@@ -157,7 +157,7 @@ import { useCanvasArrivals } from '../canvases/arrivals'
 import {
   composerComment,
   cropsOf,
-  drop,
+  takeOff,
   giveBackLines,
   isDiffDraft,
   takeComments,
@@ -1682,7 +1682,7 @@ export function TaskView({
             pages.reopen(taskId, id)
           }
         }}
-        onRemoveComment={(id) => drop(kept, id)}
+        onRemoveComment={(id) => takeOff(kept, id)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
         queued={queuedOf(snapshot.items, queue, readingLocally)}

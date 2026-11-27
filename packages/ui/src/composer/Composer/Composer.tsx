@@ -6,13 +6,14 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent,
   type UIEvent,
   type WheelEvent,
   type ReactNode,
   type RefObject,
 } from 'react'
 
-import { commandDown, keys, modKey } from '../../foundations/keys'
+import { commandDown, isMac, keys, modKey, primaryDown } from '../../foundations/keys'
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import { ListMotion } from '../../lib/ListMotion'
@@ -31,6 +32,7 @@ import { CommentChip, type ComposerComment } from '../Comments/Comments'
 import { type CommandRow, CommandPanel, commandRows } from '../Commands/CommandPanel'
 import { type ComposerCommand, commandState, doneAsPicked } from '../Commands/commands'
 import s from './Composer.module.css'
+import type { ComposerHistory } from './history'
 
 /* Bars at rest, for a transcriber that does not report levels. */
 const QUIET: readonly number[] = Array.from({ length: 12 }, () => 0)
@@ -275,6 +277,12 @@ export interface ComposerProps {
   /** Takes a file or folder off. Without it, they have no remove button. */
   onRemoveFile?: (id: string) => void
   /**
+   * One history of the words and the attachments taken off, in the order they happened: Undo (⌘Z, Ctrl+Z) takes back
+   * the last, and Redo (⇧⌘Z, Ctrl+Y) does it again. The composer keeps the words' steps in it; the consumer pushes an
+   * attachment's as it takes one off. Without it, the field undoes its words as browsers do.
+   */
+  history?: ComposerHistory
+  /**
    * Comments made on what is beside the conversation (a spot on a page, a
    * line of the diff), to go after what is written: each a chip with its
    * card. They go when it is sent, even with nothing written.
@@ -339,6 +347,7 @@ export function Composer({
   onAddFiles,
   onRemoveImage,
   onRemoveFile,
+  history,
   fileNote,
   commands,
   onCommand,
@@ -393,6 +402,54 @@ export function Composer({
   const drafted = value.trim() !== '' || attached > 0
   /* the microphone takes focus back when its tray closes with focus inside it */
   const mic = useRefocus<HTMLButtonElement>(tray != null)
+
+  /* Where the caret goes once words taken back or done again are in the field. */
+  const caret = useRef<{ start: number; end: number } | null>(null)
+  /* Undo or Redo, of the words or an attachment, as one history: the field's own never runs beside it. */
+  const step = (kind: 'undo' | 'redo') => {
+    if (history === undefined) return
+    const put = (words: { text: string; start: number; end: number }) => {
+      caret.current = { start: words.start, end: words.end }
+      onChange(words.text)
+    }
+    if (kind === 'undo') history.undo(put)
+    else history.redo(put)
+  }
+  /* Where the caret was before a change, for Undo to put it back. */
+  const selected = useRef<{ start: number; end: number } | null>(null)
+  /* Words put in other than by typing (dictated, a suggestion or a command taken, a message given back): a step of their own. */
+  useLayoutEffect(() => {
+    if (history === undefined) return
+    const known = history.known()
+    const end = value.length
+    if (known === undefined) history.wrote({ text: value, start: end, end }, { text: value, start: end, end })
+    else if (known.text !== value) history.wrote(known, { text: value, start: end, end })
+    const el = ref.current
+    if (el && caret.current) el.setSelectionRange(caret.current.start, caret.current.end)
+    caret.current = null
+  }, [value, history, ref])
+  /* An attachment taken off: the composer takes the focus its button had, so Undo is a key away, without going to the field (which can start a chat). */
+  const takenOff = (remove: (id: string) => void, id: string) => {
+    remove(id)
+    if (history !== undefined) form.current?.focus({ preventScroll: true })
+  }
+  /* The field's own Undo and Redo, from the menu: this history's instead. Before any other change, where the caret was. */
+  const beforeInput = useEffectEvent((e: InputEvent) => {
+    const el = e.target as HTMLTextAreaElement
+    if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
+      e.preventDefault()
+      step(e.inputType === 'historyUndo' ? 'undo' : 'redo')
+      return
+    }
+    selected.current = { start: el.selectionStart, end: el.selectionEnd }
+  })
+  useEffect(() => {
+    const el = ref.current
+    if (!el || history === undefined) return
+    const listener = (e: InputEvent) => beforeInput(e)
+    el.addEventListener('beforeinput', listener)
+    return () => el.removeEventListener('beforeinput', listener)
+  }, [ref, history])
 
   /* A slash at the start: the commands it could be, or the one picked. Not while words arrive or are written down. */
   const commanding = dictating || interim !== '' ? ({ kind: 'none' } as const) : commandState(value, commands ?? [])
@@ -593,7 +650,24 @@ export function Composer({
         </div>
       )}
       {tray != null && <div className={s.tray}>{tray}</div>}
-      <form ref={form} className={cx(s.composer, elapsed !== null && s.recording, drop.over && s.over, className)} onSubmit={submit}>
+      <form
+        ref={form}
+        className={cx(s.composer, elapsed !== null && s.recording, drop.over && s.over, className)}
+        onSubmit={submit}
+        {...(history === undefined
+          ? {}
+          : {
+              // Taking the focus as an attachment is taken off, so Undo reaches it.
+              tabIndex: -1,
+              onKeyDown: (e: KeyboardEvent<HTMLFormElement>) => {
+                /* Undo and Redo, here and in the field (not in a menu opened from it): this history's, the words' and the attachments' in turn. */
+                const kind = e.nativeEvent.isComposing || (e.target !== e.currentTarget && e.target !== ref.current) ? null : historyKey(e)
+                if (kind === null) return
+                e.preventDefault()
+                step(kind)
+              },
+            })}
+      >
         {drop.over && (
           <div className={s.dropping} aria-hidden="true">
             <Icon name="clip" size={14} />
@@ -671,7 +745,7 @@ export function Composer({
                   <CommentChip
                     comment={comment}
                     {...(onOpenComment === undefined ? {} : { onOpen: () => onOpenComment(comment.id) })}
-                    {...(onRemoveComment === undefined ? {} : { onRemove: () => onRemoveComment(comment.id) })}
+                    {...(onRemoveComment === undefined ? {} : { onRemove: () => takenOff(onRemoveComment, comment.id) })}
                   />
                 </li>
               ))}
@@ -692,7 +766,7 @@ export function Composer({
                       icon="close"
                       size="small"
                       label={t.removeImage(image.name)}
-                      onClick={() => onRemoveImage(image.id)}
+                      onClick={() => takenOff(onRemoveImage, image.id)}
                     />
                   )}
                 </li>
@@ -716,7 +790,7 @@ export function Composer({
                       icon="close"
                       size="small"
                       label={t.removeImage(file.name)}
-                      onClick={() => onRemoveFile(file.id)}
+                      onClick={() => takenOff(onRemoveFile, file.id)}
                     />
                   )}
                 </li>
@@ -767,6 +841,16 @@ export function Composer({
             }}
             onChange={(e) => {
               setDismissed(null)
+              if (history !== undefined) {
+                const kind = (e.nativeEvent as Partial<InputEvent>).inputType ?? ''
+                const at = selected.current ?? { start: value.length, end: value.length }
+                selected.current = null
+                // Letters typed, or deleted one by one, go on in a run; a paste, a cut or a drop is a step of its own.
+                const typing =
+                  kind === 'insertText' ? 'insert' : kind === 'deleteContentBackward' || kind === 'deleteContentForward' ? 'delete' : null
+                const field = e.target
+                history.wrote({ text: value, ...at }, { text: field.value, start: field.selectionStart, end: field.selectionEnd }, typing)
+              }
               onChange(e.target.value)
             }}
             onPaste={(e) => {
@@ -921,6 +1005,24 @@ function InputMenu({ dictation, onChoose, t }: { dictation: Dictation; onChoose:
       </MenuRadioGroup>
     </Menu>
   )
+}
+
+/** Which of Undo and Redo a key asks, as the system has them: ⌘Z and ⇧⌘Z on a Mac; Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y elsewhere. */
+export function historyKey(e: {
+  readonly key: string
+  readonly code: string
+  readonly metaKey: boolean
+  readonly ctrlKey: boolean
+  readonly altKey: boolean
+  readonly shiftKey: boolean
+}): 'undo' | 'redo' | null {
+  if (!primaryDown(e) || e.altKey) return null
+  /* By the letter the layout gives it, or by where Z and Y sit where the layout's letters aren't Latin. */
+  const latin = /^[a-z]$/i.test(e.key)
+  const is = (letter: 'z' | 'y') => (latin ? e.key.toLowerCase() === letter : e.code === `Key${letter.toUpperCase()}`)
+  if (is('z')) return e.shiftKey ? 'redo' : 'undo'
+  if (is('y') && !isMac && !e.shiftKey) return 'redo'
+  return null
 }
 
 function micLabel(d: Dictation, t: ComposerText): string {

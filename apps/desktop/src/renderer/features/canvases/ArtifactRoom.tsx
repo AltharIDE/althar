@@ -15,7 +15,7 @@ import { ModelChoice } from '../../shared/ModelChoice'
 import type { Choice } from '../../shared/models'
 import { type Outgoing, sentWith, takesImages, useAttachments } from '../../shared/useAttachments'
 import { useKeptWidth } from '../../shared/useKeptWidth'
-import { canvasCommentsOf, composerComment, drop, takeComments, useComments, withComments } from '../../shared/comments'
+import { canvasCommentsOf, composerComment, takeComments, takeOff, useComments, withComments } from '../../shared/comments'
 import { draftKey, setDraftText } from '../../shared/drafts'
 import { TaskView } from '../task/TaskView'
 import { useTask } from '../task/useTask'
@@ -396,7 +396,7 @@ function FirstWords({
           )
         }
         comments={comments.map((comment, index) => composerComment(comment, index + 1))}
-        onRemoveComment={(id) => drop(draft, id)}
+        onRemoveComment={(id) => takeOff(draft, id)}
         {...(queued === null ? {} : { queued: [{ id: 'first', text: queued }], busy: true })}
         onSubmit={(words) => {
           const attached = images.props(receiver)

@@ -73,7 +73,7 @@ import { ArtifactsView } from '../canvases/ArtifactsView'
 import {
   composerComment,
   cropsOf,
-  drop,
+  takeOff,
   takeComments,
   readingCommentCrops,
   useComments,
@@ -932,7 +932,7 @@ export function ProjectView({
             pages.reopen(about, id)
           }
         }}
-        onRemoveComment={(id) => drop(draftOf, id)}
+        onRemoveComment={(id) => takeOff(draftOf, id)}
         {...(busy && talkingTo.kind !== 'new' ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy && talkingTo.kind !== 'new'}
         queued={talkingTo.kind === 'new' ? [] : queuedOf(coordinator?.items ?? [], queue, readingLocally)}

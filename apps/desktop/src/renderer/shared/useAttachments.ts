@@ -9,12 +9,12 @@ import {
   type SentCanvasComment,
   type SentImage,
 } from '@althar/contracts'
-import type { AddedBy, ComposerFile, ComposerImage } from '@althar/ui'
+import { type AddedBy, type ComposerFile, type ComposerImage, putBack } from '@althar/ui'
 import { useState } from 'react'
 
 import { pictureUrl } from '../../main/pictureAddress'
 import type { Host } from '../data/services'
-import { draftOf, nextImageId as next, setDraftDictated, setDraftFiles, setDraftImages, useDraftAttached } from './drafts'
+import { draftHistory, draftOf, nextImageId as next, setDraftDictated, setDraftFiles, setDraftImages, useDraftAttached } from './drafts'
 import { type Attached, metaOf, refusedText, text as filesText } from './files'
 import { pictureOf, previewOf, readImage, remember, type Shrink, sentOf, shrinkInWindow, text } from './images'
 
@@ -134,7 +134,7 @@ export interface Attachments {
   }
   /** What goes with a message now; null where it can't go yet, with the composer saying why. */
   readonly take: (receiver: Receiver, readingCrop?: boolean) => Outgoing | null
-  /** Takes every image and file off, once its message is sent. */
+  /** Takes every image and file off, once its message is sent, and forgets what Undo would have put back. */
   readonly clear: () => void
   /** Puts back what went with a message Althar didn't take, before any added since, bytes and all, to send again. */
   readonly giveBack: (outgoing: Outgoing) => void
@@ -162,6 +162,53 @@ const readyOf = (attached: Extract<Attached, { ok: true }>): NonNullable<Waiting
   },
 })
 
+/*
+ * What was taken off each draft and may come back with Undo, by id, as it is now: one still being read when it went
+ * is read on, and comes back as read; null where its reading failed since, so there is nothing to bring back.
+ */
+const away = new Map<string, Map<string, Waiting | WaitingFile | null>>()
+
+/** One whose reading ended: as read, or null where it failed. Taken off meanwhile, it comes back so with Undo. */
+const settleAway = (key: string, id: string, one: Waiting | WaitingFile | null) => {
+  const taken = away.get(key)
+  if (taken?.has(id) === true) taken.set(id, one)
+}
+
+/** Takes one off a draft's list, as a step Undo puts back where it was, as it was (`draftHistory`). */
+const takeOff = <T extends Waiting | WaitingFile>(
+  key: string,
+  list: () => ReadonlyArray<T>,
+  set: (change: (now: ReadonlyArray<T>) => ReadonlyArray<T>) => void,
+  id: string,
+) => {
+  const now = list()
+  const at = now.findIndex((one) => one.id === id)
+  const one = now[at]
+  if (one === undefined) return
+  // Those before it, for it to come back after, whatever else comes and goes meanwhile.
+  const before = now.slice(0, at).map((x) => x.id)
+  const taken = away.get(key) ?? new Map<string, Waiting | WaitingFile | null>()
+  away.set(key, taken)
+  const off = () => {
+    const there = list().find((x) => x.id === id)
+    if (there === undefined) return false
+    taken.set(id, there)
+    set((all) => all.filter((x) => x.id !== id))
+    return true
+  }
+  off()
+  draftHistory(key).push({
+    undo: () => {
+      const back = taken.get(id) as T | null | undefined
+      taken.delete(id)
+      if (back === null || back === undefined) return false
+      set((all) => putBack(all, back, before))
+      return true
+    },
+    redo: off,
+  })
+}
+
 /** The images and files waiting in the draft kept under `key` (`drafts.ts`). */
 export function useAttachments(key: string, host: Attacher, shrink: Shrink = shrinkInWindow): Attachments {
   // Not the words: a screen with its images isn't drawn again for each one typed.
@@ -183,20 +230,17 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
       void readImage(file, shrink).then((read) => {
         if (!read.ok) {
           setNote(read.note)
+          settleAway(key, id, null)
           return setWaiting((now) => now.filter((one) => one.id !== id))
         }
         const { image } = read
-        setWaiting((now) =>
-          now.map((one) =>
-            one.id === id
-              ? {
-                  id,
-                  name: image.name,
-                  ready: { data: image.data, picture: { ...pictureOf(image), digest: image.digest }, src: image.src },
-                }
-              : one,
-          ),
-        )
+        const ready: Waiting = {
+          id,
+          name: image.name,
+          ready: { data: image.data, picture: { ...pictureOf(image), digest: image.digest }, src: image.src },
+        }
+        settleAway(key, id, ready)
+        setWaiting((now) => now.map((one) => (one.id === id ? ready : one)))
       })
   }
 
@@ -214,9 +258,12 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
         .then((attached) => {
           if (attached === null || !attached.ok) {
             setNote(attached === null ? (unread ?? filesText.unreadable(name)) : refusedText(attached))
+            settleAway(key, id, null)
             return setFiles((now) => now.filter((one) => one.id !== id))
           }
-          setFiles((now) => now.map((one) => (one.id === id ? { id, name: attached.name, ready: readyOf(attached) } : one)))
+          const ready: WaitingFile = { id, name: attached.name, ready: readyOf(attached) }
+          settleAway(key, id, ready)
+          setFiles((now) => now.map((one) => (one.id === id ? ready : one)))
         })
   }
 
@@ -270,11 +317,11 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
       onAddFiles: (files: ReadonlyArray<File>, how: AddedBy = 'drop') => void add(files, receiver, how),
       onRemoveImage: (id: string) => {
         setNote(null)
-        setWaiting((now) => now.filter((one) => one.id !== id))
+        takeOff(key, () => draftOf<Waiting>(key).images, setWaiting, id)
       },
       onRemoveFile: (id: string) => {
         setNote(null)
-        setFiles((now) => now.filter((one) => one.id !== id))
+        takeOff(key, () => draftOf<unknown, WaitingFile>(key).files, setFiles, id)
       },
       ...(shown === null ? {} : { fileNote: shown }),
     }
@@ -322,6 +369,9 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
       setNote(null)
       setWaiting(() => [])
       setFiles(() => [])
+      // Sent: what was taken off before can't come back into the next message.
+      draftHistory(key).clear()
+      away.delete(key)
     },
     giveBack: (outgoing) => {
       const given = outgoing.pictures.flatMap((picture, index): ReadonlyArray<Waiting> => {
