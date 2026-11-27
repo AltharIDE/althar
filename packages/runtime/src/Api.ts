@@ -203,6 +203,7 @@ import { checkHealth } from './mcpHealth'
 import { Canvases } from './Canvases'
 import { CanvasSaves } from './CanvasSaves'
 import { Elsewhere } from './Elsewhere'
+import { openWords } from './elsewhere/open'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
 import { cancelWaitingTurn, upNextMove } from './upNextMoves'
@@ -525,6 +526,15 @@ export const handlers = apiLayer(
     const timedCall = lagLogged()
       ? <A, E, R>(effect: Effect.Effect<A, E, R>) => slowCall(callName, effect)
       : <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
+    /**
+     * Refused, in the composer's words, while another process has a conversation brought into the thread open
+     * (elsewhere/open.ts): the window puts the message back in the composer, and the person sends it again once it's closed.
+     */
+    const closedElsewhere = (threadId: string) =>
+      Effect.flatMap(elsewhere.openElsewhere(threadId), (open) =>
+        open === null ? Effect.void : Effect.fail(new ApiError({ reason: 'OpenElsewhere', why: open, message: openWords(open) })),
+      )
+
     const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, Exclude<R, QueryServices>> =>
       Effect.provideContext(
         Effect.catchCause(timedCall(effect), (cause) => {
@@ -1477,6 +1487,8 @@ export const handlers = apiLayer(
           commandId,
           api(
             Effect.gen(function* () {
+              // Handed over with words, a conversation brought in from another tool that it still has open waits, as a send does.
+              if (body !== undefined) yield* closedElsewhere(threadId)
               // Its images and files are read and kept first, outside any transaction; one that can't be sent refuses the switch.
               const kept = body === undefined || images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               const copied = body === undefined ? [] : yield* filesFor(threadId, files)
@@ -1920,6 +1932,8 @@ export const handlers = apiLayer(
                   return
                 }
               }
+              // A conversation brought in from another tool that it still has open waits, before anything of it is kept.
+              yield* closedElsewhere(threadId)
               // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
               const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               const copied = yield* filesFor(threadId, files)

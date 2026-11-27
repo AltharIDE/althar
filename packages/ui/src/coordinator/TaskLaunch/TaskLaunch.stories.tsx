@@ -191,12 +191,12 @@ export const WorkersOpen: Story = {
 const CHECKED: readonly LaunchPlace[] = [
   { value: 'home', label: 'This Mac', kind: 'home' },
   { value: 'auto', label: 'Any free worker', kind: 'any' },
-  { value: 'wrk_runner1', label: 'runner-1', kind: 'worker', hint: '12 GB free · Installs Bun first' },
+  { value: 'wrk_runner1', label: 'runner-1', kind: 'worker', hint: '12 GB free' },
   { value: 'wrk_runner2', label: 'runner-2', kind: 'worker', hint: 'Sandbox can’t start', disabled: true },
   { value: 'wrk_runner3', label: 'runner-3', kind: 'worker', hint: 'Claude Code signed out', disabled: true },
 ]
 
-/** Workers as their own checks found them: one ready, installing Bun first for this project; one whose sandbox can't start, and one whose agent is signed out, greyed with why. */
+/** Workers as their own checks found them: one ready; one whose sandbox can't start, and one whose agent is signed out, greyed with why. */
 export const WorkersChecked: Story = {
   render: function Render() {
     const [place, choose] = useState('home')

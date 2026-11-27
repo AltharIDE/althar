@@ -139,16 +139,17 @@ describe('a worker’s own check, in Runs on (ADR-103)', () => {
     ])
   })
 
-  it('says what a ready worker installs first for the project, or leaves to its lead', () => {
+  it('says what a ready worker leaves to its lead, and nothing of what it installs itself', () => {
     const needs = [
       { name: 'bun', version: '1.3.5', why: 'bun.lock', installs: true },
       { name: 'cargo', why: 'Cargo.toml', installs: false },
     ]
     expect(hints(placementOf({ ...base, workers: [checked({ needs })] }))[2]).toEqual([
       'Linux worker aaaaaa',
-      '12 GB free · Installs Bun first',
+      '12 GB free · Needs cargo',
       false,
     ])
+    expect(hints(placementOf({ ...base, workers: [checked({ needs: [needs[0]!] })] }))[2]?.[1]).toBe('12 GB free')
     expect(hints(placementOf({ ...base, workers: [checked({ needs: [needs[1]!] })] }))[2]?.[1]).toBe('12 GB free · Needs cargo')
   })
 

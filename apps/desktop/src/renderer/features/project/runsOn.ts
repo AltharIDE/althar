@@ -64,13 +64,11 @@ export const runsOnText = {
         return unfit.count === 0 ? 'No repository' : unfit.limit === 1 ? 'One repository' : `Up to ${unfit.limit} repositories`
     }
   },
-  /** What a ready worker does first for this project's files: installs what it installs itself, or leaves the rest to the lead. */
+  /** What a ready worker leaves to the lead to set up for this project's files; what it installs itself goes unsaid. */
   needs: (worker: ProjectWorker) => {
-    const needs = worker.needs ?? []
     const named = (name: string) => ({ bun: 'Bun', node: 'Node', python3: 'Python', go: 'Go' })[name] ?? name
-    const installs = needs.filter((need) => need.installs).map((need) => named(need.name))
-    const lead = needs.filter((need) => !need.installs).map((need) => named(need.name))
-    return installs.length > 0 ? `Installs ${installs.join(', ')} first` : lead.length > 0 ? `Needs ${lead.join(', ')}` : undefined
+    const lead = (worker.needs ?? []).filter((need) => !need.installs).map((need) => named(need.name))
+    return lead.length > 0 ? `Needs ${lead.join(', ')}` : undefined
   },
   note: (home: string) => `The setup and lead run on the worker, the review on ${home}.`,
   /** The home, until the window has read which it is: a remote window mustn't say This Mac meanwhile. */

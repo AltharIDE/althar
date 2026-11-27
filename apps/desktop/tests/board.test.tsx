@@ -2534,7 +2534,9 @@ describe('a ready card’s next step, done from the card', () => {
     expect(yours.getByText('Nightly dependency check, 27 Oct')).toBeTruthy()
     expect(card.getByText('Stopped')).toBeTruthy()
     expect(card.getByText('Stopped by Althar')).toBeTruthy()
-    expect(card.getByText('Sep 29')).toBeTruthy()
+    // The day it stopped, as the person's own language says it (Sep 29, 29 Sept).
+    const stoppedOn = new Date('2026-09-29T09:00:00.000Z').toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+    expect(card.getByText(stoppedOn)).toBeTruthy()
     expect(card.queryByText(/^\d+d \d+h$/)).toBeNull()
     // The conflict is one quiet line, not why it waits, and not that the person stopped it.
     expect(card.getByText('Conflicts with the default branch')).toBeTruthy()

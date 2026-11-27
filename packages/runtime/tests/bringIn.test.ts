@@ -1,3 +1,4 @@
+import { type ChildProcess, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -20,6 +21,7 @@ import { Instance } from '../src/Instance'
 import { Secrets } from '../src/Secrets'
 
 import { claudeFolder } from '../src/elsewhere/conversations'
+import { listProcesses } from '../src/elsewhere/open'
 
 import { computer, digest, gitIn, PHRASE, sessionIds } from './elsewhereFixtures'
 import { fakeAgents, fakeConnectors, repository, ROOMY } from './support'
@@ -585,5 +587,143 @@ describe('bringing in other tools’ work', () => {
           assert.isFalse(items.some((item) => item.kind === 'notice' && JSON.stringify(item).includes('Folder back')))
         }),
       ),
+  )
+})
+
+/** A fake of a tool's command, `<home>/bin/<name>`, run by Node with `args` until stopped: as a terminal keeps it open. */
+const fakeTool = (home: string, name: 'claude' | 'codex', args: ReadonlyArray<string>, under: ReadonlyArray<string> = []) =>
+  Effect.acquireRelease(
+    Effect.gen(function* () {
+      const file = join(home, 'bin', name)
+      mkdirSync(join(home, 'bin'), { recursive: true })
+      writeFileSync(file, 'setInterval(() => undefined, 60_000)\n')
+      const [command = process.execPath, ...rest] = [...under, process.execPath, file, ...args]
+      const child = spawn(command, rest, { stdio: 'ignore' })
+      // Running once the process list shows it, with its arguments.
+      yield* until(listProcesses(), (all) => all?.some((one) => one.pid === child.pid) === true)
+      return child
+    }),
+    (child) => stopped(child),
+  )
+
+const stopped = (child: ChildProcess) =>
+  Effect.callback<void>((resume) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resume(Effect.void)
+    child.once('exit', () => resume(Effect.void))
+    child.kill()
+  })
+
+/** A send to a thread, as the window makes it: the message it was refused with, or null where it went. */
+const sendTo = (client: Effect.Success<ReturnType<typeof connectedTo>>['client'], threadId: string, body: string) =>
+  client.Send({ commandId: commandId(), threadId, body, disposition: 'after_current' }).pipe(
+    Effect.as(null),
+    Effect.catch((error) => Effect.succeed(error.message)),
+  )
+
+describe('a conversation brought in that its tool still has open', () => {
+  const claudeLine = 'Claude Code still has this conversation open in another window. Close it there and send again.'
+  const codexLine = 'Codex still has this conversation open in another window. Close it there and send again.'
+
+  /** An aside brought in from `key`, its thread, and what the person said in it so far. */
+  const asideOf = (connected: Effect.Success<ReturnType<typeof connectedTo>>, key: string) =>
+    Effect.gen(function* () {
+      const { client, project, sql } = connected
+      const brought = yield* client.BringIn({
+        commandId: commandId(),
+        projectId: project.id,
+        worktrees: [],
+        setups: [],
+        conversations: [key],
+        steps,
+      })
+      const [thread] = yield* sql((sql) => sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${brought.asides[0] ?? ''}`)
+      const threadId = thread?.id ?? ''
+      const said = sql(
+        (sql) => sql<{ body: string }>`
+          SELECT u.body FROM user_inputs u JOIN actors a ON a.id = u.author_actor_id
+          WHERE u.thread_id = ${threadId} AND a.kind = 'person' ORDER BY u.sequence`,
+      ).pipe(Effect.map((rows) => rows.map((row) => row.body)))
+      // What the person says from here: their words brought in with the conversation came before.
+      const before = (yield* said).length
+      return { threadId, said: Effect.map(said, (all) => all.slice(before)) }
+    })
+
+  it.live(
+    'waits while Claude Code has it open, whatever opened it, and goes once that window is closed',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connected = yield* connectedTo()
+          const { client, machine } = connected
+          const { threadId, said } = yield* asideOf(connected, `claude_code:${sessionIds.inRoot}`)
+          // Read while it's open: nothing holds reading back.
+          assert.isTrue((yield* client.GetThread({ threadId })).items.some((item) => item.kind === 'agent_message'))
+          // Opened from inside Claude Code (`/resume`), its arguments don't name it: its own record does.
+          const open = yield* fakeTool(machine.home, 'claude', [])
+          const sessions = join(machine.home, '.claude', 'sessions')
+          mkdirSync(sessions, { recursive: true })
+          writeFileSync(
+            join(sessions, `${open.pid}.json`),
+            JSON.stringify({ pid: open.pid, sessionId: sessionIds.inRoot, kind: 'interactive' }),
+          )
+          assert.strictEqual(yield* sendTo(client, threadId, 'Is it fixed now?'), claudeLine)
+          assert.deepStrictEqual(yield* said, [])
+          // Resumed by its id in a terminal, it waits too.
+          const resumed = yield* fakeTool(machine.home, 'claude', ['--resume', sessionIds.inRoot])
+          yield* stopped(open)
+          assert.strictEqual(yield* sendTo(client, threadId, 'Is it fixed now?'), claudeLine)
+          // Closed: the record a crashed one leaves behind names a pid no Claude Code has, and the same send goes.
+          yield* stopped(resumed)
+          assert.isNull(yield* sendTo(client, threadId, 'Is it fixed now?'))
+          assert.deepStrictEqual(yield* said, ['Is it fixed now?'])
+        }),
+      ),
+    budget.medium,
+  )
+
+  it.live(
+    'waits while Codex has it open in a terminal, and goes once it is closed',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connected = yield* connectedTo()
+          const { client, machine } = connected
+          const { threadId, said } = yield* asideOf(connected, `codex:${sessionIds.codexLegacy}`)
+          const open = yield* fakeTool(machine.home, 'codex', ['resume', sessionIds.codexLegacy])
+          assert.strictEqual(yield* sendTo(client, threadId, 'Rename it back'), codexLine)
+          assert.deepStrictEqual(yield* said, [])
+          yield* stopped(open)
+          assert.isNull(yield* sendTo(client, threadId, 'Rename it back'))
+          assert.deepStrictEqual(yield* said, ['Rename it back'])
+        }),
+      ),
+    budget.medium,
+  )
+
+  // Codex's writer lock is read from the kernel's list of locks on Linux, where `flock` can hold one as Codex does.
+  it.live.skipIf(process.platform !== 'linux')(
+    'waits while Codex holds its writer lock, however it opened it, and goes once it lets go',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connected = yield* connectedTo()
+          const { client, machine } = connected
+          const { threadId, said } = yield* asideOf(connected, `codex:${sessionIds.codexLegacy}`)
+          const locks = join(machine.home, '.codex', 'thread-writer-locks')
+          mkdirSync(locks, { recursive: true })
+          const lock = join(locks, `${sessionIds.codexLegacy}.lock`)
+          writeFileSync(lock, '')
+          // Left behind by a Codex that let go, the file alone isn't open.
+          assert.isNull(yield* sendTo(client, threadId, 'First'))
+          const holding = yield* fakeTool(machine.home, 'codex', [], ['flock', '--exclusive', '--no-fork', lock])
+          assert.strictEqual(yield* sendTo(client, threadId, 'Rename it back'), codexLine)
+          yield* stopped(holding)
+          assert.isNull(yield* sendTo(client, threadId, 'Rename it back'))
+          assert.deepStrictEqual(yield* said, ['First', 'Rename it back'])
+          // The lock file is Codex's: left as it was.
+          assert.isTrue(existsSync(lock))
+        }),
+      ),
+    budget.medium,
   )
 })

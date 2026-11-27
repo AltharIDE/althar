@@ -212,10 +212,13 @@ describe('the person’s word through the tool boundary', () => {
           draft: true,
         })
         const [task] = yield* s.sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${other.taskId}`
+        // A step of another tool waits only on a task's result, which Althar watches: here one recorded already.
+        yield* addItem({ projectId: s.access.projectId as ProjectId, threadId: other.threadId }, 'step_result', { step: 'implement' })
+        const step = { ...s.step, waits: [{ kind: 'lead_done', target: task!.slug }] }
         const message = yield* s.say()
-        const kept = yield* callTool(s.access, 'keep_errand', { message, steps: [{ ...s.step, taskId: task!.slug }] })
+        const kept = yield* callTool(s.access, 'keep_errand', { message, steps: [{ ...step, taskId: task!.slug }] })
         assert.match(kept, /^errand_/)
-        assert.strictEqual(yield* s.errands.keep(s.access, message, [{ ...s.step, taskId: other.taskId }]), kept)
+        assert.strictEqual(yield* s.errands.keep(s.access, message, [{ ...step, taskId: other.taskId }]), kept)
         const [row] = yield* s.sql<{ taskId: string }>`SELECT task_id FROM errand_steps WHERE errand_id = ${kept}`
         assert.strictEqual(row?.taskId, other.taskId)
         yield* s.say({ kind: 'internal' })
@@ -228,10 +231,14 @@ describe('the person’s word through the tool boundary', () => {
     Effect.gen(function* () {
       const s = yield* setup()
       const message = yield* s.say()
+      const tag = { key: 'tag', tool: 'push_tag', target: 'meridian/api tag v1.0.0', request: { tag: 'v1.0.0' } }
       for (const kind of ['pull_request_opened', 'merged', 'imaginary']) {
         const answer = yield* callTool(s.access, 'keep_errand', {
           message,
-          steps: [s.step, { ...s.step, key: 'later', waits: [{ kind, target: 'release' }] }],
+          steps: [
+            { ...tag, waits: [{ kind: 'post-merge', target: 'head-a' }] },
+            { ...s.step, key: 'later', waits: [{ kind, target: 'release' }] },
+          ],
         })
         assert.include(answer, `cannot watch wait kind "${kind}"`)
         assert.include(answer, 'Watched kinds: task_pull_request, task_merged')
@@ -239,7 +246,10 @@ describe('the person’s word through the tool boundary', () => {
         assert.lengthOf(yield* s.sql`SELECT id FROM errands`, 0)
       }
       assert.include(
-        yield* callTool(s.access, 'keep_errand', { message, steps: [{ ...s.step, taskId: 'missing' }] }),
+        yield* callTool(s.access, 'keep_errand', {
+          message,
+          steps: [{ ...s.step, taskId: 'missing', waits: [{ kind: 'lead_done', target: 'missing' }] }],
+        }),
         'This project has no task missing',
       )
       const foreign = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
@@ -250,7 +260,10 @@ describe('the person’s word through the tool boundary', () => {
         draft: true,
       })
       assert.include(
-        yield* callTool(s.access, 'keep_errand', { message, steps: [{ ...s.step, taskId: task.taskId }] }),
+        yield* callTool(s.access, 'keep_errand', {
+          message,
+          steps: [{ ...s.step, taskId: task.taskId, waits: [{ kind: 'lead_done', target: task.taskId }] }],
+        }),
         'This project has no task',
       )
       assert.include(
@@ -512,11 +525,26 @@ describe('the person’s word through the tool boundary', () => {
       const s = yield* setup()
       const message = yield* s.say({ kind: 'window' }, 'Once it’s green, do the test action, then again on the second')
       const step = { ...s.step, request: { method: 'test' } }
+      // Another tool's step waits on a task's result, which Althar watches: here one recorded already.
+      const green = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: s.access.projectId as ProjectId,
+        title: 'Green work',
+        draft: true,
+      })
+      const [task] = yield* s.sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${green.taskId}`
+      yield* addItem({ projectId: s.access.projectId as ProjectId, threadId: green.threadId }, 'step_result', { step: 'implement' })
       const kept = yield* callTool(s.access, 'keep_errand', {
         message,
         steps: [
-          { ...step, says: 'Do the test action', waits: [{ kind: 'checks', target: 'head-a', says: 'its checks pass' }] },
-          { ...step, key: 'second', target: 'repo/#2', says: 'Do it again on the second', waits: [{ kind: 'checks', target: 'head-a' }] },
+          { ...step, says: 'Do the test action', waits: [{ kind: 'lead_done', target: task!.slug, says: 'its checks pass' }] },
+          {
+            ...step,
+            key: 'second',
+            target: 'repo/#2',
+            says: 'Do it again on the second',
+            waits: [{ kind: 'lead_done', target: task!.slug }],
+          },
         ],
       })
       const id = /errand_\w+/.exec(kept)?.[0] ?? kept
@@ -543,7 +571,7 @@ describe('the person’s word through the tool boundary', () => {
       )
       assert.strictEqual(
         notices[0]?.details,
-        'You said: “Once it’s green, do the test action, then again on the second”\n\n1. Do the test action once its checks pass\n2. Do it again on the second once its checks pass',
+        'You said: “Once it’s green, do the test action, then again on the second”\n\n1. Do the test action once its checks pass\n2. Do it again on the second once its lead finishes',
       )
     }).pipe(Effect.provide(runtime())),
   )
@@ -797,6 +825,30 @@ describe('the person’s word through the tool boundary', () => {
         yield* advance('23 hours')
         yield* s.errands.remind(s.access.projectId)
         assert.lengthOf(yield* reminders, 1)
+      }).pipe(Effect.provide(slowDays())),
+    ),
+  )
+
+  it.live('a held errand reminds the person once, not every day, and once more only when it is held again', () =>
+    errandTime((advance) =>
+      Effect.gen(function* () {
+        const s = yield* setup()
+        const id = yield* s.errands.keep(s.access, yield* s.say(), [s.step])
+        const held = s.sql`SELECT id FROM thread_items WHERE thread_id = ${s.access.threadId} AND content LIKE '%Errand still on hold%'`
+        yield* s.errands.pause(s.access, id, 'The person said to wait.')
+        for (let day = 0; day < 13; day++) {
+          yield* advance('25 hours')
+          yield* s.errands.remind(s.access.projectId)
+        }
+        // Its hold said so once, then one reminder: not one each day it stays held, as the errands of 15 Nov did.
+        assert.lengthOf(yield* held, 1)
+        yield* s.errands.resume(s.access, id, yield* s.say({ kind: 'window' }, 'Go ahead now'))
+        yield* s.errands.pause(s.access, id, 'The person said to wait again.')
+        for (let day = 0; day < 3; day++) {
+          yield* advance('25 hours')
+          yield* s.errands.remind(s.access.projectId)
+        }
+        assert.lengthOf(yield* held, 2)
       }).pipe(Effect.provide(slowDays())),
     ),
   )

@@ -631,6 +631,32 @@ an aside's first one too. Claude Code's own `--resume` of a copied session
 was turned down for now: it would carry one agent's session only, where the
 brief carries any conversation to any agent.
 
+**A conversation still open in its tool waits** (DEV-264). People who
+switch often still have the conversation open in a terminal, or in an app
+running Claude Code or Codex for them. Carried on in both, it splits, each
+missing the other's turns. So before a send to a thread with a conversation
+brought in, the runtime asks whether another process has it open, and while
+one does the send is refused in the composer's words ("Claude Code still has
+this conversation open in another window. Close it there and send again."):
+the window puts the message back in the composer, and the same send goes
+once it is closed. Reading it is never held back, and nothing of the tool's
+is written, taken or stopped. The press shows at once; the check runs behind
+it, its processes listed through the runner (`elsewhere/open.ts`). Each sign
+is named by the versions it was read from, as the readers are:
+
+| Sign | Read from | Where |
+|---|---|---|
+| Claude Code's `sessions/<pid>.json`, naming the session a process has open, whatever opened it | 2.1.309 | Every platform; counted only while its pid is a Claude Code process, since a crash leaves the record and its pid may be another's |
+| Codex's `thread-writer-locks/<thread>.lock`, held exclusively by whatever writes the thread | 0.167.0 | Linux (`/proc/locks`) and macOS (`lsof`), never by taking it |
+| A Claude Code or Codex process whose arguments name the id (`claude --resume <id>`, `codex resume <id>`) | any | Every platform: `ps`, and on Windows PowerShell's `Win32_Process`, which shows command lines where Git for Windows' `ps` can't |
+
+On Windows a Codex lock can't be read without taking it, which Althar
+doesn't do to another tool's file, so there a Codex thread waits only when
+its process names it, as `codex resume <id>` does; one opened from inside
+Codex isn't seen, and the send goes. Where nothing can be told, as where
+the processes can't be listed or Althar runs in a Flatpak that can't see
+them, the send goes too: a check that fails never holds the person's work.
+
 **Twice is once.** What came in is kept by its key (a worktree's folder, a
 setup's tool and checkout, a conversation's agent and id, in `brought_in`),
 so bringing it in again finds it, and listing again says what it became.
@@ -656,3 +682,4 @@ in its editor's storage.
 - 10 Nov 2026: a running task moves between a worktree and Local, and changes the branch it works toward at any time (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
 - 17 Nov 2026: bringing in other tools' worktrees, setups and conversations (DEV-211, DEV-37): each worktree a task in place, which Althar never sets up, moves or removes.
 - 19 Nov 2026: the status line along the foot, and terminals: picked from a prototype of five places for runs and a terminal (beside the conversation, along the foot, in the thread, a tab of its own, and three spin-offs of the foot).
+- 19 Nov 2026: a send to a conversation brought in waits while Claude Code or Codex still has it open (DEV-264).
