@@ -209,7 +209,8 @@ export class ToolServer extends Context.Service<
                   ],
                 }
           const refused = exit.cause.reasons.find((reason) => reason._tag === 'Fail')
-          // What failed, in the runtime's own words for it: a refusal's, else the error's (toolRefusal.ts), never only its kind.
+          // What failed, in the runtime's own words for it: a refusal's, else the error's (toolRefusal.ts), never only its kind;
+          // any credential in it taken out here, at the edge, whichever tool worded it.
           const text =
             refused !== undefined && refused._tag === 'Fail'
               ? refusalWords(refused.error)

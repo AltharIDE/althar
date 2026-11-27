@@ -35,7 +35,7 @@ import { change, fact, timestamp } from './records'
 import { setToward } from './towards'
 import { type PlanStep, Runs, type TaskEnd } from './Runs'
 import { blockedIn } from './waits'
-import { workerRequirementsOf } from './workerRequirements'
+import { homeOnlyOf, workerRequirementsOf } from './workerRequirements'
 
 /*
  * A task's plan before it runs (docs/architecture/04): its steps and who does
@@ -90,6 +90,8 @@ export class Plans extends Context.Service<
       readonly held?: boolean
       /** Nothing of it leaves this Mac when it is done, whatever the project's host (`PlanParameters.here`). */
       readonly here?: boolean
+      /** Whether it runs only on this home, where that isn't as `here` says (`PlanParameters.homeOnly`). */
+      readonly homeOnly?: boolean
       /** A review of someone else's pull request, its one step its lead (`PlanParameters.reads`). */
       readonly reads?: boolean
       /**
@@ -229,6 +231,7 @@ export class Plans extends Context.Service<
           end?: TaskEnd | null
           endChosen?: boolean
           here?: boolean
+          homeOnly?: boolean
           aside?: boolean
           reads?: boolean
           worksIn?: WorksIn
@@ -295,6 +298,7 @@ export class Plans extends Context.Service<
                     end: input.end ?? null,
                     ...(input.endChosen === true ? { endChosen: true } : {}),
                     ...(input.here === true ? { here: true } : {}),
+                    ...(input.homeOnly === undefined ? {} : { homeOnly: input.homeOnly }),
                     ...(input.aside === true ? { aside: true } : {}),
                     ...(input.reads === true ? { reads: true } : {}),
                     ...(input.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
@@ -379,7 +383,7 @@ export class Plans extends Context.Service<
             return previous === undefined && runsOn === undefined ? {} : { parameters: JSON.stringify(atHome) }
           }
           const requirements = yield* workerRequirementsOf(plan.taskId, {
-            homeOnly: parameters.here === true,
+            homeOnly: homeOnlyOf(parameters),
             readOnly: parameters.reads === true,
           })
           const available = config.workers?.list(plan.projectId) ?? []
@@ -638,6 +642,7 @@ export class Plans extends Context.Service<
                   // A card sends the ending it shows with every change: only another one than the plan had is the person's choice.
                   ...(before.endChosen === true || (end !== undefined && end !== (before.end ?? null)) ? { endChosen: true } : {}),
                   ...(before.here === true ? { here: true } : {}),
+                  ...(before.homeOnly === undefined ? {} : { homeOnly: before.homeOnly }),
                   ...(before.aside === true ? { aside: true } : {}),
                   ...(before.reads === true ? { reads: true } : {}),
                   ...(where === undefined ? {} : { worksIn: where }),

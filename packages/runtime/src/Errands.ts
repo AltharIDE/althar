@@ -35,6 +35,7 @@ import type { ErrandRecord } from './errandWords'
 import { change, fact, timestamp } from './records'
 import { addItem } from './threads'
 import { ActionNotPerformed, ToolRefused } from './toolErrors'
+import { toolRefusalOf } from './toolRefusal'
 import type { ToolAccess } from './ToolServer'
 
 /** Inputs the host recorded for the live turn, never claims from a tool's arguments. */
@@ -283,7 +284,9 @@ export class Errands extends Context.Service<
                 ? refused(error.message)
                 : error instanceof ConnectorFailed
                   ? refused(`The action’s answer is uncertain: ${error.message} It will be read back before another attempt.`)
-                  : refused('Althar could not keep or read the errand. Try again, or tell the person.'),
+                  : error === undefined
+                    ? refused('Althar could not keep or read the errand. Try again, or tell the person.')
+                    : toolRefusalOf(error, 'Althar could not keep or read the errand'),
             )
           }),
         )

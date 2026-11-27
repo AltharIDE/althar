@@ -7,6 +7,7 @@ import { MessageChannel } from 'node:worker_threads'
 import { Api, ApiError, clientProtocol, emitterPort, type ProjectWorker } from '@althar/contracts'
 import { assert, describe, it } from '@effect/vitest'
 import { Context, Duration, Effect, Layer, Schema } from 'effect'
+import { SqlClient } from 'effect/sql'
 import { RpcClient } from 'effect/rpc'
 import { until } from '@althar/testing/effect'
 
@@ -67,11 +68,19 @@ const enrolledOf = (
   projectIds: more.projectIds ?? [],
 })
 
-const connected = (workers: RuntimeOptions['workers']) =>
+const connected = (
+  workers: RuntimeOptions['workers'],
+  more: {
+    /** A store on disk, and the project's folder, to open again as a home that restarted does. */
+    readonly database?: string
+    readonly folder?: string
+    readonly countdown?: Duration.Duration
+  } = {},
+) =>
   Effect.gen(function* () {
     const context = yield* Layer.build(
       services({
-        database: ':memory:',
+        database: more.database ?? ':memory:',
         worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
         appVersion: '0.0.0-test',
         deviceName: 'Test Mac',
@@ -82,8 +91,8 @@ const connected = (workers: RuntimeOptions['workers']) =>
         agentsRoot: mkdtempSync(join(tmpdir(), 'althar-agents-')),
         busy: { machine: ROOMY },
         checksAppear: Duration.zero,
-        // Long enough that nothing counting down starts while it is looked at.
-        countdown: Duration.minutes(5),
+        // Long enough that nothing counting down starts while it is looked at, unless a test says.
+        countdown: more.countdown ?? Duration.minutes(5),
         ...(workers === undefined ? {} : { workers }),
       }),
     )
@@ -99,7 +108,10 @@ const connected = (workers: RuntimeOptions['workers']) =>
     )
     const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
     const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
-    const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* Context.get(context, Folders).allow(repository()) })
+    const project = yield* client.OpenProject({
+      commandId: commandId(),
+      grant: yield* Context.get(context, Folders).allow(more.folder ?? repository()),
+    })
     const { threadId } = yield* client.GetCoordinator({ projectId: project.id })
     const coordinator: ToolAccess = { role: 'coordinator', projectId: project.id, threadId, sessionId: 'none', taskId: null }
     const call = (access: ToolAccess, name: string, args: Record<string, unknown>) =>
@@ -288,6 +300,95 @@ describe('placing a task on a worker at every stage', () => {
   )
 })
 
+describe('a task started at once, or drafted, on a worker', () => {
+  it.live('starts a task begun at once, or planned, on the worker an agent names, for the coordinator and for a lead', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const opened: Array<string> = []
+        const { call, coordinator, context } = yield* connected(
+          {
+            list: () => [worker(HERMES, 'hermes-box')],
+            open: (request) => Effect.sync(() => opened.push(request.workerId)).pipe(Effect.andThen(Effect.die('Seen opening the worker'))),
+          },
+          { countdown: Duration.seconds(1) },
+        )
+        const sql = Context.get(context, SqlClient.SqlClient)
+        // The coordinator's starts at once, there, and still says nothing of it goes up when it is done.
+        const said = yield* call(coordinator, 'start_task', {
+          title: 'Look on the box',
+          description: 'Check what is there.',
+          lead: { agent: 'codex' },
+          runs_on: 'hermes-box',
+        })
+        assert.notInclude(said, 'held')
+        assert.include(said, 'nothing goes outside the project when it is done')
+        yield* until(
+          Effect.sync(() => opened.length),
+          (count) => count > 0,
+        )
+        assert.deepStrictEqual([...new Set(opened)], [HERMES])
+        // A lead's goes through its countdown, then starts on the worker too.
+        opened.length = 0
+        yield* call(coordinator, 'draft_task', { title: 'Its parent' })
+        const [parent] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE slug = 'its-parent'`
+        const lead: ToolAccess = { ...coordinator, role: 'lead', taskId: parent?.id ?? '' }
+        const fromLead = yield* call(lead, 'start_task', { title: 'Lead looks on the box', lead: { agent: 'codex' }, runs_on: HERMES })
+        assert.include(fromLead, 'It runs on hermes-box.')
+        yield* until(
+          Effect.sync(() => opened.length),
+          (count) => count > 0,
+        )
+        assert.deepStrictEqual([...new Set(opened)], [HERMES])
+        // A plan the coordinator placed as it proposed it starts there too, when its countdown ends, and never on the home.
+        opened.length = 0
+        yield* call(coordinator, 'draft_task', { title: 'Planned for the box' })
+        assert.include(
+          yield* call(coordinator, 'propose_plan', { task: 'planned-for-the-box', lead: { agent: 'codex' }, runs_on: 'hermes-box' }),
+          'It runs on hermes-box.',
+        )
+        yield* until(
+          Effect.sync(() => opened.length),
+          (count) => count > 0,
+        )
+        assert.deepStrictEqual([...new Set(opened)], [HERMES])
+      }),
+    ),
+  )
+  it.live('keeps a draft’s worker through a restart, for its first plan, and leaves a later plan where the person put it', () =>
+    Effect.gen(function* () {
+      const database = join(mkdtempSync(join(tmpdir(), 'althar-store-')), 'althar.db')
+      const folder = repository()
+      const workers = { list: () => [worker(HERMES, 'hermes-box')], open: () => Effect.die('Nothing starts here') }
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const { call, coordinator } = yield* connected(workers, { database, folder })
+          assert.include(
+            yield* call(coordinator, 'draft_task', { title: 'Across a restart', runs_on: 'hermes-box' }),
+            'Its plan runs on hermes-box.',
+          )
+        }),
+      )
+      // The home restarted between the draft and its plan: the plan still runs where the draft said.
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const { client, call, coordinator, card } = yield* connected(workers, { database, folder })
+          assert.include(
+            yield* call(coordinator, 'propose_plan', { task: 'across-a-restart', lead: { agent: 'codex' } }),
+            'It runs on hermes-box.',
+          )
+          const first = yield* until(card('Across a restart'), (one) => one?.plan != null)
+          assert.strictEqual(first?.plan?.runsOn, HERMES)
+          // The person moves it home on its card; planned again, it stays there rather than going back to the draft's worker.
+          yield* client.PlacePlan({ commandId: commandId(), planId: first?.plan?.id ?? '', workerId: null })
+          yield* call(coordinator, 'propose_plan', { task: 'across-a-restart', lead: { agent: 'codex' }, review: null })
+          const again = yield* until(card('Across a restart'), (one) => one?.plan != null && one.plan.id !== first?.plan?.id)
+          assert.isUndefined(again?.plan?.runsOn)
+        }),
+      )
+    }),
+  )
+})
+
 describe('a worker, as an agent names it (workerLookup.ts)', () => {
   const platform = (list: ReadonlyArray<ProjectWorker>, enrolled?: ReadonlyArray<EnrolledWorkerState> | null) => ({
     list: () => list,
@@ -329,10 +430,60 @@ describe('a worker, as an agent names it (workerLookup.ts)', () => {
       said(platform([worker(HERMES, 'hermes-box')], [enrolledOf(HERMES, 'hermes-box', { projectIds: ['p'] })])),
       'No worker is called ghost. This home’s workers: hermes-box; or the home.',
     )
-    // A worker that works on any project it is given isn't said to be off this one.
-    const anyProject = { ...enrolledOf(OTHER, 'any-box'), anyProject: true }
-    assert.include(said(platform([], [anyProject])), 'any-box (connected)')
-    assert.notInclude(said(platform([], [anyProject])), 'not on')
+  })
+
+  it('judges whether a worker may work on the project by the home’s grant, even one whose agents run for any project', () => {
+    const wildcard = { ...enrolledOf(OTHER, 'any-box'), anyProject: true }
+    const answer = (enrolled: EnrolledWorkerState, said: string) => {
+      const where = whereaboutsOf(platform([], [enrolled]), 'p', said, 'althar')
+      return where.kind === 'refused' ? where.message : where.kind
+    }
+    // Not granted this project: the home won't run it there, so it is said to be off it, by name and in the roster.
+    assert.include(answer(wildcard, 'any-box'), 'any-box is connected, but isn’t allowed to work on althar.')
+    assert.include(answer(wildcard, 'ghost'), 'any-box (connected, not on althar)')
+    // Granted it, it may: it hasn't offered its agents for it yet.
+    const grantedOne = { ...wildcard, projectIds: ['p'] }
+    assert.include(answer(grantedOne, 'any-box'), 'any-box is connected and may work on althar, but hasn’t offered any agent for it yet.')
+    assert.include(answer(grantedOne, 'ghost'), 'any-box (connected)')
+    assert.notInclude(answer(grantedOne, 'ghost'), 'not on')
+  })
+
+  it('takes an exact id over any other name, and refuses a name or end of id that more than one worker answers to', () => {
+    const where = (list: ReadonlyArray<ProjectWorker>, said: string, enrolled?: ReadonlyArray<EnrolledWorkerState>) => {
+      const found = whereaboutsOf(platform(list, enrolled), 'p', said, 'althar')
+      return found.kind === 'worker' ? found.worker.workerId : found.kind === 'refused' ? found.message : found.kind
+    }
+    // A worker named with another's id, listed first, doesn't take a placement addressed to that id.
+    assert.strictEqual(where([worker(HERMES, OTHER), worker(OTHER, 'runner-2')], OTHER), OTHER)
+    // Two workers of the same name: neither is picked, and both ids are given to choose by.
+    assert.strictEqual(
+      where([worker(HERMES, 'box'), worker(OTHER, 'Box')], 'box'),
+      `More than one worker answers to box: box (${HERMES}), Box (${OTHER}). Name the one you mean by its id.`,
+    )
+    assert.strictEqual(where([worker(HERMES, 'box'), worker(OTHER, 'Box')], OTHER), OTHER)
+    // Nor two whose ids end alike, nor one in the project's list and one only in the home's ledger.
+    const ending = ['wrk_' + 'a'.repeat(26) + '123456', 'wrk_' + 'b'.repeat(26) + '123456']
+    assert.include(
+      where(
+        ending.map((id, at) => worker(id, `w${at}`)),
+        '123456',
+      ),
+      'More than one worker answers to 123456',
+    )
+    assert.include(
+      where([worker(HERMES, 'box')], 'box', [
+        enrolledOf(HERMES, 'box', { projectIds: ['p'] }),
+        enrolledOf(AWAY, 'box', { connected: false }),
+      ]),
+      `${HERMES}`,
+    )
+    assert.include(
+      where([worker(HERMES, 'box')], 'box', [
+        enrolledOf(HERMES, 'box', { projectIds: ['p'] }),
+        enrolledOf(AWAY, 'box', { connected: false }),
+      ]),
+      'More than one worker answers to box',
+    )
   })
 })
 
@@ -371,9 +522,14 @@ describe('what a failed tool tells its agent (toolRefusal.ts)', () => {
       Effect.gen(function* () {
         const { coordinator, context } = yield* connected(undefined)
         const invalid = new ApiError({ reason: 'Invalid', message: 'This task has started already, so where it runs can’t change now.' })
+        // A credential in a recognised error's words, or in a tool's own refusal, is taken out before the agent reads it.
+        const leaky = new ApiError({ reason: 'Invalid', message: 'The host said: token ghp_abcdefghijklmnopqrstuvwxyz is bad.' })
+        const refusedLeaky = new ToolRefused({ message: 'Connect with Bearer sk-abcdefghijklmnop0123 again.' })
         yield* Context.get(context, ToolServer).serve('coordinator', [
           { name: 'fails_in_runtime', description: 'Fails.', input: { type: 'object' }, call: () => Effect.fail(invalid as never) },
           { name: 'fails_silently', description: 'Fails.', input: { type: 'object' }, call: () => Effect.die('gone') },
+          { name: 'fails_leaking', description: 'Fails.', input: { type: 'object' }, call: () => Effect.fail(leaky as never) },
+          { name: 'refuses_leaking', description: 'Fails.', input: { type: 'object' }, call: () => Effect.fail(refusedLeaky) },
         ])
         const said = (name: string) => callToolWhole(coordinator, name, {}).pipe(Effect.provideContext(context))
         const failed = yield* said('fails_in_runtime')
@@ -382,6 +538,20 @@ describe('what a failed tool tells its agent (toolRefusal.ts)', () => {
         assert.deepStrictEqual((yield* said('fails_silently')).content, [
           { type: 'text', text: 'Althar could not do that, and what it did is in its log. Try again, or tell the person.' },
         ])
+        assert.deepStrictEqual((yield* said('fails_leaking')).content, [{ type: 'text', text: 'The host said: token [REDACTED] is bad.' }])
+        assert.deepStrictEqual((yield* said('refuses_leaking')).content, [{ type: 'text', text: 'Connect with Bearer [REDACTED] again.' }])
+      }),
+    ),
+  )
+
+  it.live('reaches the agent from an errand tool whose store fails, with why', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { coordinator, context } = yield* connected(undefined)
+        // The errands' table gone from under it: a typed failure inside a real errand tool, not a refusal of its own.
+        yield* Context.get(context, SqlClient.SqlClient)`ALTER TABLE errands RENAME TO errands_gone`
+        const said = yield* callTool(coordinator, 'read_errands', {}).pipe(Effect.provideContext(context))
+        assert.match(said, /^Althar could not keep or read the errand: .+ Try again, or tell the person\.$/su)
       }),
     ),
   )

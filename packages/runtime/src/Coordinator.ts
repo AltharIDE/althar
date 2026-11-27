@@ -1294,8 +1294,35 @@ export class Coordinator extends Context.Service<
        */
       const heldTasks = new Set<string>()
 
-      /** Where a task drafted with runs_on runs, until its plan comes: propose_plan places its plan there, unless it says another. */
-      const placedDrafts = new Map<string, Placing>()
+      /**
+       * Where a task drafted with runs_on runs, kept with the task as a fact of its own (`task.draft_placed`), so it holds
+       * through a restart: its first plan is placed there, unless propose_plan says another. A plan after it keeps where the
+       * one it replaces was placed, which the person may have changed on its card since.
+       */
+      const placeDraft = (projectId: string, taskId: string, placing: Placing) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ revision: number }>`SELECT revision FROM tasks WHERE id = ${taskId}`
+          yield* fact({
+            projectId: projectId as ProjectId,
+            aggregateType: 'task',
+            aggregateId: taskId,
+            revision: task?.revision ?? 1,
+            type: 'task.draft_placed',
+            payload: { runsOn: placing.runsOn, name: placing.name },
+            actorId: instance.coordinatorId,
+          })
+        })
+      const draftPlacing = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ runsOn: string | null; name: string | null }>`
+            SELECT json_extract(e.payload, '$.runsOn') AS runs_on, json_extract(e.payload, '$.name') AS name FROM record_events e
+            WHERE e.aggregate_type = 'task' AND e.aggregate_id = ${taskId} AND e.type = 'task.draft_placed'
+              AND NOT EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = ${taskId})
+            ORDER BY e.sequence DESC LIMIT 1`
+          return row === undefined ? undefined : ({ runsOn: row.runsOn, name: row.name ?? 'the home' } satisfies Placing)
+        })
 
       /** Where an agent said a task runs, as its plan keeps it (Plans.place): a worker's id, `auto`, or null for the home; refused with why. */
       const placingOf = (projectId: string, said: string) =>
@@ -1368,7 +1395,7 @@ export class Coordinator extends Context.Service<
           // Where it runs, found first, so a worker that can't be used drafts nothing.
           const placing = drafted.runs_on === undefined ? undefined : yield* placingOf(access.projectId, drafted.runs_on)
           const { created, issues: tied } = yield* drafting(access, drafted)
-          if (placing !== undefined) placedDrafts.set(created.taskId, placing)
+          if (placing !== undefined) yield* placeDraft(access.projectId, created.taskId, placing)
           if (access.role === 'coordinator') {
             draftedThisTurn.set(access.threadId, (draftedThisTurn.get(access.threadId) ?? new Map()).set(created.taskId, created.slug))
             yield* redraft(access.threadId, (drafts) =>
@@ -1464,7 +1491,8 @@ export class Coordinator extends Context.Service<
             here: true,
             worksIn,
             ...(drafted.works_in_why === undefined ? {} : { worksInWhy: drafted.works_in_why }),
-            ...(placing === undefined ? {} : { runsOn: placing.runsOn }),
+            // Placed on a worker, it runs there: nothing of it still goes up when it is done.
+            ...(placing === undefined || placing.runsOn === null ? {} : { runsOn: placing.runsOn, homeOnly: false }),
           })
           const runsLine = placing === undefined ? '' : ` It runs on ${placing.name}.`
           if (byLead) {
@@ -1913,7 +1941,8 @@ export class Coordinator extends Context.Service<
               message: `${task.slug} has started already; message its lead instead${proposed.runs_on === undefined ? '' : ', or move it with change_part (workspace, runs_on)'}.`,
             })
           // Where it runs: as said now, else as it was drafted; found before anything changes, so a worker that can't be used plans nothing.
-          const placing = proposed.runs_on === undefined ? placedDrafts.get(task.id) : yield* placingOf(access.projectId, proposed.runs_on)
+          const placing =
+            proposed.runs_on === undefined ? yield* draftPlacing(task.id) : yield* placingOf(access.projectId, proposed.runs_on)
           // A lead plans the tasks it drafted; the coordinator any.
           const parent = parentOf(access)
           if (parent !== null) {
@@ -1989,7 +2018,6 @@ export class Coordinator extends Context.Service<
             ...(heldWhileDrafted ? { held: true } : {}),
             ...(placing === undefined ? {} : { runsOn: placing.runsOn }),
           })
-          placedDrafts.delete(task.id)
           // Held as it was being proposed: held now.
           if (!heldWhileDrafted && heldTasks.delete(task.id)) yield* plans.hold(planId, instance.personId)
           // Planned from a preset: its parts replace the plan's, and its card names it.

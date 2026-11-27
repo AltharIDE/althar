@@ -20,7 +20,7 @@ import { change, fact } from './records'
 import type { PlanStep } from './runRecords'
 import type { Sessions } from './Sessions'
 import { addItem } from './threads'
-import { workerRequirementsOf } from './workerRequirements'
+import { homeOnlyOf, workerRequirementsOf } from './workerRequirements'
 
 /*
  * Moving a task between the home and its workers, and between workers (ADR-103), from its ⋯ menu: between its lead's
@@ -144,6 +144,7 @@ export const makeTaskPlaces = ({ sessions }: { readonly sessions: Sessions['Serv
         readonly steps: ReadonlyArray<PlanStep>
         readonly worksIn?: 'worktree' | 'checkout'
         readonly here?: boolean
+        readonly homeOnly?: boolean
         readonly reads?: boolean
         readonly movingTo?: MovingTo
       }
@@ -208,7 +209,7 @@ export const makeTaskPlaces = ({ sessions }: { readonly sessions: Sessions['Serv
           : parameters.steps.map((step) => (step.key === 'implement' ? { ...step, agentId, model } : step))
       if (input.to !== 'home') {
         const requirements = yield* workerRequirementsOf(input.taskId, {
-          homeOnly: parameters.here === true,
+          homeOnly: homeOnlyOf(parameters),
           readOnly: parameters.reads === true,
         })
         const kept = workerPlanUnfit(requirements, parameters.worksIn, steps)
