@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 
-import { Effect } from 'effect'
+import { Clock, Effect } from 'effect'
 
 /*
  * Where something an agent left running answers, found from the machine, not
@@ -88,38 +88,70 @@ export const listenersOfNetstat = (output: string): ReadonlyArray<Listener> =>
     return reachableHere(address) ? [{ pid, port }] : []
   })
 
+/** How a command the lookup ran went: which, how long it took, and why it gave nothing where it didn't. */
+export interface Ran {
+  readonly command: string
+  readonly ms: number
+  /** Null where it gave what it printed. */
+  readonly failed: string | null
+}
+
 /** What a command printed, or null where it can't be run or fails: not having it is no reason to stop. */
-const printed = (file: string, args: ReadonlyArray<string>): Effect.Effect<string | null> =>
-  Effect.callback<string | null>((resume) => {
-    try {
-      execFile(file, [...args], { timeout: 10_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (error, stdout) => {
-        // `lsof` exits 1 where it finds nothing.
-        resume(Effect.succeed(error === null || (typeof error.code === 'number' && stdout !== '') ? stdout : null))
-      })
-    } catch {
-      // Not allowed to run it, as in a sandbox.
-      resume(Effect.succeed(null))
-    }
+const printedRan = (file: string, args: ReadonlyArray<string>): Effect.Effect<{ readonly out: string | null; readonly ran: Ran }> =>
+  Effect.gen(function* () {
+    const began = yield* Clock.currentTimeMillis
+    const { out, failed } = yield* Effect.callback<{ readonly out: string | null; readonly failed: string | null }>((resume) => {
+      try {
+        execFile(file, [...args], { timeout: 10_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (error, stdout) => {
+          if (error === null) return resume(Effect.succeed({ out: stdout, failed: null }))
+          // `lsof` exits 1 where it finds nothing. Its time says where it timed out.
+          const kept = typeof error.code === 'number' && stdout !== ''
+          resume(Effect.succeed(kept ? { out: stdout, failed: null } : { out: null, failed: error.message.slice(0, 300) }))
+        })
+      } catch (error) {
+        // Not allowed to run it, as in a sandbox.
+        resume(Effect.succeed({ out: null, failed: `couldn't run: ${String(error)}` }))
+      }
+    })
+    return { out, ran: { command: file, ms: (yield* Clock.currentTimeMillis) - began, failed } }
   })
 
-/** Every process and its parent. */
-export const processes = (windows = process.platform === 'win32'): Effect.Effect<ReadonlyMap<number, number>> =>
+const printed = (file: string, args: ReadonlyArray<string>): Effect.Effect<string | null> =>
+  Effect.map(printedRan(file, args), (result) => result.out)
+
+/**
+ * One listing a lookup read, as soon as it read it: a lookup cut short still
+ * says what it had. `parents` are each process and its parent, `listening`
+ * every port something listened on with its process.
+ */
+export type PortsPart =
+  | { readonly listing: 'processes'; readonly ran: ReadonlyArray<Ran>; readonly parents: ReadonlyArray<readonly [number, number]> }
+  | { readonly listing: 'listeners'; readonly ran: ReadonlyArray<Ran>; readonly listening: ReadonlyArray<Listener> }
+
+const processesRan = (windows: boolean) =>
   (windows
-    ? printed('powershell', [
+    ? printedRan('powershell', [
         '-NoProfile',
         '-Command',
         'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }',
       ])
-    : printed('ps', ['-A', '-o', 'pid=,ppid='])
-  ).pipe(Effect.map((listing) => (listing === null ? new Map<number, number>() : parentsOf(listing))))
+    : printedRan('ps', ['-A', '-o', 'pid=,ppid='])
+  ).pipe(Effect.map(({ out, ran }) => ({ parents: out === null ? new Map<number, number>() : parentsOf(out), ran: [ran] })))
 
-/** Every TCP port something on this machine listens on, with its process. */
-export const listeners = (windows = process.platform === 'win32'): Effect.Effect<ReadonlyArray<Listener>> =>
+/** Every process and its parent. */
+export const processes = (windows = process.platform === 'win32'): Effect.Effect<ReadonlyMap<number, number>> =>
+  Effect.map(processesRan(windows), (result) => result.parents)
+
+const listenersRan = (windows: boolean): Effect.Effect<{ readonly listening: ReadonlyArray<Listener>; readonly ran: ReadonlyArray<Ran> }> =>
   Effect.gen(function* () {
-    if (windows) return listenersOfNetstat((yield* printed('netstat', ['-ano', '-p', 'tcp'])) ?? '')
-    const lsof = yield* printed('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-F', 'pn'])
-    if (lsof !== null) return listenersOfLsof(lsof)
-    return listenersOfSs((yield* printed('ss', ['-H', '-ltnp'])) ?? '')
+    if (windows) {
+      const netstat = yield* printedRan('netstat', ['-ano', '-p', 'tcp'])
+      return { listening: listenersOfNetstat(netstat.out ?? ''), ran: [netstat.ran] }
+    }
+    const lsof = yield* printedRan('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-F', 'pn'])
+    if (lsof.out !== null) return { listening: listenersOfLsof(lsof.out), ran: [lsof.ran] }
+    const ss = yield* printedRan('ss', ['-H', '-ltnp'])
+    return { listening: listenersOfSs(ss.out ?? ''), ran: [lsof.ran, ss.ran] }
   })
 
 /** The processes that hold a file open: the one a background command's output goes to is held by its shell. Nothing where `lsof` can't say. */
@@ -135,17 +167,62 @@ export const holding = (path: string): Effect.Effect<ReadonlyArray<number>> =>
         ),
       )
 
+/**
+ * What one lookup of the ports below `roots` saw: each process the machine
+ * listed with its parent, the tree they make from the roots, every port
+ * something listened on, the ports in the tree, and the commands it ran.
+ * Kept for whoever watches the lookups (`RuntimeOptions.serving`), as a test
+ * does to say what it saw.
+ */
+export interface PortsSeen {
+  readonly roots: ReadonlyArray<number>
+  readonly parents: ReadonlyArray<readonly [number, number]>
+  readonly tree: ReadonlyArray<number>
+  readonly listening: ReadonlyArray<Listener>
+  readonly ports: ReadonlyArray<number>
+  readonly ran: ReadonlyArray<Ran>
+}
+
+/**
+ * The ports the processes in the trees of `roots` listen on, in the order the
+ * machine lists them, with what the lookup saw; `told` hears each listing as
+ * it is read.
+ */
+export const portsSeenBelow = (
+  roots: ReadonlyArray<number>,
+  windows = process.platform === 'win32',
+  told: (part: PortsPart) => void = () => undefined,
+): Effect.Effect<PortsSeen> =>
+  Effect.gen(function* () {
+    if (roots.length === 0) return { roots, parents: [], tree: [], listening: [], ports: [], ran: [] }
+    // The two listings don't depend on each other, and every agent turn waits on them: read them side by side.
+    const [parents, listening] = yield* Effect.all(
+      [
+        Effect.tap(processesRan(windows), ({ parents: all, ran }) =>
+          Effect.sync(() => told({ listing: 'processes', ran, parents: [...all] })),
+        ),
+        Effect.tap(listenersRan(windows), ({ listening: all, ran }) =>
+          Effect.sync(() => told({ listing: 'listeners', ran, listening: all })),
+        ),
+      ],
+      { concurrency: 'unbounded' },
+    )
+    const tree = treeOf(parents.parents, roots)
+    const ports: Array<number> = []
+    for (const { pid, port } of listening.listening) if (tree.has(pid) && !ports.includes(port)) ports.push(port)
+    return {
+      roots,
+      parents: [...parents.parents],
+      tree: [...tree],
+      listening: listening.listening,
+      ports,
+      ran: [...parents.ran, ...listening.ran],
+    }
+  })
+
 /** The ports the processes in the trees of `roots` listen on, in the order the machine lists them. */
 export const portsBelow = (roots: ReadonlyArray<number>): Effect.Effect<ReadonlyArray<number>> =>
-  Effect.gen(function* () {
-    if (roots.length === 0) return []
-    // The two listings don't depend on each other, and every agent turn waits on them: read them side by side.
-    const [parents, listening] = yield* Effect.all([processes(), listeners()], { concurrency: 'unbounded' })
-    const tree = treeOf(parents, roots)
-    const ports: Array<number> = []
-    for (const { pid, port } of listening) if (tree.has(pid) && !ports.includes(port)) ports.push(port)
-    return ports
-  })
+  Effect.map(portsSeenBelow(roots), (seen) => seen.ports)
 
 /**
  * The port one is found to listen on, from what listens in the tree it can be
@@ -168,6 +245,41 @@ export const portFor = (input: {
   const fresh = free.filter((port) => !input.known.has(port))
   return input.rivals === 0 && fresh.length === 1 ? (fresh[0] ?? null) : null
 }
+
+/**
+ * One look for where something an agent left running answers: what its tree
+ * listened on as the turn began (`before`; `seen` null where that lookup ran
+ * out of time, `parts` what it had read by then); one look for one command's
+ * port, with all `portFor` was given and what it answered; or why the looks
+ * for one command stopped (`stopped`).
+ */
+export type PortLook =
+  | {
+      readonly kind: 'before'
+      readonly at: number
+      readonly agent: number | null
+      readonly seen: PortsSeen | null
+      readonly parts: ReadonlyArray<PortsPart>
+    }
+  | {
+      readonly kind: 'look'
+      readonly at: number
+      readonly id: string
+      readonly outputPath: string | null
+      readonly held: ReadonlyArray<number>
+      readonly seen: PortsSeen
+      readonly known: ReadonlyArray<number>
+      readonly claimed: ReadonlyArray<number>
+      readonly rivals: number
+      readonly own: boolean
+      readonly port: number | null
+    }
+  | {
+      readonly kind: 'stopped'
+      readonly at: number
+      readonly id: string
+      readonly why: 'gone or ended' | 'found in its output' | 'out of tries'
+    }
 
 /** Where a server on `port` answers, as a browser opens it. */
 export const localAddress = (port: number) => `http://localhost:${port}/`

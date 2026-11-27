@@ -17,6 +17,7 @@ import {
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import type { Machine } from './atOnce'
+import type { PortLook } from './ports'
 import type { PressureReading } from './resourcePressure'
 import { CliUnanswered, UnknownAgent } from './errors'
 import type { OnDevice } from './Installs'
@@ -239,6 +240,8 @@ export interface RuntimeOptions {
   readonly zone?: () => string
   /** How Althar tells whether an agent's service answers, and how long a step waits before it tries one that failed again (`Connectivity.ts`). */
   readonly connectivity?: ConnectivityOptions
+  /** Told each look for where something an agent left running answers from its port (`ports.ts`), as a test is, to say what it saw. */
+  readonly serving?: (look: PortLook) => void
 }
 
 /** Each is the default unless a test says otherwise. */

@@ -3,7 +3,18 @@ import { createServer } from 'node:net'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { listenersOfLsof, listenersOfNetstat, listenersOfSs, localAddress, parentsOf, portFor, portsBelow, treeOf } from '../src/ports'
+import {
+  listenersOfLsof,
+  listenersOfNetstat,
+  listenersOfSs,
+  localAddress,
+  parentsOf,
+  portFor,
+  portsBelow,
+  type PortsPart,
+  portsSeenBelow,
+  treeOf,
+} from '../src/ports'
 
 /*
  * Where something left running listens, found from the machine: its
@@ -102,6 +113,43 @@ describe.skipIf(process.platform === 'win32')('a server listening on this machin
         assert.include(yield* portsBelow([process.ppid]), port)
         assert.deepStrictEqual(yield* portsBelow([]), [])
         assert.notInclude(yield* portsBelow([2_147_483_000]), port)
+      } finally {
+        server.close()
+      }
+    }),
+  )
+  it.effect('says what each lookup saw and ran, and hears each listing as it is read, Windows’ commands too', () =>
+    Effect.gen(function* () {
+      const server = createServer()
+      yield* Effect.promise(() => new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve)))
+      try {
+        const address = server.address()
+        const port = typeof address === 'object' && address !== null ? address.port : -1
+        const parts: Array<PortsPart> = []
+        const seen = yield* portsSeenBelow([process.pid], false, (part) => void parts.push(part))
+        assert.include(seen.ports, port)
+        assert.include(seen.tree, process.pid)
+        assert.deepInclude(seen.listening, { pid: process.pid, port })
+        assert.include(
+          seen.ran.map((one) => one.command),
+          'ps',
+        )
+        assert.sameMembers(
+          parts.map((part) => part.listing),
+          ['processes', 'listeners'],
+        )
+        // Windows' own commands, wherever they run: each said, with how it went.
+        const windows: Array<PortsPart> = []
+        const there = yield* portsSeenBelow([process.pid], true, (part) => void windows.push(part))
+        assert.deepStrictEqual(
+          there.ran.map((one) => one.command),
+          ['powershell', 'netstat'],
+        )
+        assert.sameMembers(
+          windows.map((part) => part.listing),
+          ['processes', 'listeners'],
+        )
+        assert.deepStrictEqual(yield* portsSeenBelow([]), { roots: [], parents: [], tree: [], listening: [], ports: [], ran: [] })
       } finally {
         server.close()
       }
