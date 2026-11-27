@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type HomeWorker } from '@althar/contracts'
+import { type AgentStatus, ApiError, type HomeWorker } from '@althar/contracts'
 import { EdgeSpot } from '@althar/ui'
 
 import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
@@ -499,6 +499,36 @@ describe('the Settings tab', () => {
     expect(within(install).getByText(/from GitHub, about 45 MB/)).toBeTruthy()
     await userEvent.click(within(install).getByRole('button', { name: 'Download OpenCode' }))
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
+  })
+
+  it('never sends anyone to install Antigravity themselves: its download, or that there is no build for this computer', async () => {
+    const codex = agents.find((agent) => agent.id === 'codex')
+    if (codex === undefined) throw new Error('No Codex in the fixtures')
+    const antigravity: AgentStatus = {
+      ...codex,
+      id: 'antigravity',
+      name: 'Google Antigravity',
+      installed: false,
+      accounts: [],
+      guide: null,
+      download: { size: '125 MB', installing: false, pinned: '1.3.0' },
+    }
+    let here = antigravity
+    const status = vi.fn(async () => ({ apiVersion: 1, appVersion: '0.0.0', agents: [...agents, here] }))
+    const { client } = fakeClient({ status })
+    withServices(<Settings />, client, fakeHost())
+    await userEvent.click(await screen.findByRole('tab', { name: /Google Antigravity/ }))
+    const install = screen.getByRole('region', { name: 'Google Antigravity isn’t on this Mac' })
+    expect(within(install).getByText('Google Antigravity 1.3.0, from Google, about 125 MB.')).toBeTruthy()
+    expect(within(install).queryByText(/installer/)).toBeNull()
+    await userEvent.click(within(install).getByRole('button', { name: 'Download Google Antigravity' }))
+    expect(client.installAgent).toHaveBeenCalledWith('antigravity')
+    // Where Google builds none for this computer, it says so, and offers nothing to press.
+    here = { ...antigravity, download: null, noBuild: true }
+    await userEvent.click(within(install).getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(within(install).getByText(/There’s no build of Google Antigravity for this Mac/)).toBeTruthy())
+    expect(within(install).queryByText(/installer/)).toBeNull()
+    expect(within(install).queryByRole('button')).toBeNull()
   })
 
   it('looks again at once for an agent the person installed themselves', async () => {

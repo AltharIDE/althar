@@ -940,6 +940,15 @@ describe('the start', () => {
     })
     // Here, with no page to open: none offered.
     expect(runtimeEntry({ ...antigravity, installed: true })).toMatchObject({ id: 'antigravity', guide: false })
+    // Where Google builds none for this computer: it says so, with nothing to download.
+    expect(runtimeEntry({ ...antigravity, download: null, noBuild: true })).toEqual({
+      id: 'antigravity',
+      name: 'Google Antigravity',
+      brand: expect.any(String),
+      guide: false,
+      state: RuntimeState.Missing,
+      noBuild: true,
+    })
   })
 
   it('opens an agent’s page on installing it, where it has one', () => {
