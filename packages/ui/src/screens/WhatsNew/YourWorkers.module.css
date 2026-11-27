@@ -16,9 +16,13 @@
   --yw-ink-3: var(--t-3);
   --yw-orbit: var(--n-5);
   --yw-live: var(--live);
-  --yw-lid: var(--n-5);
-  --yw-base: var(--n-4);
+  --yw-bezel: #151413;
+  --yw-alu: var(--n-4);
+  --yw-alu-lo: var(--n-5);
+  --yw-alu-hi: var(--n-1);
+  --yw-shadow: #1c1a17;
   --yw-screen: var(--paper);
+  --yw-menu: var(--n-2);
   --yw-chip: var(--n-2);
   --yw-term: var(--term);
   --yw-term-edge: var(--term-raised);
@@ -75,7 +79,7 @@
   --z: clamp(0, (var(--t) - 0.4) / 0.2, 1);
   --e: calc(var(--z) * var(--z) * (3 - 2 * var(--z)));
   transform-origin: 0 0;
-  transform: translate(500px, 284px) scale(calc(2.35 - 1.35 * var(--e))) translate(calc(-622px + 122px * var(--e)), -284px);
+  transform: translate(500px, 284px) scale(calc(2.2 - 1.2 * var(--e))) translate(calc(-634px + 134px * var(--e)), -284px);
 }
 
 /* ---- the rings, drawing round as they come ---- */
@@ -236,25 +240,49 @@
   fill: var(--yw-term-live);
 }
 
-/* ---- this computer: a laptop, the task open on it, then the count ---- */
+/* ---- this computer: a MacBook, the task open on it, then the count ---- */
 
-.lid,
-.dot {
-  fill: var(--yw-lid);
+.lid {
+  fill: var(--yw-bezel);
+  stroke: var(--yw-alu-lo);
+  stroke-width: 0.9;
 }
 .screen {
   fill: var(--yw-screen);
 }
-.base {
-  fill: var(--yw-base);
+.menuBar {
+  fill: var(--yw-menu);
 }
-.chip,
+.menuApp,
+.menuItems {
+  font-family: var(--yw-sans);
+  font-size: 3.1px;
+}
+.menuApp {
+  font-weight: 650;
+  fill: var(--yw-ink);
+}
+.menuItems {
+  fill: var(--yw-ink-2);
+}
+.notch {
+  fill: var(--yw-bezel);
+}
+.camera {
+  fill: #2c2f3d;
+}
+.hinge {
+  fill: var(--yw-bezel);
+  opacity: 0.8;
+}
+.baseLit {
+  fill: var(--yw-alu-hi);
+}
+.thumb {
+  fill: var(--yw-alu-lo);
+}
 .said {
   fill: var(--yw-chip);
-}
-.chipText {
-  font-size: 4.2px;
-  fill: var(--yw-ink-3);
 }
 .task {
   font-family: var(--yw-sans);
@@ -298,18 +326,6 @@
   font-size: 5.6px;
   letter-spacing: 0.14em;
   fill: var(--yw-ink-3);
-}
-.plate {
-  fill: var(--yw-ground);
-}
-.here {
-  font-size: 9px;
-  letter-spacing: 0.16em;
-  fill: var(--yw-ink-2);
-  paint-order: stroke;
-  stroke: var(--yw-ground);
-  stroke-width: 4px;
-  stroke-linejoin: round;
 }
 
 @media (prefers-reduced-motion: reduce) {

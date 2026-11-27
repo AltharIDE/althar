@@ -718,9 +718,13 @@
   --yw-ink-3: var(--t3);
   --yw-orbit: rgba(255, 240, 215, 0.17);
   --yw-live: var(--live);
-  --yw-lid: #3b3732;
-  --yw-base: #2c2925;
+  --yw-bezel: #0b0a09;
+  --yw-alu: #3d3a36;
+  --yw-alu-lo: #2a2825;
+  --yw-alu-hi: #6b665e;
+  --yw-shadow: #000;
   --yw-screen: var(--win);
+  --yw-menu: var(--bar);
   --yw-chip: var(--raised);
   --yw-term: #24211d;
   --yw-term-edge: rgba(255, 240, 215, 0.22);

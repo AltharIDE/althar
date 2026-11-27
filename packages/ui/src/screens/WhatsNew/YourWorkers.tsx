@@ -85,8 +85,12 @@ const NODES: readonly Node[] = RINGS.flatMap((ring, r) =>
   }),
 )
 const ONE = NODES[0]!
+/** This computer, a MacBook: its lid, the screen inset in it, and the base under it. */
+const LID = { x: HOME.x - 68, y: HOME.y - 54, w: 136, h: 90 } as const
+const SCREEN = { x: LID.x + 3.5, y: LID.y + 3.5, w: LID.w - 7, h: LID.h - 7.5 } as const
+const BASE = { x: HOME.x - 84, y: LID.y + LID.h + 1.5, w: 168, h: 6.2 } as const
 /** The laptop's edge, where its wires leave it. */
-const EDGE = HOME.x + 66
+const EDGE = HOME.x + 70
 /** The task's pill, out from this computer's edge to runner-1; its commits', back. */
 const OUT = { width: 54, from: EDGE + 2, to: ONE.x - 9 - 54 } as const
 const BACK = { width: 40, from: ONE.x - 9 - 40, to: EDGE + 2 } as const
@@ -186,7 +190,8 @@ export type YourWorkersProps = RootProps<
 export function YourWorkers({ text, at, className, ...rest }: YourWorkersProps) {
   const t = { ...yourWorkersText, ...text }
   const ref = useRef<SVGSVGElement>(null)
-  const glow = `yw-glow-${useId().replace(/[^\w-]/g, '')}`
+  const id = useId().replace(/[^\w-]/g, '')
+  const [glow, shade, metal, top] = ['glow', 'shade', 'metal', 'top'].map((part) => `yw-${part}-${id}`) as [string, string, string, string]
   const { t: story, count, playing } = useStory(ref, at)
   return (
     <figure className={cx(w.figure, className)} aria-label={t.label} {...rest}>
@@ -205,6 +210,18 @@ export function YourWorkers({ text, at, className, ...rest }: YourWorkersProps) 
             <stop offset="0.45" style={{ stopColor: 'var(--yw-live)', stopOpacity: 0.06 }} />
             <stop offset="1" style={{ stopColor: 'var(--yw-live)', stopOpacity: 0 }} />
           </radialGradient>
+          <radialGradient id={shade}>
+            <stop offset="0" style={{ stopColor: 'var(--yw-shadow)', stopOpacity: 0.32 }} />
+            <stop offset="1" style={{ stopColor: 'var(--yw-shadow)', stopOpacity: 0 }} />
+          </radialGradient>
+          <linearGradient id={metal} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" style={{ stopColor: 'var(--yw-alu)' }} />
+            <stop offset="1" style={{ stopColor: 'var(--yw-alu-lo)' }} />
+          </linearGradient>
+          {/* The screen's top corners, for the menu bar along them. */}
+          <clipPath id={top}>
+            <rect x={SCREEN.x} y={SCREEN.y} width={SCREEN.w} height={SCREEN.h} rx={4.5} />
+          </clipPath>
         </defs>
         <g className={w.world}>
           {/* The light of the work, under this computer, growing as the fleet does. */}
@@ -310,57 +327,67 @@ export function YourWorkers({ text, at, className, ...rest }: YourWorkersProps) 
             ))}
           </g>
 
-          {/* This computer, at the middle: the task open on it, then how many agents are at work. */}
+          {/* This computer, at the middle: a MacBook, the task open on it, then how many agents are at work. */}
           <g className={w.mac}>
-            <rect x={HOME.x - 65} y={HOME.y - 48} width={130} height={82} rx={7} className={w.lid} />
-            <rect x={HOME.x - 60} y={HOME.y - 43} width={120} height={72} rx={3.5} className={w.screen} />
-            <rect x={HOME.x - 78} y={HOME.y + 34} width={156} height={6} rx={3} className={w.base} />
-            <g className={w.fade} style={win(-2, -1, 0.42, 0.48)}>
-              {[0, 1, 2].map((i) => (
-                <circle key={i} cx={HOME.x - 53 + i * 5} cy={HOME.y - 35} r={1.6} className={w.dot} />
-              ))}
-              <rect x={HOME.x + 26} y={HOME.y - 39.5} width={28} height={8} rx={2.5} className={w.chip} />
-              <text x={HOME.x + 40} y={HOME.y - 33.8} textAnchor="middle" className={w.chipText}>
-                This Mac
+            <ellipse cx={HOME.x} cy={BASE.y + BASE.h + 1.6} rx={96} ry={5} fill={`url(#${shade})`} />
+            {/* The lid: black glass in a thin aluminium rim, the screen inset, the notch and its camera at the top. */}
+            <rect x={LID.x} y={LID.y} width={LID.w} height={LID.h} rx={7.5} className={w.lid} />
+            <rect x={SCREEN.x} y={SCREEN.y} width={SCREEN.w} height={SCREEN.h} rx={4.5} className={w.screen} />
+            <rect x={SCREEN.x} y={SCREEN.y} width={SCREEN.w} height={6.2} className={w.menuBar} clipPath={`url(#${top})`} />
+            <text x={SCREEN.x + 4.5} y={SCREEN.y + 4.3} className={w.menuApp}>
+              Althar
+            </text>
+            {['File', 'Edit', 'View'].map((item, i) => (
+              <text key={item} x={SCREEN.x + 18 + i * 9.5} y={SCREEN.y + 4.3} className={w.menuItems}>
+                {item}
               </text>
-              <text x={HOME.x - 53} y={HOME.y - 19} className={w.task}>
+            ))}
+            <text x={SCREEN.x + SCREEN.w - 4.5} y={SCREEN.y + 4.3} textAnchor="end" className={w.menuItems}>
+              Thu 14:02
+            </text>
+            <rect x={HOME.x - 9} y={LID.y + 1} width={18} height={7.4} rx={2.2} className={w.notch} />
+            <circle cx={HOME.x} cy={LID.y + 5} r={0.85} className={w.camera} />
+            {/* The hinge, and the base: an aluminium deck, lit along its top, its thumb cut in the middle. */}
+            <rect x={LID.x + 9} y={LID.y + LID.h} width={LID.w - 18} height={1.5} className={w.hinge} />
+            <path
+              d={`M${BASE.x + 3} ${BASE.y} H${BASE.x + BASE.w - 3} Q${BASE.x + BASE.w} ${BASE.y} ${BASE.x + BASE.w} ${BASE.y + 2.2} V${BASE.y + BASE.h - 2.6} Q${BASE.x + BASE.w} ${BASE.y + BASE.h} ${BASE.x + BASE.w - 4} ${BASE.y + BASE.h} H${BASE.x + 4} Q${BASE.x} ${BASE.y + BASE.h} ${BASE.x} ${BASE.y + BASE.h - 2.6} V${BASE.y + 2.2} Q${BASE.x} ${BASE.y} ${BASE.x + 3} ${BASE.y} Z`}
+              fill={`url(#${metal})`}
+            />
+            <rect x={BASE.x + 4} y={BASE.y} width={BASE.w - 8} height={0.7} className={w.baseLit} />
+            <rect x={HOME.x - 13} y={BASE.y} width={26} height={1.9} rx={0.95} className={w.thumb} />
+
+            <g className={w.fade} style={win(-2, -1, 0.42, 0.48)}>
+              <text x={SCREEN.x + 8} y={SCREEN.y + 20} className={w.task}>
                 Partial refunds
               </text>
-              <text x={HOME.x - 53} y={HOME.y - 11} className={w.branch}>
+              <text x={SCREEN.x + 8} y={SCREEN.y + 28} className={w.branch}>
                 althar/partial-refunds
               </text>
-              <rect x={HOME.x - 22} y={HOME.y - 5} width={76} height={11} rx={4} className={w.said} />
-              <text x={HOME.x - 18} y={HOME.y + 2.3} className={w.saidText}>
+              <rect x={SCREEN.x + SCREEN.w - 84} y={SCREEN.y + 34} width={76} height={11} rx={4} className={w.said} />
+              <text x={SCREEN.x + SCREEN.w - 80} y={SCREEN.y + 41.3} className={w.saidText}>
                 Refund part of a payment.
               </text>
-              <text x={HOME.x - 53} y={HOME.y + 20} className={cx(w.status, w.fade)} style={win(-2, -1, 0.13, 0.15)}>
+              <text x={SCREEN.x + 8} y={SCREEN.y + 66} className={cx(w.status, w.fade)} style={win(-2, -1, 0.13, 0.15)}>
                 Starting on runner-1
               </text>
               <g className={w.fade} style={win(0.14, 0.16, 0.36, 0.375)}>
-                <circle cx={HOME.x - 51} cy={HOME.y + 18} r={1.9} className={w.live} />
-                <text x={HOME.x - 46} y={HOME.y + 20} className={w.status}>
+                <circle cx={SCREEN.x + 10} cy={SCREEN.y + 64} r={1.9} className={w.live} />
+                <text x={SCREEN.x + 15} y={SCREEN.y + 66} className={w.status}>
                   On runner-1
                 </text>
               </g>
-              <text x={HOME.x - 53} y={HOME.y + 20} className={cx(w.status, w.fade)} style={win(0.375, 0.39)}>
+              <text x={SCREEN.x + 8} y={SCREEN.y + 66} className={cx(w.status, w.fade)} style={win(0.375, 0.39)}>
                 <tspan className={w.ok}>✓ Finished</tspan> <tspan className={w.ok}>+31</tspan> <tspan className={w.del}>−3</tspan>
               </text>
             </g>
             <g className={w.fade} style={win(0.47, 0.53)}>
-              <text x={HOME.x} y={HOME.y + 4} textAnchor="middle" className={w.count}>
+              <text x={HOME.x} y={SCREEN.y + 50} textAnchor="middle" className={w.count}>
                 {count}
               </text>
-              <text x={HOME.x} y={HOME.y + 18} textAnchor="middle" className={w.countLabel}>
+              <text x={HOME.x} y={SCREEN.y + 63} textAnchor="middle" className={w.countLabel}>
                 AGENTS AT WORK
               </text>
             </g>
-          </g>
-          {/* Under it, its name, on a patch of the ground so the wires pass behind. */}
-          <g className={w.fade} style={win(0.46, 0.54)}>
-            <rect x={HOME.x - 30} y={HOME.y + 52} width={60} height={14} rx={4} className={w.plate} />
-            <text x={HOME.x} y={HOME.y + 62} textAnchor="middle" className={w.here}>
-              THIS MAC
-            </text>
           </g>
         </g>
       </svg>
