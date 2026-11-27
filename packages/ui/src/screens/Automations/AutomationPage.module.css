@@ -7,9 +7,9 @@
 
 .column {
   display: grid;
-  max-width: 880px;
+  max-width: var(--page-width);
   margin: 0 auto;
-  padding: 14px 40px 96px;
+  padding: 14px var(--page-inline) 96px;
 }
 
 /* ——— The bar: back to the list, and what can be done to it, kept in reach as the page scrolls ——— */
@@ -34,10 +34,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  max-width: 880px;
+  max-width: var(--page-width);
   min-height: 56px;
   margin: 0 auto;
-  padding: 10px 40px;
+  padding: 10px var(--page-inline);
   box-sizing: border-box;
 }
 

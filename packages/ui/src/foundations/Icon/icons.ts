@@ -26,6 +26,7 @@ import {
   Edit,
   EditPencil,
   Expand,
+  Flask,
   Folder,
   Frame,
   InfoCircle,
@@ -244,6 +245,8 @@ export const ICONS = {
   commit: GitCommit,
   /** What something is, explained where it is pointed at. */
   info: InfoCircle,
+  /** Still experimental: what works, but may change or have rough edges, as homes. */
+  flask: Flask,
   /** Something failed: the mark before the words that say what, in the danger colour. */
   problem: WarningCircle,
   /** Althar's own news: its tab, with what's new in an update and what's coming next. */

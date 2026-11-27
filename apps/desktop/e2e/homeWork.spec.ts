@@ -122,7 +122,7 @@ test('a home’s window shows its lead’s pictures, and says why its host refus
     writeFileSync(launcher, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(fixture)} "$@"\n`, { mode: 0o700 })
 
     // The home, over SSH, in a window of its own.
-    await page.getByRole('button', { name: 'Homes', exact: true }).click()
+    await page.getByRole('button', { name: 'Computers', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Connect a home…', exact: true }).click()
     await page.getByRole('dialog', { name: 'Your first home' }).getByRole('button', { name: 'Set one up' }).click()
     await page.getByRole('radio', { name: /^With a pairing code/ }).click()
@@ -140,7 +140,7 @@ test('a home’s window shows its lead’s pictures, and says why its host refus
     await page.getByRole('button', { name: 'Connect', exact: true }).click()
     const remote = await opened
     await remote.setViewportSize({ width: 1440, height: 900 })
-    await expect(remote.getByRole('button', { name: 'runner-1, over SSH. Homes', exact: true })).toBeVisible()
+    await expect(remote.getByRole('button', { name: 'runner-1, over SSH. Computers', exact: true })).toBeVisible()
     await remote
       .getByRole('complementary', { name: 'Projects' })
       .getByRole('button', { name: /^meridian/ })

@@ -23,7 +23,6 @@ export const workerScript = (base: string) => `${base}/althar-worker.sh`
 const text = {
   emptyAddress: 'Give its SSH address, as you would after ssh.',
   badAddress: 'That isn’t an SSH address. Use a name from your SSH config, or user@host.',
-  lasts: (minutes: number) => (minutes <= 1 ? 'a minute' : `${minutes} minutes`),
   codeFailed: 'The home couldn’t make a code.',
   noRelease: 'There’s no Althar release with workers yet.',
   newest: (newest: string | null) =>
@@ -216,7 +215,7 @@ export const setupView = (setup: WorkerSetup): WorkerSetupView => ({
     setup.check !== undefined && !setup.check.sandbox.starts && setup.check.sandbox.fix !== undefined && setup.check.allowed === undefined,
 })
 
-/** The code's way as the dialog draws it: its line and how long it lasts, being made, or why the home made none. */
+/** The code's way as the dialog draws it: its line, being made, or why the home made none. */
 export const codeView = (
   code: { readonly code: string; readonly expiresAt: number } | null,
   failed: string | null,
@@ -225,13 +224,10 @@ export const codeView = (
   base: string | null,
 ): WorkerCodeView =>
   failed !== null
-    ? { command: null, lasts: null, failed }
+    ? { command: null, failed }
     : code === null || code.expiresAt <= now || base === null
-      ? { command: null, lasts: null }
-      : {
-          command: `curl -fsSL ${workerScript(base)} | ALTHAR_RELEASE_BASE=${base} sh -s -- join '${code.code}'`,
-          lasts: text.lasts(Math.max(1, Math.round((code.expiresAt - now) / 60_000))),
-        }
+      ? { command: null }
+      : { command: `curl -fsSL ${workerScript(base)} | ALTHAR_RELEASE_BASE=${base} sh -s -- join '${code.code}'` }
 
 export interface AddWorkerModel {
   readonly way: 'ssh' | 'code'

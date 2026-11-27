@@ -167,7 +167,7 @@ const start = async (env: Readonly<Record<string, string>> = {}) => {
 }
 
 const openSetup = async (page: Page) => {
-  await page.getByRole('button', { name: 'Homes', exact: true }).click()
+  await page.getByRole('button', { name: 'Computers', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Connect a home…', exact: true }).click()
 }
 
@@ -230,7 +230,7 @@ test('sets a first home up over SSH, as steps, from what a home is to its own wi
     const opened = electronApp.waitForEvent('window', { predicate: (candidate) => candidate !== page })
     await dialog.getByRole('button', { name: 'Connect', exact: true }).click()
     const remote = await opened
-    await expect(remote.getByRole('button', { name: 'My VPS, over SSH. Homes', exact: true })).toBeVisible()
+    await expect(remote.getByRole('button', { name: 'My VPS, over SSH. Computers', exact: true })).toBeVisible()
     expect(await remote.evaluate(async () => (await window.althar.homes!.state()).connection)).toBe('connected')
     await expect.poll(() => existsSync(join(home, 'profile', 'home-setup.json'))).toBe(false)
     for (const scheme of ['light', 'dark'] as const) {
@@ -265,7 +265,7 @@ test('on the home’s window, a new project finds a repository only on GitHub, a
     const opened = electronApp.waitForEvent('window', { predicate: (candidate) => candidate !== page })
     await dialog.getByRole('button', { name: 'Connect', exact: true }).click()
     const remote = await opened
-    await expect(remote.getByRole('button', { name: 'My VPS, over SSH. Homes', exact: true })).toBeVisible()
+    await expect(remote.getByRole('button', { name: 'My VPS, over SSH. Computers', exact: true })).toBeVisible()
 
     // A new project there: GitHub connected on the home, from the clone list, with a token.
     await remote.getByRole('complementary', { name: 'Projects' }).getByRole('button', { name: 'New project' }).click()

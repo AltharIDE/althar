@@ -339,6 +339,27 @@ describe('the wait for a reply', () => {
     expect(kinds(blocksOf({ ...source(sent), reading: true, turnEnded: later }, new Map(), at))).toEqual(['you', 'turn', 'you', 'waiting'])
   })
 
+  it('lets go of the wait once the person stopped the turn on what was asked, whatever session starts next', () => {
+    const stop = items.notice({ source: 'runtime', role: 'interrupted', title: 'Interrupted by you.' }, null)
+    const thread = [items.you('Go'), items.says('Done.'), items.you('.'), stop]
+    // A new session starting, which knows of no turn ended: what was stopped isn't waited on, however long ago.
+    expect(kinds(blocksOf({ ...source(thread), reading: true, turnEnded: null }, new Map(), at, after(62_000)))).toEqual([
+      'you',
+      'turn',
+      'you',
+      'interrupted',
+    ])
+    // Asked again since, the new ask is waited on.
+    expect(kinds(blocksOf({ ...source([...thread, items.you('Again')]), reading: true }, new Map(), at))).toEqual([
+      'you',
+      'turn',
+      'you',
+      'interrupted',
+      'you',
+      'waiting',
+    ])
+  })
+
   it('has what waits after the last reply asked as the agent starts to read it, and queued where nothing will', () => {
     const thread = [items.you('Go'), items.says('Done.'), items.you('And the docs?', { state: 'queued', interrupting: false })]
     const shown = (reading: boolean) => blocksOf({ ...source(thread), reading }, new Map(), at)

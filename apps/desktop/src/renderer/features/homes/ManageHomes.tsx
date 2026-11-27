@@ -19,6 +19,7 @@ import type { HomeProjects, HomeState, HomesHost, HomesOverview, RemoteHome } fr
 import { kitInk } from '../../shared/inks'
 import { ConnectionFields, useEdit } from './EditConnection'
 import { Identity } from './ConnectHome'
+import { useExperimental } from './Experimental'
 import { homeProblem, homesUi, keyOf, type Liveness, livenessOf, openedAgo } from './useHomes'
 import s from './ManageHomes.module.css'
 
@@ -171,6 +172,7 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
   const list = useRef<HTMLUListElement>(null)
   useQuietFocus(list)
   const ownKey = here !== null && here.current.kind !== 'local' ? here.current.home.homeId : 'local'
+  const experimental = useExperimental(s.experimental)
   const open = (id: string, projectId?: string) => {
     onClose()
     void saved
@@ -199,6 +201,7 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
       }}
       actions={<Button onClick={onClose}>Done</Button>}
     >
+      {experimental}
       <ListMotion within={list} enter="grow">
         <ul className={s.homes} ref={list}>
           <li data-move="local" className={s.home}>

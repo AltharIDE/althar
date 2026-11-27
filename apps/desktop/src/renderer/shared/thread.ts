@@ -1074,7 +1074,11 @@ export const blocksOf = (
   // Between turns it is waited on only on its way to the agent, or given to it with no turn ended since: a turn that ended on it,
   // interrupted or with nothing said, has answered it as far as it will.
   const over = !onItsWay && source.turnEnded != null && askedWhen != null && Date.parse(source.turnEnded) >= Date.parse(askedWhen)
-  const waiting = startingTurn || (askedAt !== null && askedAt > lastTurn && (turnRunning || (source.reading === true && !over)))
+  // The person stopped the turn on it: answered as far as it will be, even where the session starting next knows of no turn ended.
+  const stoppedAt = blocks.findLastIndex((block) => block.kind === 'interrupted')
+  const stopped = askedAt !== null && stoppedAt > askedAt && stoppedAt > lastTurn
+  const waiting =
+    startingTurn || (askedAt !== null && askedAt > lastTurn && !stopped && (turnRunning || (source.reading === true && !over)))
   // Nor where Althar carried the step on after it, after a restart: the turn running is a later one that has said nothing yet.
   const runningTurn = turnRunning && !waiting && restartedAt < lastTurn ? lastTurn : -1
   // What an agent says after its step's result, closing its turn, folds with the work that led to it. A run it starts on its own after, with tool calls or a plan, is work of its own: it folds under its own time, and its last message shows.

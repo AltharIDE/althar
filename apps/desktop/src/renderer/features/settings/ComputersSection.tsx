@@ -21,6 +21,7 @@ import { useNow } from '../../shared/time'
 import { usePlaces } from '../../shared/usePlaces'
 import { computerWorkerOf, useRemoveWorker, useWorkerProjects, useWorkers, useWorkerSignIn } from '../../shared/useWorkers'
 import { useAddWorker } from './useAddWorker'
+import { homesUi, useHomesUi } from '../homes/useHomes'
 import { useWindowHome } from '../homes/windowHome'
 import { PhonesDialog } from '../phones/PhonesDialog'
 import { phoneOf, usePairedPhones } from '../phones/usePairing'
@@ -48,7 +49,8 @@ import { device } from '../../shared/device'
  * set up at. A home that takes workers only by its operator's certificates
  * gets the commands that add one by hand.
  * Under them, the phones paired with the home, each with Remove, and Pair a
- * phone…, the homes menu's own dialog.
+ * phone…, the Computers menu's own dialog. Add a worker…, from that menu,
+ * opens its dialog here.
  */
 
 export function ComputersSection({
@@ -82,6 +84,13 @@ export function ComputersSection({
   const signing = useWorkerSignIn()
   const atOnce = useAgentsAtOnce()
   const [adding, setAdding] = useState(false)
+  // Add a worker…, from the Computers menu: open here as the section shows.
+  const { addWorker } = useHomesUi()
+  useEffect(() => {
+    if (!addWorker) return
+    homesUi.set({ addWorker: false })
+    setAdding(true)
+  }, [addWorker])
   const [pairing, setPairing] = useState(false)
   const phones = usePairedPhones()
   const now = useNow(false)

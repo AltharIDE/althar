@@ -1,9 +1,11 @@
 import { useEffect } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { Button, ChromeButton, chord, keys, Menu, MenuGroup, MenuItem, MenuSeparator, Spinner, Icon } from '@althar/ui'
 
 import type { HomeState, HomesHost, HomesOverview, RemoteHome } from '../../../homes'
 import type { Host } from '../../data/services'
 import { useServices } from '../../data/services'
+import { useWorkers } from '../../shared/useWorkers'
 import { ConnectHome } from './ConnectHome'
 import { ManageHomes } from './ManageHomes'
 import { PhonesDialog } from '../phones/PhonesDialog'
@@ -14,14 +16,26 @@ import s from './Homes.module.css'
 /*
  * The window's home is one chip at the end of its bar: in a home's window,
  * its name; in this computer's, a plug, including before the first connection.
- * Its menu is the chooser: this computer and each
- * home, Connect a home…, Manage homes…, then Pair a phone… for the window's
- * home. A dropped connection shows in the
+ * Its menu, Computers, is every computer Althar works with: this computer and
+ * each home to open, Connect a home…, Manage homes…; Add a worker… and Manage
+ * workers…, in Settings › Computers, where the window can reach it; then Pair
+ * a phone… for the window's home. A dropped connection shows in the
  * chip itself, with Reconnect beside it: the window stays as it was,
  * readable, and nothing covers it.
  */
 
 const SHORTCUT = chord(keys.mod, keys.shift, 'H')
+
+/** The menu's name, and the chip's in this computer's window. */
+const MENU = 'Computers'
+
+/** The home's workers, from the menu: adding one, and Settings › Computers, where they are. Where the window has none to reach, not offered. */
+export interface MenuWorkers {
+  readonly onAdd: () => void
+  readonly onManage: () => void
+  /** It has workers already, so there are some to manage. */
+  readonly any: boolean
+}
 
 /** The menu of homes, from the chip. */
 function HomesMenu({
@@ -29,11 +43,13 @@ function HomesMenu({
   here,
   overview,
   trigger,
+  workers,
 }: {
   homes: HomesHost
   here: HomeState
   overview: HomesOverview | null
   trigger: React.ReactElement
+  workers?: MenuWorkers | undefined
 }) {
   const { menu } = useHomesUi()
   const saved = overview?.homes ?? []
@@ -48,7 +64,7 @@ function HomesMenu({
   }
   return (
     <Menu
-      label="Homes"
+      label={MENU}
       trigger={trigger}
       align="end"
       width={300}
@@ -93,6 +109,19 @@ function HomesMenu({
           Manage homes…
         </MenuItem>
       )}
+      {workers !== undefined && (
+        <>
+          <MenuSeparator />
+          <MenuItem icon="plus" onSelect={workers.onAdd}>
+            Add a worker…
+          </MenuItem>
+          {workers.any && (
+            <MenuItem icon="worker" onSelect={workers.onManage}>
+              Manage workers…
+            </MenuItem>
+          )}
+        </>
+      )}
       <MenuSeparator />
       <MenuItem icon="phone" onSelect={() => homesUi.set({ dialog: 'phones' })}>
         Pair a phone…
@@ -104,9 +133,22 @@ function HomesMenu({
 /** At the bar's end: the home's name in its window; a plug in this computer's, including for its first connection. */
 export function HomeButton() {
   const { host } = useServices()
+  const navigate = useNavigate()
+  const { menu } = useHomesUi()
+  // Read while the menu is open, so Manage workers… is there where the home has some.
+  const listed = useWorkers(menu)
+  const computers = () => void navigate({ to: '/settings/$section', params: { section: 'computers' } })
+  const workers: MenuWorkers = {
+    onAdd: () => {
+      homesUi.set({ addWorker: true })
+      computers()
+    },
+    onManage: computers,
+    any: (listed?.workers.length ?? 0) > 0,
+  }
   return host.homes === undefined ? null : (
     <>
-      <Chip homes={host.homes} />
+      <Chip homes={host.homes} workers={workers} />
       <PhonesFromMenu homes={host.homes} />
     </>
   )
@@ -125,7 +167,7 @@ function PhonesFromMenu({ homes }: { homes: HomesHost }) {
   )
 }
 
-export function Chip({ homes }: { homes: HomesHost }) {
+export function Chip({ homes, workers }: { homes: HomesHost; workers?: MenuWorkers | undefined }) {
   const here = useHomeState(homes)
   const overview = useHomesOverview(homes)
   const setup = useHomeSetup(homes)
@@ -150,7 +192,8 @@ export function Chip({ homes }: { homes: HomesHost }) {
           homes={homes}
           here={here}
           overview={overview}
-          trigger={<ChromeButton icon="plug" label="Homes" kbd={SHORTCUT} compact />}
+          workers={workers}
+          trigger={<ChromeButton icon="plug" label={MENU} kbd={SHORTCUT} compact />}
         />
       </span>
     )
@@ -164,13 +207,14 @@ export function Chip({ homes }: { homes: HomesHost }) {
         homes={homes}
         here={here}
         overview={overview}
+        workers={workers}
         trigger={
           <button
             type="button"
             className={s.chip}
             data-down={down || undefined}
             title={home.ssh?.target ?? home.https?.origin ?? ''}
-            aria-label={`${home.name}, ${down ? 'disconnected' : connecting ? 'reconnecting' : home.https === undefined ? 'over SSH' : 'connected'}. Homes`}
+            aria-label={`${home.name}, ${down ? 'disconnected' : connecting ? 'reconnecting' : home.https === undefined ? 'over SSH' : 'connected'}. ${MENU}`}
           >
             {connecting ? <Spinner size="small" /> : <Icon name={down ? 'unlinked' : 'home'} size={13} />}
             <span className={s.chipName}>{home.name}</span>
@@ -190,7 +234,7 @@ export function Chip({ homes }: { homes: HomesHost }) {
 
 /**
  * What opens over the window for its homes: Connect a home, or Manage homes.
- * File › Homes… (⌘⇧H, Ctrl+Shift+H) opens the chip's menu where there is a
+ * File › Computers… (⌘⇧H, Ctrl+Shift+H) opens the chip's menu where there is a
  * chip; Connect a home where there isn't one yet.
  */
 export function HomeConnections({ host }: { host: Host; ready?: boolean }) {

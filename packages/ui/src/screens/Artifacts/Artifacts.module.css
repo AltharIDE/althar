@@ -7,9 +7,9 @@
 }
 
 .column {
-  max-width: 920px;
+  max-width: var(--page-width);
   margin: 0 auto;
-  padding: 36px 40px 96px;
+  padding: 36px var(--page-inline) 96px;
 }
 
 .head {
@@ -98,13 +98,6 @@
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-.count {
-  min-width: 48px;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: var(--t-3);
 }
 
 /* ——— The table ——— */

@@ -184,7 +184,6 @@ export const CodeWithoutARelease: Story = {
     way: 'code',
     code: {
       command: null,
-      lasts: null,
       failed: 'Couldn’t find out which release to install from. Check your connection, then check again.',
     },
     onCheck: fn(),
@@ -203,12 +202,11 @@ export const WithACode: Story = {
     code: {
       command:
         "curl -fsSL https://github.com/AltharIDE/althar/releases/download/host-v0.11.0/althar-worker.sh | ALTHAR_RELEASE_BASE=https://github.com/AltharIDE/althar/releases/download/host-v0.11.0 sh -s -- join 'althar-worker1.eyJob21lSWQiOiJob21lXzA…'",
-      lasts: '10 minutes',
     },
   },
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body)
     await expect(page.getByText(/althar-worker\.sh \| ALTHAR_RELEASE_BASE=\S+\/host-v0\.11\.0 sh -s -- join/)).toBeInTheDocument()
-    await expect(page.getByText('Works for 10 minutes')).toBeInTheDocument()
+    await expect(page.queryByText(/Works for/)).not.toBeInTheDocument()
   },
 }

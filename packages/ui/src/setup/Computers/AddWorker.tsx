@@ -48,12 +48,10 @@ export interface WorkerSetupView {
   canAllow?: boolean | undefined
 }
 
-/** A one-time code for a machine without SSH, and the line that takes it there. */
+/** A one-time code for a machine without SSH, and the line that takes it there. A code that runs out is made again by itself. */
 export interface WorkerCodeView {
   /** The line to run on the machine; null while it is being made. */
   command: string | null
-  /** How long it still works, as the person reads it: 9 minutes. */
-  lasts: string | null
   failed?: string | null | undefined
 }
 
@@ -82,8 +80,6 @@ export interface AddWorkerText {
   waiting: string
   codeNote: (home: string) => string
   making: string
-  codeLasts: (time: string) => string
-  shows: string
   checkAgain: string
   checking: string
   allow: string
@@ -126,8 +122,6 @@ export const addWorkerText: AddWorkerText = {
   waiting: 'Waiting for it to connect…',
   codeNote: (home) => `Run this on the machine. It installs the worker and enrolls it with ${home}. The code works once.`,
   making: 'Making a code…',
-  codeLasts: (time) => `Works for ${time}`,
-  shows: 'It shows in Computers once it connects.',
   checkAgain: 'Check again',
   checking: 'Checking…',
   allow: 'Allow with sudo',
@@ -410,7 +404,7 @@ function WorkerSteps({ setup, home, t }: { setup: WorkerSetupView; home: string;
   )
 }
 
-/** The one-time code's way: the line to run on the machine, how long it still works, and where it shows. */
+/** The one-time code's way: the line to run on the machine. */
 function WorkerCode({ code, home, t }: { code: WorkerCodeView | null; home: string; t: AddWorkerText }) {
   if (code?.failed != null)
     return (
@@ -432,10 +426,6 @@ function WorkerCode({ code, home, t }: { code: WorkerCodeView | null; home: stri
           <CopyButton value={code.command} ghost />
         </span>
       )}
-      <span className={s.waiting}>
-        {code?.lasts != null && <span>{t.codeLasts(code.lasts)}</span>}
-        <span>{t.shows}</span>
-      </span>
     </div>
   )
 }
