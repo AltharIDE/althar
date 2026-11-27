@@ -36,6 +36,16 @@ describe('an agent’s row', () => {
     expect(screen.getByText('OpenCode 1.4.2, from opencode.ai, about 38 MB.')).toBeInTheDocument()
   })
 
+  it('says there is no build for this device, and offers nothing, for one whose maker builds none here', () => {
+    rows([{ id: 'antigravity', name: 'Google Antigravity', state: RuntimeState.Missing, guide: false, noBuild: true }], {
+      onCheck: () => {},
+      onHelp: () => {},
+      onInstall: () => {},
+    })
+    expect(screen.getByRole('listitem')).toHaveTextContent(/No build for this/)
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
   it('offers only to check again for an agent it can neither fetch nor point to instructions for', () => {
     rows([{ id: 'amp', name: 'Amp', state: RuntimeState.Missing, guide: false }], { onCheck: () => {}, onHelp: () => {} })
     expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument()

@@ -120,6 +120,7 @@ export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail']
       ...(agent.download === null ? {} : { download: agent.download.size }),
       ...(pinnedOf(agent) === undefined ? {} : { pinned: pinnedOf(agent) }),
       ...(failed === undefined ? {} : { failed }),
+      ...(agent.noBuild === true ? { noBuild: true } : {}),
     }
   switch (agent.signIn) {
     case 'signed_in':

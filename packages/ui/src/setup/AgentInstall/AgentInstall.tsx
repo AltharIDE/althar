@@ -16,7 +16,9 @@ import s from './AgentInstall.module.css'
  * from where, about how big, checked, and kept apart from the person's own
  * tools. While it downloads it says so; if it didn't finish, why, and the
  * way to try again. The agent's own instructions are beside it either way,
- * and, for one installed by hand, a way to look for it again at once.
+ * and, for one installed by hand, a way to look for it again at once. One
+ * Althar alone fetches, whose maker has no build for this device, says so,
+ * and nothing more: there is nothing to install.
  */
 
 export interface AgentInstallText {
@@ -24,6 +26,8 @@ export interface AgentInstallText {
   can: (name: string, size: string) => string
   canPinned: (name: string, size: string, pinned: PinnedDownload) => string
   cannot: (name: string) => string
+  noBuild: (name: string) => string
+  notHere: (name: string) => string
   download: (name: string) => string
   downloading: (name: string, size: string) => string
   tryAgain: string
@@ -36,6 +40,8 @@ export const agentInstallText: AgentInstallText = {
   can: (name, size) => `${name}’s latest release, from GitHub, about ${size}.`,
   canPinned: (name, size, { from, version }) => `${name} ${version}, from ${from}, about ${size}.`,
   cannot: (name) => `Install ${name} with its own installer, then come back here.`,
+  noBuild: (name) => `There’s no build of ${name} for ${device.this}, so it can’t run here.`,
+  notHere: (name) => `Althar can’t download ${name} from this window.`,
   download: (name) => `Download ${name}`,
   downloading: (name, size) => `Downloading ${name}, about ${size}, and checking it…`,
   tryAgain: 'Try again',
@@ -67,6 +73,8 @@ export type AgentInstallProps = RootProps<
     onCheck?: () => void
     /** Looking for it again now. */
     checking?: boolean
+    /** Its maker publishes no build for this device, and nothing else installs it: it says so, with nothing to press. */
+    noBuild?: boolean
     text?: Partial<AgentInstallText>
   }
 >
@@ -81,6 +89,7 @@ export function AgentInstall({
   onHelp,
   onCheck,
   checking = false,
+  noBuild = false,
   className,
   text,
   ...rest
@@ -98,7 +107,9 @@ export function AgentInstall({
       <BrandChip {...(brand === undefined ? {} : { brand })} size={44} className={s.chip} />
       <div className={s.words}>
         <h3 className={s.title}>{t.missing(name)}</h3>
-        {state.kind === 'installing' && size !== undefined ? (
+        {noBuild ? (
+          <p className={s.note}>{t.noBuild(name)}</p>
+        ) : state.kind === 'installing' && size !== undefined ? (
           <p className={s.busy} role="status">
             <Spinner size="small" />
             {t.downloading(name, size)}
@@ -106,7 +117,16 @@ export function AgentInstall({
         ) : (
           <>
             {state.kind === 'failed' && <Problem>{state.why}</Problem>}
-            <p className={s.note}>{can ? (pinned === undefined ? t.can(name, size) : t.canPinned(name, size, pinned)) : t.cannot(name)}</p>
+            {/* Only one with its own installer, its instructions beside it, is sent to install it. */}
+            <p className={s.note}>
+              {can
+                ? pinned === undefined
+                  ? t.can(name, size)
+                  : t.canPinned(name, size, pinned)
+                : onHelp === undefined
+                  ? t.notHere(name)
+                  : t.cannot(name)}
+            </p>
             <div className={s.ways}>
               {can ? (
                 <Button variant="default" onClick={onInstall}>

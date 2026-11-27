@@ -453,6 +453,7 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
               {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
               onCheck={checkAgain}
               checking={checking}
+              {...(chosen.noBuild === true ? { noBuild: true } : {})}
             />
           )}
         </AgentTabPanel>

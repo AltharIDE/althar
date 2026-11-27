@@ -68,6 +68,8 @@ export type RuntimeEntry = RuntimeBase &
         pinned?: PinnedDownload
         /** Why the last download didn't finish, in a sentence. */
         failed?: string
+        /** Its maker publishes no build for this device, and nothing else installs it: there is nothing to do. */
+        noBuild?: boolean
       }
     | {
         state: RuntimeState.Installing
@@ -96,6 +98,7 @@ export interface RuntimesText {
   movesTo: (to: string) => string
   waits: string
   missing: string
+  noBuild: string
   outdated: (version: string, needs: string) => string
   signIn: string
   cancel: string
@@ -119,6 +122,7 @@ export const runtimesText: RuntimesText = {
   movesTo: (to) => `its work moves to ${to}`,
   waits: 'its work waits for the reset',
   missing: `Not installed on ${device.this}`,
+  noBuild: `No build for ${device.this}`,
   outdated: (version, needs) => `Version ${version} · Althar needs ${needs} or later`,
   signIn: 'Sign in',
   cancel: 'Cancel',
@@ -265,6 +269,7 @@ function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers): Parts {
         ),
       }
     case RuntimeState.Missing: {
+      if (r.noBuild === true) return { line: t.noBuild }
       // Where Althar can fetch it, the button does; the agent's own instructions stay beside it.
       const fetch = r.download !== undefined && h.onInstall && (
         <Button onClick={() => h.onInstall?.(r.id)}>{r.failed === undefined ? t.download : t.tryAgain}</Button>

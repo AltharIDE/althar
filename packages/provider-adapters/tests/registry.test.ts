@@ -1,9 +1,13 @@
+import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 
 import { assert, describe, it } from '@effect/vitest'
 
+import { programName } from '../src/installs'
 import {
   agents,
+  agyBrowser,
+  agyServer,
   BWRAP_TRY,
   claudeSandboxStarts,
   type Contained,
@@ -111,9 +115,9 @@ describe('the agent registry', () => {
 
   it('runs Antigravity’s server as Google’s registry launches it, its sign-in its home’s own, with no browser and a temporary folder of its own', () => {
     const spec = agents.antigravity.launch('/usr/bin/node')
-    assert.strictEqual(spec.command, 'agy_acp_server.par')
+    assert.strictEqual(spec.command, agyServer())
     assert.deepStrictEqual(spec.args, process.platform === 'linux' ? ['--uid='] : [])
-    assert.deepStrictEqual(spec.env, { AGY_ACP_FORCE_FILE_STORAGE: '1', PYTHONUNBUFFERED: '1', BROWSER: 'true' })
+    assert.deepStrictEqual(spec.env, { AGY_ACP_FORCE_FILE_STORAGE: '1', PYTHONUNBUFFERED: '1', BROWSER: agyBrowser() })
     assert.isTrue(spec.privateTemp)
     // Every role in the mode that asks, and what it asks the person never answered by the rules.
     assert.deepStrictEqual(agents.antigravity.modes, { ask: 'default', readOnly: null, reader: 'default' })
@@ -121,17 +125,70 @@ describe('the agent registry', () => {
     for (const agent of Object.values(agents).filter((entry) => entry.id !== 'antigravity')) assert.isUndefined(agent.permissions.questions)
   })
 
-  it('downloads Antigravity’s server only from Google, at one version, each archive and both its programs pinned, and none for Windows', () => {
+  it('downloads Antigravity’s server only from Google, at one version, each archive and both its programs pinned, Windows’ too', () => {
     const download = agents.antigravity.cli?.download
     if (download === undefined || !('version' in download)) return assert.fail('Antigravity has a pinned download')
     assert.strictEqual(download.version, '1.3.0')
-    assert.deepStrictEqual(Object.keys(download.assets).sort(), ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64'])
+    assert.deepStrictEqual(Object.keys(download.assets).sort(), [
+      'darwin-arm64',
+      'darwin-x64',
+      'linux-arm64',
+      'linux-x64',
+      'win32-arm64',
+      'win32-x64',
+    ])
     for (const [platform, asset] of Object.entries(download.assets)) {
-      assert.match(asset.url, /^https:\/\/dl\.google\.com\/agy-extensions\/releases\/(macos|linux)\/agy-acp-server-1\.3\.0-/, platform)
+      const windows = platform.startsWith('win32')
+      assert.match(
+        asset.url,
+        /^https:\/\/dl\.google\.com\/agy-extensions\/releases\/(macos|linux|windows)\/agy-acp-server-1\.3\.0-/,
+        platform,
+      )
       assert.match(asset.sha256, /^[0-9a-f]{64}$/, platform)
-      assert.deepStrictEqual(Object.keys(asset.files).sort(), ['agy_acp_server.par', 'localharness_external'], platform)
+      // The server under the name the registry runs, on Windows an `.exe`, and its harness beside it.
+      const server = programName(agyServer(windows ? 'win32' : 'linux'), windows ? 'win32' : 'linux')
+      assert.deepStrictEqual(
+        Object.keys(asset.files).sort(),
+        [server, programName('localharness_external', windows ? 'win32' : 'linux')],
+        platform,
+      )
       for (const sha256 of Object.values(asset.files)) assert.match(sha256, /^[0-9a-f]{64}$/, platform)
     }
+    // As Google's Windows zip was measured: the zip and both programs in it.
+    assert.deepStrictEqual(download.assets['win32-x64'], {
+      url: 'https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.3.0-windows-x86_64.zip',
+      sha256: '65215e0688681fa3116e048a9eab27ef53af1bbd6f3da3f1c52bd4911d8b17f9',
+      files: {
+        'agy_acp_server.exe': 'bc86a76bfe422a58aed70300fdab65457c7439b9fcb7d3f6c314ea6f79601fa3',
+        'localharness_external.exe': 'b200d5e01725784b45f99ee532b0da22f5fb43f01b16ecd69f225bf1ddf36557',
+      },
+    })
+    assert.notInclude(agents.antigravity.knownGaps.join(' '), 'Windows')
+  })
+
+  it('runs Antigravity’s server by the name Windows’ download gives it, and opens no browser of its own there either', () => {
+    assert.strictEqual(agyServer('win32'), 'agy_acp_server')
+    assert.strictEqual(agyServer('darwin'), 'agy_acp_server.par')
+    assert.strictEqual(agyServer('linux'), 'agy_acp_server.par')
+    assert.strictEqual(agents.antigravity.cli?.name, agyServer())
+    assert.strictEqual(agents.antigravity.launch('').command, agyServer())
+    assert.strictEqual(agents.antigravity.launch('').env?.BROWSER, agyBrowser())
+    assert.strictEqual(agyBrowser('darwin'), 'true')
+    // Python's webbrowser splits a command with a %s in it into the command and the address.
+    assert.strictEqual(agyBrowser('win32'), 'cmd /d /c exit 0 %s')
+  })
+
+  // What Python's webbrowser would run on Windows, an address with its `&`s in it: it ends at once and succeeds.
+  it.runIf(process.platform === 'win32')('ends Windows’ browser command at once, successfully, whatever the address', () => {
+    const [command = '', ...args] = agyBrowser('win32').split(' ')
+    const url = 'https://accounts.google.com/o/oauth2/auth?client_id=x&redirect_uri=http%3A%2F%2Flocalhost%3A1&scope=a+b&state=%PATH%'
+    const ran = spawnSync(
+      command,
+      args.map((arg) => arg.replace('%s', url)),
+      { encoding: 'utf8', windowsHide: true },
+    )
+    assert.strictEqual(ran.status, 0, ran.stderr)
+    assert.strictEqual(ran.stdout, '')
   })
 
   it('makes OpenCode ask, whatever its own config says, for its built-in agents too', () => {

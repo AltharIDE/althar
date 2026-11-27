@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { type AgentDefinition, agents, type LaunchSpec, usingLocated } from '@althar/provider-adapters'
+import { type AgentDefinition, agents, agyServer, type LaunchSpec, usingLocated } from '@althar/provider-adapters'
 import { assert, describe, expect, it } from '@effect/vitest'
 import { Deferred, Effect, Exit, Fiber } from 'effect'
 import { TestClock } from 'effect/testing'
@@ -526,12 +526,76 @@ describe('downloading a pinned agent', () => {
     await refused({ 'agy_acp_server.par': SERVER }, {}, "didn't hold what it was pinned with")
   })
 
-  it('has nothing to download where its maker has no build, as for Windows', async () => {
+  it('has nothing to download where its maker has no build, as for 32-bit Windows, and says there is none', async () => {
     const { fetch } = pinnedTo(whole)
-    const { run } = using({ fetch, platform: 'win32' })
+    const { run } = using({ fetch, platform: 'win32', arch: 'ia32' })
     const state = await run(Effect.flatMap(Installs, (installs) => installs.state(agents.antigravity)))
-    assert.isTrue(Exit.isSuccess(state) && !state.value.downloadable)
+    assert.isTrue(Exit.isSuccess(state) && !state.value.downloadable && state.value.noBuild)
     const failed = await run(Effect.flatMap(Installs, (installs) => installs.install(agents.antigravity)))
     assert.include(JSON.stringify(failed), 'no Google Antigravity for this computer')
+  })
+
+  it('offers its download on Windows, on Intel and Arm alike, and on every other system Google builds it for', async () => {
+    for (const [platform, arch] of [
+      ['win32', 'x64'],
+      ['win32', 'arm64'],
+      ['darwin', 'arm64'],
+      ['darwin', 'x64'],
+      ['linux', 'x64'],
+      ['linux', 'arm64'],
+    ] as const) {
+      const { run } = using({ platform, arch })
+      const state = await run(Effect.flatMap(Installs, (installs) => installs.state(agents.antigravity)))
+      assert.isTrue(
+        Exit.isSuccess(state) && state.value.downloadable && !state.value.noBuild && state.value.pinned === '1.3.0',
+        platform + arch,
+      )
+    }
+    // One that has its own installer is never said to have no build, wherever its download has none.
+    const { run } = using({ platform: 'win32', arch: 'ia32' })
+    const opencodeState = await run(Effect.flatMap(Installs, (installs) => installs.state(opencode)))
+    assert.isTrue(Exit.isSuccess(opencodeState) && !opencodeState.value.noBuild)
+  })
+
+  it('keeps Windows’ server and harness, `.exe`s, together, and runs the server from them', async () => {
+    const pins = agents.antigravity.cli?.download
+    if (pins === undefined || !('version' in pins)) throw new Error('Antigravity has a pinned download')
+    // The names Google's Windows zip holds, as the registry pins them.
+    assert.deepStrictEqual(Object.keys(pins.assets['win32-x64']?.files ?? {}).toSorted(), [
+      'agy_acp_server.exe',
+      'localharness_external.exe',
+    ])
+    const held = { 'agy_acp_server.exe': 'server', 'localharness_external.exe': 'harness' }
+    const zip = zipSync(Object.fromEntries(Object.entries(held).map(([name, body]) => [name, text(body)])))
+    const agent: AgentDefinition = {
+      ...agents.antigravity,
+      cli: {
+        name: agyServer('win32'),
+        download: {
+          ...pins,
+          assets: {
+            'win32-x64': {
+              url: URL,
+              sha256: sum(zip),
+              files: Object.fromEntries(Object.entries(held).map(([name, body]) => [name, sum(text(body))])),
+            },
+          },
+        },
+      },
+    }
+    const { root, run } = using({ fetch: async () => new Response(new Uint8Array(zip)), platform: 'win32', arch: 'x64' })
+    const done = await run(Effect.flatMap(Installs, (installs) => installs.install(agent)))
+    assert.isTrue(Exit.isSuccess(done), JSON.stringify(done))
+    const current = join(root, 'antigravity', 'current')
+    assert.strictEqual(readFileSync(join(current, 'agy_acp_server.exe'), 'utf8'), 'server')
+    assert.strictEqual(readFileSync(join(current, 'localharness_external.exe'), 'utf8'), 'harness')
+    const found = await run(Effect.map(Installs, (installs) => installs.locate(agent)))
+    const command = join(current, 'agy_acp_server.exe')
+    assert.deepStrictEqual(Exit.isSuccess(found) ? found.value : null, { command, whose: 'althar' })
+    // Its launch names the same program, so Althar runs the copy it kept.
+    const pointed = usingLocated({ ...agent, launch: () => ({ ...agents.antigravity.launch(''), command: agyServer('win32') }) }, () =>
+      Exit.isSuccess(found) ? found.value : null,
+    )
+    assert.strictEqual(pointed.launch('').command, command)
   })
 })

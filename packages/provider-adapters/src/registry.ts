@@ -1108,6 +1108,18 @@ const claudeJudges = {
   },
 }
 
+/** Antigravity's server, by the name its download gives it: `agy_acp_server.exe` on Windows, a `.par` elsewhere. */
+export const agyServer = (platform: string = process.platform) => (platform === 'win32' ? 'agy_acp_server' : 'agy_acp_server.par')
+
+/**
+ * What Antigravity's server opens a page with, as Python's `webbrowser` reads
+ * `BROWSER`: a command that does nothing and succeeds, so Althar alone opens
+ * it. Windows has no `true`, and `webbrowser` would go on to the person's own
+ * browser where the command isn't there; `cmd` ends at `exit` before the
+ * address, whatever its `&`s.
+ */
+export const agyBrowser = (platform: string = process.platform) => (platform === 'win32' ? 'cmd /d /c exit 0 %s' : 'true')
+
 const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefinition<AgentId>>> = {
   'claude-code': {
     id: 'claude-code',
@@ -1896,9 +1908,9 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
      * drops to nobody when started as root (the registry's own launch).
      */
     launch: () => ({
-      command: 'agy_acp_server.par',
+      command: agyServer(),
       args: process.platform === 'linux' ? ['--uid='] : [],
-      env: { AGY_ACP_FORCE_FILE_STORAGE: '1', PYTHONUNBUFFERED: '1', BROWSER: 'true' },
+      env: { AGY_ACP_FORCE_FILE_STORAGE: '1', PYTHONUNBUFFERED: '1', BROWSER: agyBrowser() },
       inheritEnv: ['GEMINI_HOME'],
       privateTemp: true,
     }),
@@ -1940,11 +1952,13 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
      * Google publishes no license to pass it on and no checksums: Althar
      * downloads it from Google at the person's asking, version 1.3.0 as Orca
      * pins it, each archive and both programs in it by the sha256 Orca
-     * measured. The server finds its harness, `localharness_external`, beside
-     * itself. No build for Windows.
+     * measured, and Windows' as Althar measured them on 27 November 2026. The
+     * server finds its harness, `localharness_external`, beside itself. On
+     * Windows both are `.exe`s, the server without `.par`; Windows on Arm's
+     * server is Intel's, run by Windows' own emulation, beside an Arm harness.
      */
     cli: {
-      name: 'agy_acp_server.par',
+      name: agyServer(),
       download: {
         version: '1.3.0',
         assets: {
@@ -1980,8 +1994,24 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
               localharness_external: '7fe676f1234889900800bad3ca50fb9b55f1e16ee4cb82b789f84ae5145fd582',
             },
           },
+          'win32-x64': {
+            url: 'https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.3.0-windows-x86_64.zip',
+            sha256: '65215e0688681fa3116e048a9eab27ef53af1bbd6f3da3f1c52bd4911d8b17f9',
+            files: {
+              'agy_acp_server.exe': 'bc86a76bfe422a58aed70300fdab65457c7439b9fcb7d3f6c314ea6f79601fa3',
+              'localharness_external.exe': 'b200d5e01725784b45f99ee532b0da22f5fb43f01b16ecd69f225bf1ddf36557',
+            },
+          },
+          'win32-arm64': {
+            url: 'https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.3.0-windows-arm64.zip',
+            sha256: '4a0f469720e9beb9438a979f543fdbfad5022ebe0992c052c590bd78b3144ca3',
+            files: {
+              'agy_acp_server.exe': '060a99d358dcd0dc1cd95394621f53560c46e90be4e9073199ca703890523da9',
+              'localharness_external.exe': '7c340151ffb33b633453e9521551a25cd131069374e09e464d1b9ddb65d9add7',
+            },
+          },
         },
-        size: process.platform === 'darwin' ? '115 MB' : '330 MB',
+        size: process.platform === 'linux' ? '330 MB' : process.platform === 'win32' ? '125 MB' : '115 MB',
       },
     },
     commands: 'althar',
@@ -1990,7 +2020,6 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
       "Its usual folder's `config/` loads the person's own hooks and MCP servers; an account Althar made has neither.",
       'Its approvals’ option ids are not yet seen, so each is read by its kind.',
       'No status command, so its sign-in shows only when a session starts.',
-      'No build for Windows.',
       'It unpacks about 1 GB into a temporary folder each time it starts, removed when it stops.',
     ],
   },
