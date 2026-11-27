@@ -41,6 +41,7 @@ import { shotOf, shotWords, VIEWPORT } from './screenshots'
 import { ASIDE_BUILDS, onScratch } from './scratch'
 import { Setups } from './Setups'
 import { POOL, type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
+import { toolRefusalOf } from './toolRefusal'
 import { taskWorker } from './workerExecution'
 import { readWorkerPreview, workerPreviewPort } from './workerPreviewHttp'
 
@@ -1456,10 +1457,7 @@ export class Launches extends Context.Service<
                           : error.message,
                     }),
                   )
-                : Effect.andThen(
-                    Effect.logWarning('A run tool did not succeed', error),
-                    Effect.fail(new ToolRefused({ message: 'Althar could not do that. Try again, or tell the person.' })),
-                  ),
+                : Effect.andThen(Effect.logWarning('A run tool did not succeed', error), Effect.fail(toolRefusalOf(error))),
           ),
         )
 

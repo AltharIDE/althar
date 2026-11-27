@@ -25,6 +25,7 @@ import type { Sessions } from './Sessions'
 import { TITLE_LENGTH } from './taskTitle'
 import { addItem } from './threads'
 import { type ToolAccess, ToolRefused, type ToolServer } from './ToolServer'
+import { toolRefusalOf } from './toolRefusal'
 import { words } from './words'
 
 interface ChangeLeadToolsDependencies {
@@ -613,10 +614,7 @@ export const makeChangeLeadTools = (dependencies: ChangeLeadToolsDependencies) =
                 if (error instanceof ToolRefused) return Effect.fail(error)
                 const refused = refusalOf(error)
                 if (refused !== undefined) return Effect.fail(new ToolRefused({ message: refused }))
-                return Effect.andThen(
-                  Effect.logWarning('A pull request tool did not succeed', error),
-                  Effect.fail(new ToolRefused({ message: 'Althar could not do that. Try again, or tell the person.' })),
-                )
+                return Effect.andThen(Effect.logWarning('A pull request tool did not succeed', error), Effect.fail(toolRefusalOf(error)))
               }),
             )
       },

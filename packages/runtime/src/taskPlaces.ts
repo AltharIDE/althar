@@ -136,7 +136,9 @@ export const makeTaskPlaces = ({ sessions }: { readonly sessions: Sessions['Serv
         SELECT id, project_id, parameters FROM task_plans WHERE task_id = ${input.taskId} AND state = 'accepted'
         ORDER BY decided_at DESC, rowid DESC LIMIT 1`
       if (task.state !== 'open' || plan === undefined)
-        return yield* invalid('Only a task under way moves. Choose where one runs on its plan before it starts.')
+        return yield* invalid(
+          'Only a task under way moves. One not started yet runs where its plan places it, and one that ended stays where it ran.',
+        )
       const parameters = JSON.parse(plan.parameters) as {
         readonly workerId?: string
         readonly steps: ReadonlyArray<PlanStep>

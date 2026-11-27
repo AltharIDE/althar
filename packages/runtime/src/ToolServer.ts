@@ -11,6 +11,7 @@ import { Context, Effect, Exit, Layer } from 'effect'
 import { Errands, type AskedAction, type TurnWord } from './Errands'
 import { errandTools } from './errandTools'
 import { ToolRefused } from './toolErrors'
+import { refusalWords } from './toolRefusal'
 import { singleTypes } from './toolSchemas'
 import { workerMcpMounts, WORKER_MCP_PATH } from './workerMcp'
 export { ActionNotPerformed, ToolRefused } from './toolErrors'
@@ -208,10 +209,11 @@ export class ToolServer extends Context.Service<
                   ],
                 }
           const refused = exit.cause.reasons.find((reason) => reason._tag === 'Fail')
+          // What failed, in the runtime's own words for it: a refusal's, else the error's (toolRefusal.ts), never only its kind.
           const text =
-            refused !== undefined && refused._tag === 'Fail' && refused.error instanceof ToolRefused
-              ? refused.error.message
-              : 'Althar could not do that. Try again, or tell the person.'
+            refused !== undefined && refused._tag === 'Fail'
+              ? refusalWords(refused.error)
+              : 'Althar could not do that, and what it did is in its log. Try again, or tell the person.'
           await told(text)
           return { isError: true, content: [{ type: 'text' as const, text }] }
         })

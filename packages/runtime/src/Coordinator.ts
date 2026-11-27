@@ -3,7 +3,16 @@ import { createHash } from 'node:crypto'
 
 import { type ActorId, type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/domain'
 import { type Commands, Ledger } from '@althar/persistence-sqlite'
-import { AUTOMATION_DEFAULTS, type AutomationDefinition, GOAL_LENGTH, GOAL_ROUNDS, Schedule, scheduleInLine } from '@althar/contracts'
+import {
+  AUTOMATION_DEFAULTS,
+  type AutomationDefinition,
+  GOAL_LENGTH,
+  GOAL_ROUNDS,
+  Schedule,
+  scheduleInLine,
+  workerName,
+  workerNameOf,
+} from '@althar/contracts'
 import { Priority, StatusCategory } from '@althar/connectors'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -85,6 +94,8 @@ import { addItem, transcript } from './threads'
 import { controlGoal } from './threadGoals'
 import { hearsOf, personsWords, quoted, threadsSaying } from './TaskActions'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { toolRefusalOf } from './toolRefusal'
+import { whereaboutsOf } from './workerLookup'
 import { describe as describePreset, presetsIn, resetPreset, tunePreset } from './presets'
 import {
   callBegan,
@@ -111,6 +122,15 @@ import { waitFor } from './waits'
 export const LEAD_STARTS = { turn: 3, all: 10 } as const
 
 /** What a task's lead is told of starting tasks, in each tool that starts one. */
+/** Where a task's plan runs, as an agent named it: a worker's id, `auto` for any free one, or null for the home; and its name. */
+interface Placing {
+  readonly runsOn: string | null
+  readonly name: string
+}
+
+/** Where a task runs, as draft_task, propose_plan and start_task take it, and change_part's workspace part later. */
+const RUNS_ON =
+  "Where it runs once it starts, where the person asked: a worker of this home by its name as Settings › Computers shows it (hermes-box) or its id, any free worker (any), or the home (home). It is placed as its card's Runs on places it: one counting down that the worker can't take now is held for the person, and the answer says why. The home without it. change_part's workspace part changes it later, at any stage."
 const LEAD_STARTING = ` From a task's lead: for work the person asked for that your task shouldn't do itself, such as a review's findings into a fix, never for work your brief covers, and never to change your own task's shape or approach: prototyping or exploring designs for its work, or building what it prototyped, happens on your task itself, on its branch and pull request, with change_part (preset Prototype, or Change). It records your task as where it came from: its card says it was started by your task, and your thread has a line linking to it. You may start ${LEAD_STARTS.turn} in a turn and ${LEAD_STARTS.all} from your task in all.`
 
 /*
@@ -178,6 +198,8 @@ const Where = {
   works_in: Schema.optional(Schema.Literals(['local', 'worktree'])),
   works_in_why: Schema.optional(Schema.String),
   toward: Schema.optional(Schema.String),
+  /* Where it runs once it starts: the home, any free worker, or one of the home's workers by name or id (workerLookup.ts). */
+  runs_on: Schema.optional(Schema.String),
 }
 const Drafted = Schema.Struct({
   title: Schema.String,
@@ -1010,7 +1032,7 @@ export class Coordinator extends Context.Service<
        */
       const drafting = (
         access: ToolAccess,
-        { title, description, repositories, works_in: asked, toward, ...fromIssues }: typeof Drafted.Type,
+        { title, description, repositories, works_in: asked, toward, runs_on: _placed, ...fromIssues }: typeof Drafted.Type,
         plain = false,
         aside = false,
       ) =>
@@ -1271,6 +1293,44 @@ export class Coordinator extends Context.Service<
        * here as draft_task makes it; one whose plan came already is held there and then.
        */
       const heldTasks = new Set<string>()
+
+      /** Where a task drafted with runs_on runs, until its plan comes: propose_plan places its plan there, unless it says another. */
+      const placedDrafts = new Map<string, Placing>()
+
+      /** Where an agent said a task runs, as its plan keeps it (Plans.place): a worker's id, `auto`, or null for the home; refused with why. */
+      const placingOf = (projectId: string, said: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${projectId}`
+          const place = whereaboutsOf(config.workers, projectId, said, project?.name ?? 'this project')
+          switch (place.kind) {
+            case 'refused':
+              return yield* new ToolRefused({ message: place.message })
+            case 'home':
+              return { runsOn: null, name: 'the home' } satisfies Placing
+            case 'any':
+              return { runsOn: 'auto', name: 'any free worker' } satisfies Placing
+            case 'worker':
+              return { runsOn: place.worker.workerId, name: workerName(place.worker) } satisfies Placing
+          }
+        })
+
+      /** Where a plan runs that kept the place of the one it replaced, where it has one. */
+      const keptPlacing = (projectId: string, planId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ runsOn: string | null }>`
+            SELECT json_extract(parameters, '$.runsOn') AS runs_on FROM task_plans WHERE id = ${planId}`
+          if (row?.runsOn == null) return undefined
+          return yield* placingOf(projectId, row.runsOn).pipe(
+            // A worker gone since keeps its id on the plan, and its card says so.
+            Effect.orElseSucceed(() => ({ runsOn: row.runsOn, name: workerNameOf(row.runsOn ?? '') }) satisfies Placing),
+          )
+        })
+
+      /** What keeps a plan just placed from starting there, where something does, in its card's words. */
+      const placedProblem = (planId: string, placing: Placing | undefined) =>
+        placing === undefined || placing.runsOn === null ? Effect.succeed(undefined) : plans.problem(planId)
       const holdDraft = (threadId: string, key: string, actorId: ActorId) =>
         Effect.gen(function* () {
           yield* redraft(threadId, (drafts) => heldDraft(drafts, key))
@@ -1305,7 +1365,10 @@ export class Coordinator extends Context.Service<
           const { pull_request: pullRequest, ...drafted } = yield* read(DraftedTask, input)
           // Work on a pull request names it; asked only to review one, the person gets a review task.
           if (pullRequest === undefined) yield* notAReview(access)
+          // Where it runs, found first, so a worker that can't be used drafts nothing.
+          const placing = drafted.runs_on === undefined ? undefined : yield* placingOf(access.projectId, drafted.runs_on)
           const { created, issues: tied } = yield* drafting(access, drafted)
+          if (placing !== undefined) placedDrafts.set(created.taskId, placing)
           if (access.role === 'coordinator') {
             draftedThisTurn.set(access.threadId, (draftedThisTurn.get(access.threadId) ?? new Map()).set(created.taskId, created.slug))
             yield* redraft(access.threadId, (drafts) =>
@@ -1324,7 +1387,8 @@ export class Coordinator extends Context.Service<
             lifetime,
           )
           const from = fromWords(tied.map((one) => ({ key: one.found.key, partOf: one.partOf })))
-          if (pullRequest === undefined) return `Drafted ${created.slug}${from}. Now propose its plan with propose_plan.`
+          const runsLine = placing === undefined ? '' : ` Its plan runs on ${placing.name}.`
+          if (pullRequest === undefined) return `Drafted ${created.slug}${from}.${runsLine} Now propose its plan with propose_plan.`
           // A new task has nothing of its own to lose: it starts on the pull request's head.
           const attached = yield* changes
             .attach({ taskId: created.taskId, pullRequest: String(pullRequest), start: true, actorId: instance.coordinatorId })
@@ -1333,8 +1397,8 @@ export class Coordinator extends Context.Service<
               Effect.catch((error) => (error instanceof AttachRefused ? Effect.succeed(error.message) : Effect.fail(error))),
             )
           if (attached !== null)
-            return `Drafted ${created.slug}${from}, but it doesn't follow that pull request: ${attached} Fix that with attach_pull_request, or propose its plan with propose_plan as it is.`
-          return `Drafted ${created.slug}${from}, on that pull request's head: it follows it, and its work goes there when it publishes, with no new pull request. Now propose its plan with propose_plan.`
+            return `Drafted ${created.slug}${from}, but it doesn't follow that pull request: ${attached}${runsLine} Fix that with attach_pull_request, or propose its plan with propose_plan as it is.`
+          return `Drafted ${created.slug}${from}, on that pull request's head: it follows it, and its work goes there when it publishes, with no new pull request.${runsLine} Now propose its plan with propose_plan.`
         })
 
       /**
@@ -1380,6 +1444,8 @@ export class Coordinator extends Context.Service<
           // The lead is found first, so a model that can't be used drafts nothing.
           const lead = yield* stepOf(access.projectId, pick)
           yield* notAReview(access)
+          // Where it runs, found first too.
+          const placing = drafted.runs_on === undefined ? undefined : yield* placingOf(access.projectId, drafted.runs_on)
           // A lead's starts after the countdown, as any plan, so the person can hold it; the coordinator's at once, as an aside.
           const byLead = parentOf(access) !== null
           const { created } = yield* drafting(access, drafted, true, !byLead)
@@ -1398,12 +1464,22 @@ export class Coordinator extends Context.Service<
             here: true,
             worksIn,
             ...(drafted.works_in_why === undefined ? {} : { worksInWhy: drafted.works_in_why }),
+            ...(placing === undefined ? {} : { runsOn: placing.runsOn }),
           })
-          if (byLead)
-            return `Planned ${created.slug}, started from this task: its lead starts in 25 seconds unless the person holds it, with no review, and nothing goes outside the project when it is done. The person sees it as a card, started by this task; say in a sentence what it does.`
+          const runsLine = placing === undefined ? '' : ` It runs on ${placing.name}.`
+          if (byLead) {
+            const problem = yield* placedProblem(planId, placing)
+            if (problem !== undefined)
+              return `Planned ${created.slug}, started from this task, on ${placing?.name ?? 'the home'}, which can't take it now, so it is held for the person rather than starting: ${problem}`
+            return `Planned ${created.slug}, started from this task: its lead starts in 25 seconds unless the person holds it, with no review, and nothing goes outside the project when it is done.${runsLine} The person sees it as a card, started by this task; say in a sentence what it does.`
+          }
           // A chat: it sits on Scratch, off the board's lanes, until it takes a worktree or an output (a task is a conversation plus
           // parts, "Asides"). Made there; one this session drafted before, under the same title, is put there now.
           yield* shelve(created.taskId, 'scratch', instance.coordinatorId)
+          // Placed where it can't start now, it stays held for the person, its card saying why.
+          const problem = yield* placedProblem(planId, placing)
+          if (problem !== undefined)
+            return `Made ${created.slug} on ${placing?.name ?? 'the home'}, but it can't start there now, so it is held for the person: ${problem}`
           const started = yield* plans.start(planId, instance.coordinatorId)
           if (started === 'waiting' && worksIn === 'checkout') {
             const taken = yield* localTakenFor(created.taskId)
@@ -1415,7 +1491,7 @@ export class Coordinator extends Context.Service<
             const { busy: atWork, atOnce } = yield* busy.now
             return `Started ${created.slug}, but it waits for a free agent: ${atWork} of the ${atOnce} this computer runs at once are busy. Its lead starts on it by itself when one is free, with no review, and nothing goes outside the project when it is done. The person sees it as a card, waiting; say in a sentence what it does, and that it waits its turn.`
           }
-          return `Started ${created.slug}: its lead is on it now, with no review, and nothing goes outside the project when it is done. The person sees it as a card; say in a sentence what it does.`
+          return `Started ${created.slug}: its lead is on it now${placing === undefined ? '' : `, on ${placing.name}`}, with no review, and nothing goes outside the project when it is done. The person sees it as a card; say in a sentence what it does.`
         })
 
       /**
@@ -1833,7 +1909,11 @@ export class Coordinator extends Context.Service<
                 : `Planned ${task.slug}: this plan went through and ${task.slug} has started. Nothing changed.`
           }
           if (task.state !== 'draft')
-            return yield* new ToolRefused({ message: `${task.slug} has started already; message its lead instead.` })
+            return yield* new ToolRefused({
+              message: `${task.slug} has started already; message its lead instead${proposed.runs_on === undefined ? '' : ', or move it with change_part (workspace, runs_on)'}.`,
+            })
+          // Where it runs: as said now, else as it was drafted; found before anything changes, so a worker that can't be used plans nothing.
+          const placing = proposed.runs_on === undefined ? placedDrafts.get(task.id) : yield* placingOf(access.projectId, proposed.runs_on)
           // A lead plans the tasks it drafted; the coordinator any.
           const parent = parentOf(access)
           if (parent !== null) {
@@ -1907,7 +1987,9 @@ export class Coordinator extends Context.Service<
             // A plan the person held stays held; otherwise a small change starts at once.
             ...(small ? { smallChange: true, ...(held === undefined && !heldWhileDrafted ? { startsIn: Duration.zero } : {}) } : {}),
             ...(heldWhileDrafted ? { held: true } : {}),
+            ...(placing === undefined ? {} : { runsOn: placing.runsOn }),
           })
+          placedDrafts.delete(task.id)
           // Held as it was being proposed: held now.
           if (!heldWhileDrafted && heldTasks.delete(task.id)) yield* plans.hold(planId, instance.personId)
           // Planned from a preset: its parts replace the plan's, and its card names it.
@@ -1928,9 +2010,20 @@ export class Coordinator extends Context.Service<
                       ),
                     ),
                   )
-          const where = `${preset === undefined ? '' : ` As ${preset}.`}${yield* localLine(access.projectId, task.id, worksIn)}${waitsSaid}`
+          // Where it runs: as asked, or where the plan it replaced was placed, which it keeps.
+          const placed = placing ?? (yield* keptPlacing(access.projectId, planId))
+          const problem = yield* placedProblem(planId, placed)
+          const runsLine =
+            placed === undefined
+              ? ''
+              : problem === undefined
+                ? ` It runs on ${placed.name}.`
+                : ` It is placed on ${placed.name}, which can't take it as it stands: ${problem}`
+          const where = `${preset === undefined ? '' : ` As ${preset}.`}${yield* localLine(access.projectId, task.id, worksIn)}${runsLine}${waitsSaid}`
           if (held !== undefined)
             return `Changed ${task.slug}'s plan.${where} It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`
+          if (problem !== undefined)
+            return `Planned ${task.slug}.${where} So it is held for the person rather than starting; they see it as a card, with why, so there's no need to describe the plan again.`
           if (small) {
             // A preset may replace these parts, and a small plan can explicitly have no reviewer.
             const sql = yield* SqlClient.SqlClient
@@ -2624,10 +2717,7 @@ export class Coordinator extends Context.Service<
             Effect.catch((error) =>
               error instanceof ToolRefused
                 ? Effect.fail(error)
-                : Effect.andThen(
-                    Effect.logWarning('A coordinator tool did not succeed', error),
-                    Effect.fail(new ToolRefused({ message: 'Althar could not do that. Try again, or tell the person.' })),
-                  ),
+                : Effect.andThen(Effect.logWarning('A coordinator tool did not succeed', error), Effect.fail(toolRefusalOf(error))),
             ),
           ),
       })
@@ -2869,6 +2959,10 @@ export class Coordinator extends Context.Service<
                 type: 'string',
                 description:
                   "The branch it works toward, such as release/0.8.0: it starts from it, and its pull request goes into it. Only where the person asked for that branch, or the task is a fix for it; the project's Work toward without it. Its repository's remote must have it.",
+              },
+              runs_on: {
+                type: 'string',
+                description: RUNS_ON,
               },
             },
             required: ['title'],
@@ -3179,6 +3273,10 @@ export class Coordinator extends Context.Service<
                 description:
                   "The branch it works toward, such as release/0.8.0: it starts from it, and its pull request goes into it. Only where the person asked for that branch, or the task is a fix for it; the project's Work toward without it. Its repository's remote must have it.",
               },
+              runs_on: {
+                type: 'string',
+                description: RUNS_ON,
+              },
               waits_for: {
                 type: 'array',
                 items: { type: 'string' },
@@ -3227,6 +3325,10 @@ export class Coordinator extends Context.Service<
                 type: 'string',
                 description:
                   "The branch it works toward, such as release/0.8.0: it starts from it, and its pull request goes into it. Only where the person asked for that branch, or the task is a fix for it; the project's Work toward without it. Its repository's remote must have it.",
+              },
+              runs_on: {
+                type: 'string',
+                description: RUNS_ON,
               },
             },
             required: ['title', 'lead'],

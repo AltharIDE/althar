@@ -31,6 +31,7 @@ import { change, fact, timestamp } from './records'
 import { Sessions } from './Sessions'
 import { addItem, updateItem } from './threads'
 import { POOL, type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
+import { toolRefusalOf } from './toolRefusal'
 
 export type { Wanted } from './issueFields'
 
@@ -1059,10 +1060,7 @@ export class IssueChanges extends Context.Service<
                 ? Effect.fail(error)
                 : error instanceof IssueChangeRefused
                   ? Effect.fail(new ToolRefused({ message: error.message }))
-                  : Effect.andThen(
-                      Effect.logWarning('An issue tool did not succeed', error),
-                      Effect.fail(new ToolRefused({ message: 'Althar could not do that. Try again, or tell the person.' })),
-                    ),
+                  : Effect.andThen(Effect.logWarning('An issue tool did not succeed', error), Effect.fail(toolRefusalOf(error))),
             ),
           ),
       })

@@ -20,6 +20,7 @@ import { MERGE_REVIEW, mergeCopyOf } from './reviewCopy'
 import { Sessions } from './Sessions'
 import { addItem } from './threads'
 import { ToolRefused } from './toolErrors'
+import { toolRefusalOf } from './toolRefusal'
 import { DESCRIPTION_SHAPE } from './pullRequestWords'
 import { summarize } from './words'
 
@@ -781,7 +782,7 @@ export class MergeReviews extends Context.Service<
               ? Effect.fail(error)
               : Effect.andThen(
                   Effect.logWarning('Could not keep a review after a merge', error),
-                  Effect.fail(new ToolRefused({ message: 'Althar could not record that. Try again.' })),
+                  Effect.fail(toolRefusalOf(error, 'Althar could not record that')),
                 ),
           ),
         )

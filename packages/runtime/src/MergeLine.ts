@@ -30,6 +30,7 @@ import { checksOf, nameOf } from './pullRequestWords'
 import { timestamp } from './records'
 import { addItem, updateItem } from './threads'
 import { ActionNotPerformed, ToolRefused } from './toolErrors'
+import { toolRefusalOf } from './toolRefusal'
 import { POOL, type Tool, type ToolAccess, ToolServer } from './ToolServer'
 
 /*
@@ -172,9 +173,8 @@ const short = (sha: string | null | undefined) => (sha == null ? 'no commit' : s
 const lineOf = (entry: Pick<Entry, 'request' | 'branch'>) => `${entry.request.repository} ${entry.branch}`
 const stepOf = (entry: Pick<Entry, 'errandId' | 'stepKey'>) => `${entry.errandId}/${entry.stepKey}`
 const refused = (message: string) => new ToolRefused({ message })
-/** Anything but a refusal said in words is said as Althar's own failure, never as what the host or the store said. */
-const asRefused = (error: unknown) =>
-  error instanceof ToolRefused ? error : refused('Althar could not do that. Try again, or tell the person.')
+/** Anything but a refusal said in words is said in the runtime's own words for it (toolRefusal.ts), secrets taken out. */
+const asRefused = (error: unknown) => toolRefusalOf(error)
 const queueWords = (ways: MergeWays) => (ways.queue === 'merge_train' ? 'merge train' : 'merge queue')
 /** The host's own button that puts a pull request in its queue, as its pull request's page shows it. */
 const addButton = (host: CodeHost) =>

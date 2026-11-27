@@ -21,6 +21,7 @@ import { ASIDE_BUILDS, onScratch } from './scratch'
 import { addItem, updateItem } from './threads'
 import { Questions } from './Questions'
 import { POOL, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
+import { toolRefusalOf } from './toolRefusal'
 import { taskWorker, type WorkerSetupOutcome } from './workerExecution'
 import type { WorkerSetupCommands } from '@althar/worker-protocol/agent-runs'
 
@@ -761,7 +762,7 @@ export class Setups extends Context.Service<
                 ? Effect.fail(error)
                 : Effect.andThen(
                     Effect.logWarning('install_dependencies did not succeed', error),
-                    Effect.fail(new ToolRefused({ message: 'Althar could not run the setup. Try again, or tell the person.' })),
+                    Effect.fail(toolRefusalOf(error, 'Althar could not run the setup')),
                   ),
             ),
           ),
@@ -854,7 +855,7 @@ export class Setups extends Context.Service<
                 ? Effect.fail(error)
                 : Effect.andThen(
                     Effect.logWarning('record_setup did not succeed', error),
-                    Effect.fail(new ToolRefused({ message: 'Althar could not record the setup. Try again, or tell the person.' })),
+                    Effect.fail(toolRefusalOf(error, 'Althar could not record the setup')),
                   ),
             ),
           ),

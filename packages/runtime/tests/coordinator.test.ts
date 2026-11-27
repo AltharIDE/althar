@@ -1558,15 +1558,15 @@ describe("the coordinator's tools", () => {
       assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Did it.', built: 'A hello.' }), 'Althar has your summary.')
       const reviewer: ToolAccess = { role: 'reviewer', projectId, threadId, sessionId: 'none', taskId: null }
       assert.strictEqual(yield* callTool(reviewer, 'report_review', { verdict: 'pass', summary: 'Fine.' }), 'No review is waiting on you.')
-      // What goes wrong inside Althar is told as such, not as the agent's mistake.
+      // What goes wrong inside Althar is told as such, not as the agent's mistake, in the runtime's own words for it.
       const elsewhere: ToolAccess = { role: 'coordinator', projectId: 'prj_missing', threadId, sessionId: 'none', taskId: null }
-      assert.strictEqual(
+      assert.match(
         yield* callTool(elsewhere, 'draft_task', { title: 'x' }),
-        'Althar could not do that. Try again, or tell the person.',
+        /^Althar could not do that: .+\. Try again, or tell the person\.$/su,
       )
-      assert.strictEqual(
+      assert.match(
         yield* callTool({ ...lead, threadId: 'thr_missing' }, 'finish_step', { summary: 'Did it.', built: 'A hello.' }),
-        'Althar could not record that. Try again.',
+        /^Althar could not record that(: .+\.|, and what it did is in its log\.) Try again, or tell the person\.$/su,
       )
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.minutes(5) }))),
   )

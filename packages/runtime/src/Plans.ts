@@ -106,6 +106,11 @@ export class Plans extends Context.Service<
       readonly worksInWhy?: string | null
       /** What the proposing call was, as the coordinator made it: kept with the plan through the person's changes, so a repeat of the call is known for one (`Coordinator.propose`). */
       readonly proposal?: string
+      /**
+       * Where it runs once it starts, as `place` chooses it: a worker by its id, or `auto` for any free one; null for the home.
+       * Left out, a plan it replaces keeps where it was placed. One counting down that the place can't take now is held.
+       */
+      readonly runsOn?: string | null
     }): Effect.Effect<string, unknown>
     /**
      * Starts a proposed plan now: its first step is under way (`running`), or
@@ -127,6 +132,8 @@ export class Plans extends Context.Service<
      * so choices that reach it out of order leave the latest.
      */
     place(planId: string, runsOn: string | null, actorId: ActorId, chosenAt?: number): Effect.Effect<boolean, unknown>
+    /** What keeps a plan not yet begun from starting where it is placed, in the words its card says it; undefined where nothing does. */
+    problem(planId: string): Effect.Effect<string | undefined, unknown>
     /**
      * Changes a proposed plan's steps (who does them, or which are skipped),
      * and what happens when the work is done; or a started one's, while its
@@ -250,11 +257,16 @@ export class Plans extends Context.Service<
             const countdown = input.startsIn ?? testCountdown ?? (yield* countdownNow)
             const countdownEnds = new Date(Date.parse(at) + Duration.toMillis(countdown)).toISOString()
             let startsAt: string | null = null
+            let placed = false
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 // A task has one plan waiting: a new proposal replaces the one before.
-                const earlier = yield* sql<{ id: string; startsAt: string | null }>`
-                  SELECT id, starts_at FROM task_plans WHERE task_id = ${input.taskId} AND state = 'proposed'`
+                const earlier = yield* sql<{ id: string; startsAt: string | null; runsOn: string | null }>`
+                  SELECT id, starts_at, json_extract(parameters, '$.runsOn') AS runs_on FROM task_plans
+                  WHERE task_id = ${input.taskId} AND state = 'proposed'`
+                // Where it runs: as asked now, else where the plan it replaces was placed.
+                const runsOn = input.runsOn === undefined ? (earlier.find((plan) => plan.runsOn !== null)?.runsOn ?? null) : input.runsOn
+                placed = runsOn !== null
                 // A plan the person held stays held when it is re-planned, unless this one is to start at once or says how soon.
                 const keepsHold = input.held === undefined && input.startsIn === undefined && earlier.some((plan) => plan.startsAt === null)
                 startsAt = input.held === true || keepsHold ? null : countdownEnds
@@ -294,6 +306,7 @@ export class Plans extends Context.Service<
                     ...(input.worksIn === undefined ? {} : { worksIn: input.worksIn }),
                     ...(input.worksInWhy == null || input.worksInWhy.trim() === '' ? {} : { worksInWhy: input.worksInWhy.trim() }),
                     ...(input.proposal === undefined ? {} : { proposal: input.proposal }),
+                    ...(runsOn === null ? {} : { runsOn }),
                   }),
                   proposedByActorId: input.actorId,
                   state: 'proposed',
@@ -312,6 +325,8 @@ export class Plans extends Context.Service<
               }),
             )
             if (input.aside !== true) yield* postCard(input.projectId, input.taskId)
+            // Placed where it can't start now, it waits for the person, as a place chosen on its card does.
+            if (placed) yield* holdIfUnfit(planId, input.actorId)
             yield* Queue.offer(wake, undefined)
             return planId
           }),
@@ -597,6 +612,17 @@ export class Plans extends Context.Service<
         start: (planId, actorId, workerId) => provide(start(planId, actorId, false, workerId)),
         hold: (planId, actorId) => provide(hold(planId, actorId)),
         place: (planId, runsOn, actorId, chosenAt) => provide(place(planId, runsOn, actorId, chosenAt)),
+        problem: (planId) =>
+          provide(
+            Effect.gen(function* () {
+              const plan = yield* load(planId)
+              if (plan.state !== 'proposed') return undefined
+              return yield* placeOn(undefined)(plan).pipe(
+                Effect.as(undefined),
+                Effect.catch((error) => (error instanceof ApiError ? Effect.succeed(error.message) : Effect.fail(error))),
+              )
+            }),
+          ),
         change: (planId, steps, actorId, end, worksIn, toward) =>
           provide(
             Effect.gen(function* () {
