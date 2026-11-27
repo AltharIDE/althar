@@ -1,6 +1,7 @@
 import { Brand, BrandMark, Icon, Logo, planPeekText, reportProblemText, undoTurnText } from '@althar/ui'
+import { YourWorkers, yourWorkersText } from '@althar/ui/screens'
 import { sealSvg } from '@althar/ui/seal'
-import { type CSSProperties, Fragment as Piece, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { Agent, AGENTS } from '../../content/agents'
 import { Fragment } from '../../home/bodies/desktop/Fragment'
@@ -1169,153 +1170,15 @@ function Undo() {
 /* ---- 0.10.0: your own workers ---- */
 
 /*
- * The beats: Althar on your Mac, a task open in it, its lead running on a
- * Linux worker of yours; the worker runs the project's setup and its tests
- * for the task, and sends its commits back to the Mac, where the lead's
- * answer comes in. Then it holds, and clears.
+ * The kit's drawing of it, as Althar's own What's new and the home page have
+ * it: one worker of yours running a task and sending its commits back, then
+ * a fleet of them round your computer, all at work. On the log's warm dark,
+ * in its colours (LogPictures.module.css .fleet).
  */
-const HOSTED: Timeline = { beats: [0, 1800, 3000, 3800, 4600, 5600, 7000, 12600], loop: 13400, rest: 6 }
-
-/** The tasks the worker has, and the beat each finishes on, if it does. The first one is the task open on the Mac. */
-const ON_HOME = [
-  { name: 'Partial refunds', agent: Agent.Claude, done: 5 },
-  { name: 'Webhook retries', agent: Agent.Codex, done: null },
-] as const
-
-/** What the worker does for the task: the commands it runs typed, what comes back not, and the beat each line comes on. */
-const ON_WORKER = [
-  { at: 0, line: 'Lead for Partial refunds · Claude Code', typed: false },
-  { at: 2, line: 'bun install', typed: true },
-  { at: 2, line: 'Setup done in 4.2 s', typed: false },
-  { at: 3, line: 'bun test src/refunds', typed: true },
-  { at: 4, line: '✓ 23 passed', typed: false },
-  { at: 5, line: '2 commits back to This Mac', typed: false },
-] as const
-
 function Home() {
-  const ref = useRef<HTMLDivElement>(null)
-  const beat = useBeat(ref, HOSTED)
-  const out = beat === HOSTED.beats.length - 1
-  const at = (from: number) => beat >= from && !out
-  const sent = at(5)
-  const working = !out && !sent
   return (
-    <Frame
-      label="Your own workers: a task open in Althar on your Mac runs its lead on runner-1, a Linux machine of yours, which runs the project's setup and tests and sends its commits back to the Mac"
-      w={64}
-      n={32}
-    >
-      <div ref={ref} className={p.hoStage}>
-        <div className={cx(p.win, p.hoWin)}>
-          <Bar end={<span className={p.hoChip}>This Mac</span>}>
-            <Tab name="Tally" ink="#2f6f7a" on />
-          </Bar>
-          <div className={p.hoTalk}>
-            <div className={p.brTask}>
-              <b>Partial refunds</b>
-              <code>althar/partial-refunds</code>
-            </div>
-            <div className={p.unYou}>
-              <p>Let a refund be for part of a payment.</p>
-            </div>
-            <div className={p.brAfter}>
-              <span className={p.brLive} data-shown={!at(5)}>
-                <i />
-                <span>Writing src/refunds/refund.ts</span>
-              </span>
-              <div className={p.brLead} data-shown={at(5)}>
-                <span className={p.mk}>
-                  <AgentMark agent={Agent.Claude} size={13} />
-                </span>
-                <p>
-                  A refund takes an amount now, up to what’s left on the payment.{' '}
-                  <span className={p.diff}>
-                    <ins>+31</ins> <del>−3</del>
-                  </span>
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className={p.hoLink}>
-          <span className={p.hoWire} />
-          <span className={p.hoVia}>Runs on</span>
-        </div>
-        <div className={p.hoBox}>
-          <div className={p.hoHead}>
-            <span className={p.hoOs}>
-              <OsMark id="linux" size={15} />
-            </span>
-            <span className={p.who}>
-              <b>runner-1</b>
-              <span>Your Linux machine · x64</span>
-            </span>
-            <span className={p.hoReady}>Ready</span>
-          </div>
-          <span className={p.hoLabel}>Leads here</span>
-          <ul className={p.hoTasks}>
-            {ON_HOME.map((task) => {
-              const done = task.done !== null && at(task.done)
-              return (
-                <li key={task.name}>
-                  <span className={p.mk}>
-                    <AgentMark agent={task.agent} size={12} />
-                  </span>
-                  <span className={p.hoName}>{task.name}</span>
-                  <span key={String(done)} className={p.hoState} data-done={done}>
-                    {done ? (
-                      <>
-                        <Icon name="check" size={11} />
-                        Finished
-                      </>
-                    ) : (
-                      <>
-                        <i />
-                        At work
-                      </>
-                    )}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
-          <span className={p.hoLabel}>Run</span>
-          <div className={p.hoWorker}>
-            <div className={p.hoRun}>
-              <code>partial-refunds</code>
-              <span key={sent ? 'sent' : working ? 'working' : 'idle'} className={p.hoState} data-done={sent}>
-                {sent ? (
-                  <>
-                    <Icon name="check" size={11} />
-                    Sent back
-                  </>
-                ) : working ? (
-                  <>
-                    <i />
-                    Running
-                  </>
-                ) : (
-                  'Free'
-                )}
-              </span>
-            </div>
-            {/* What the worker runs for the task, as its run shows it. */}
-            <ol className={p.hoLog}>
-              {ON_WORKER.map((line) => (
-                <li key={line.line} data-shown={at(line.at)} data-typed={line.typed}>
-                  {/* Each word whole: a line breaks between its arguments, never inside a flag or an ID. */}
-                  {line.line.split(' ').map((word, i) => (
-                    <Piece key={i}>
-                      {i > 0 && ' '}
-                      <span>{word}</span>
-                    </Piece>
-                  ))}
-                </li>
-              ))}
-            </ol>
-          </div>
-        </div>
-      </div>
+    <Frame label={yourWorkersText.label} w={64} n={32}>
+      <YourWorkers className={p.fleet} />
     </Frame>
   )
 }

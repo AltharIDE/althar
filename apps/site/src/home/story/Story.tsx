@@ -1,3 +1,4 @@
+import { YourWorkers } from '@althar/ui/screens'
 import { useRef, useState } from 'react'
 
 import { LINKS } from '../../content/facts'
@@ -26,7 +27,8 @@ import { useWaterfall } from './waterfall'
  * The home page after its first screen: the product, one scene after
  * another, on the page's paper, the way down told by the scroll. First the
  * race (Race.tsx); then three of the app's views at work in a row (Views),
- * under a heading that pours cobalt where the pointer goes (waterfall.ts); the community's Discord, busy beside its
+ * under a heading that pours cobalt where the pointer goes (waterfall.ts); your workers, one and then a fleet
+ * round your computer, played by the scroll (the kit's YourWorkers); the community's Discord, busy beside its
  * words and the way in (Community.tsx); the review pins on a dark ground and plays as you scroll; the
  * features and the app's screens run sideways; the integrations light up
  * name by name; and the download sits on cobalt under its own light. The
@@ -103,6 +105,31 @@ function Board() {
           </div>
         </div>
         <Views at={at} />
+      </div>
+    </section>
+  )
+}
+
+/**
+ * Your workers: one, close up, running a task and sending its commits back,
+ * then the view pulling back to rings of them round your computer, all at
+ * work (the kit's YourWorkers, the app's What's new and the changelog draw
+ * the same). Pinned on a desktop, the scroll plays it; on a tablet or a
+ * phone it isn't pinned, and plays its own loop while in sight. With motion
+ * reduced it stands still on the fleet.
+ */
+function WorkersScene() {
+  const box = useRef<HTMLElement>(null)
+  const narrow = useMedia('(max-width: 900px)')
+  const [at, setAt] = useState(0)
+  const still = useScrolled(box, { pin: narrow ? 0 : 2.6, bare: true }, setAt, 1)
+  return (
+    <section ref={box} id="workers" className={cx(s.scene, s.workers)} aria-labelledby="workers-h" data-km={KM.workers}>
+      <div className={s.stick} data-stick="">
+        <div className={s.wrap}>
+          <Head id="workers" />
+          <YourWorkers className={s.fleet} {...(narrow || still ? {} : { at })} />
+        </div>
       </div>
     </section>
   )
@@ -277,6 +304,7 @@ export function Story() {
     <main id="main" tabIndex={-1} className={s.story}>
       <Race />
       <Board />
+      <WorkersScene />
       <Community />
       <ReviewScene />
       <Flow />

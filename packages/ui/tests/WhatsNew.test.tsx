@@ -148,40 +148,38 @@ describe('What’s new', () => {
 })
 
 describe('the lead drawn', () => {
-  const state = (container: HTMLElement) => container.querySelector('[data-finished]')
-  const one = (container: HTMLElement) => container.querySelector('[data-many]')
-  const rows = (container: HTMLElement) => [...container.querySelectorAll('.row')]
+  const story = (container: HTMLElement) => Number((container.querySelector('svg') as SVGElement).style.getPropertyValue('--t'))
+  const count = (container: HTMLElement) => container.querySelector('.count')?.textContent
 
-  it('goes round its beats while on screen: one worker runs a task and sends it back, then many work at once', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+  it('stands where its host puts it: one worker close up, then the fleet all at work', () => {
+    const { container, rerender } = render(<YourWorkers at={0.3} />)
+    // runner-1 has the task: one agent at work.
+    expect(story(container)).toBeCloseTo(0.3 * 0.86, 3)
+    expect(count(container)).toBe('1')
+    rerender(<YourWorkers at={1} />)
+    expect(count(container)).toBe('44')
+  })
+
+  it('plays its own loop while on screen: the task goes out, then the fleet joins', async () => {
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] })
     const { container } = render(<YourWorkers />)
     // The observer sees it on screen a moment after it's drawn.
     await act(async () => {
       await Promise.resolve()
     })
-    expect(one(container)).toHaveAttribute('data-many', 'true')
-    // From its rest at 10.4 s, through the loop's end at 14 s, to runner-1 at work 1.6 s into the next.
     await act(async () => {
-      vi.advanceTimersByTime(3_600 + 1_600 + 10)
+      vi.advanceTimersByTime(17_000 * 0.3)
     })
-    expect(one(container)).toHaveAttribute('data-many', 'false')
-    expect(one(container)).toHaveAttribute('data-busy', 'true')
-    expect(rows(container).every((row) => row.getAttribute('data-shown') === 'false')).toBe(true)
-    // Its commits come back, and the task is finished on this computer.
+    expect(story(container)).toBeGreaterThan(0.28)
+    expect(story(container)).toBeLessThan(0.32)
+    expect(count(container)).toBe('1')
     await act(async () => {
-      vi.advanceTimersByTime(4_400 - 1_600)
+      vi.advanceTimersByTime(17_000 * 0.5)
     })
-    expect(state(container)).toHaveAttribute('data-finished', 'true')
-    // Then many workers, each at work.
-    await act(async () => {
-      vi.advanceTimersByTime(6_000 - 4_400)
-    })
-    expect(one(container)).toHaveAttribute('data-many', 'true')
-    expect(rows(container)).toHaveLength(5)
-    expect(rows(container).every((row) => row.getAttribute('data-shown') === 'true')).toBe(true)
+    expect(Number(count(container))).toBeGreaterThan(30)
   })
 
-  it('rests on the many with motion reduced', () => {
+  it('rests on the fleet with motion reduced', () => {
     vi.stubGlobal(
       'matchMedia',
       (query: string) =>
@@ -192,11 +190,10 @@ describe('the lead drawn', () => {
           removeEventListener() {},
         }) as unknown as MediaQueryList,
     )
-    const { container } = render(<YourWorkers text={{ computer: { name: 'Your laptop', what: 'Where you talk.' } }} />)
-    expect(screen.getByText('Your laptop')).toBeInTheDocument()
-    expect(one(container)).toHaveAttribute('data-many', 'true')
-    expect(rows(container).every((row) => row.getAttribute('data-busy') === 'true')).toBe(true)
-    expect(screen.getAllByText('6 tasks on your workers').length).toBeGreaterThan(0)
+    const { container } = render(<YourWorkers />)
+    expect(story(container)).toBeCloseTo(0.88, 3)
+    expect(count(container)).toBe('44')
+    expect(screen.getByRole('figure')).toHaveAccessibleName(/dozens of workers/)
   })
 })
 
