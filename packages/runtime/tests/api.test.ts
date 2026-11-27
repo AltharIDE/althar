@@ -1359,6 +1359,39 @@ describe('the API', () => {
       }),
     ),
   )
+
+  it.live('says a message is not sent while no agent is on its way to read it, and sends it again', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Unsent' })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: task.threadId,
+          body: 'my message not sending',
+          disposition: 'after_current',
+        })
+        const message = (thread: ThreadSnapshot) =>
+          thread.items.flatMap((item) => (item.kind === 'user_message' && item.content.text === 'my message not sending' ? [item] : []))[0]
+        // Queued for a lead that hasn't started yet, it is on its way.
+        assert.isUndefined(message(yield* client.GetThread({ threadId: task.threadId }))?.input?.unsent)
+        // Its lead couldn't start: nothing is on its way to read it.
+        yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'missing' }))
+        assert.deepInclude(message(yield* client.GetThread({ threadId: task.threadId, fresh: true }))?.input, {
+          state: 'queued',
+          unsent: true,
+        })
+        // Sent again, by a lead that starts: it reads it, and it isn't said to be unsent any more.
+        yield* client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'codex' })
+        const read = yield* until(
+          client.GetThread({ threadId: task.threadId, fresh: true }),
+          (thread) => message(thread)?.input?.state === 'delivered',
+        )
+        assert.isUndefined(message(read)?.input?.unsent)
+      }),
+    ),
+  )
 })
 
 describe('accounts, through the API', () => {

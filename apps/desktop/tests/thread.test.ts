@@ -372,6 +372,23 @@ describe('the wait for a reply', () => {
     expect(blocksOf({ ...source(now), reading: true }, new Map(), at)[2]).toMatchObject({ delivery: Delivery.Interrupting })
   })
 
+  it('says not sent of what no agent is on its way to read, in the thread and never waited on, until it is sent again', () => {
+    // Its lead couldn't start: an interrupting message as a queued one, neither with a wait after it nor in the composer.
+    for (const interrupting of [false, true]) {
+      const thread = [
+        items.you('Go'),
+        items.says('Done.'),
+        items.you('my message not sending', { state: 'queued', interrupting, unsent: true }),
+      ]
+      const shown = blocksOf({ ...source(thread), reading: false, queue: true }, new Map(), at)
+      expect(kinds(shown)).toEqual(['you', 'turn', 'you'])
+      expect(shown[2]).toMatchObject({ delivery: Delivery.NotSent })
+      // Sent again, it is on its way at once.
+      const again = blocksOf({ ...source(thread), reading: true, resending: true }, new Map(), at)
+      expect(again[2]).toMatchObject({ delivery: interrupting ? Delivery.Interrupting : Delivery.Delivered })
+    }
+  })
+
   it('waits on what the coordinator passed on, and on what opens the thread from outside it, but not on what waits behind a turn', () => {
     const passed = items.notice({ source: 'runtime', title: 'From the coordinator:', description: 'Ship it.', role: 'relayed' }, null)
     expect(kinds(blocksOf(source([items.says('Done.'), passed], true), new Map(), at))).toEqual(['turn', 'divider', 'waiting'])

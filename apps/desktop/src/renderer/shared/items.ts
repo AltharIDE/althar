@@ -233,6 +233,7 @@ export const queueShown = (
           item.input?.state === 'queued' &&
           !item.input.interrupting &&
           item.input.claimed !== true &&
+          item.input.unsent !== true &&
           !locallyReading(item),
       )))
 
@@ -282,6 +283,7 @@ export const queuedOf = (
         item.input?.state === 'queued' &&
         !item.input.interrupting &&
         item.input.claimed !== true &&
+        item.input.unsent !== true &&
         !(readingLocally && locallyReading(item))
           ? [
               {

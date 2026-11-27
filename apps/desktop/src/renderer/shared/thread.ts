@@ -641,6 +641,8 @@ export interface ThreadSource {
    * not a queue, though the agent may still be starting to read it.
    */
   readonly reading?: boolean
+  /** The person just sent again what wasn't sent: it shows as on its way, not as not sent. */
+  readonly resending?: boolean
   /** A locally sent first message is starting an absent session. */
   readonly readingLocally?: boolean
   /** When the agent's last turn ended, by the runtime's clock: a message delivered before it was answered, if with nothing. */
@@ -897,16 +899,20 @@ export const blocksOf = (
             item.input?.state === 'queued' &&
             !item.input.interrupting &&
             item.input.claimed !== true &&
+            item.input.unsent !== true &&
             !(source.readingLocally === true && locallyReading(item)))
         )
           continue
-        // Being read now, it is the agent's already, in the store's word a moment later.
+        // Being read now, it is the agent's already, in the store's word a moment later. One no agent is on its way to read
+        // says so, with Send again, unless the person just sent it again.
         const delivery =
-          item.input?.state === 'queued' && item.input.claimed !== true && (item.input.interrupting || source.reading !== true)
-            ? item.input.interrupting
-              ? Delivery.Interrupting
-              : Delivery.Queued
-            : Delivery.Delivered
+          item.input?.state === 'queued' && item.input.unsent === true && source.resending !== true
+            ? Delivery.NotSent
+            : item.input?.state === 'queued' && item.input.claimed !== true && (item.input.interrupting || source.reading !== true)
+              ? item.input.interrupting
+                ? Delivery.Interrupting
+                : Delivery.Queued
+              : Delivery.Delivered
         blocks.push({
           kind: 'you',
           id: item.id,

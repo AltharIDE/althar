@@ -41,6 +41,12 @@
   font-size: 11px;
   color: var(--t-3);
 }
+.notSent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--danger);
+}
 .queued .at {
   animation: appear 160ms var(--ease) 1s both;
 }

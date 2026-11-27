@@ -1020,7 +1020,8 @@ export const useTask = (threadId: string): TaskModel => {
         show: (task) => ({ ...task, goal: nextGoal(task.goal ?? null, { action: 'pause' }) }),
       }),
     compact: () => act(() => client.compact(threadId)),
-    tryAgain: () => act(() => client.tryAgain(threadId)),
+    // On its way as a send is: what it sends again shows as going at once, not as not sent.
+    tryAgain: () => act(() => client.tryAgain(threadId), presses.send),
     choose: async (choice) => {
       setError(null)
       let taken = true
