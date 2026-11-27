@@ -112,16 +112,25 @@ describe('checking a GitHub connection', () => {
           line('account', 'ok', { fact: 'you' }),
           // Owners as GitHub spells them, once each.
           line('reach', 'ok', { fact: 'northwind' }),
-          line('push', 'ok'),
+          line('push', 'ok', {
+            repositories: [
+              { path: 'northwind/api', state: 'ok', reason: null },
+              { path: 'Northwind/web', state: 'ok', reason: null },
+            ],
+          }),
           line('changes', 'ok'),
           line('checks', 'ok'),
           line('issues', 'ok'),
         ],
         expiresAt: '2025-01-08T00:00:00.000Z',
         scopes: ['repo', 'workflow'],
+        // Each repository it reaches, by its path as asked.
+        reached: ['northwind/api', 'Northwind/web'],
       })
       for (const request of sent) {
         assert.strictEqual(request.method, 'GET')
+        // git's own question of a push goes to the web host, as git sends it.
+        if (!request.url.startsWith(GH)) continue
         assert.strictEqual(request.headers['x-github-api-version'], '2022-11-28')
         assert.strictEqual(request.headers.accept, 'application/vnd.github+json')
       }
@@ -171,24 +180,97 @@ describe('checking a GitHub connection', () => {
     Effect.gen(function* () {
       const routes: ReadonlyArray<Route> = [
         me({ 'github-authentication-token-expiration': '2026-10-11 17:00:00 +0200' }),
+        ['GET', `${GH}/user/installations?per_page=100&page=1`, { json: { total_count: 0, installations: [] } }],
         ['GET', NORTHWIND, { status: 404, json: { message: 'Not Found' } }],
       ]
       const installed = gitHub(routes, { auth: 'device_flow', appSlug: 'althar', repositories: [['northwind', 'api']] })
       const report = yield* installed.check
+      // Nothing it reaches, so nothing is known of what it may do there.
       assert.deepStrictEqual(report.lines, [
         line('account', 'ok', { fact: 'you' }),
         line('reach', 'no', {
           reason: { kind: 'not_installed', owner: 'northwind', url: 'https://github.com/apps/althar/installations/new' },
         }),
-        line('push', 'ok'),
-        line('changes', 'ok'),
-        line('checks', 'ok'),
-        line('issues', 'ok'),
+        line('push', 'unknown', { reason: UNSAID }),
+        line('changes', 'unknown', { reason: UNSAID }),
+        line('checks', 'unknown', { reason: UNSAID }),
+        line('issues', 'unknown', { reason: UNSAID }),
       ])
       assert.strictEqual(report.expiresAt, '2026-10-11T15:00:00.000Z')
       assert.isNull(report.scopes)
       const unnamed = yield* gitHub(routes, { auth: 'device_flow', repositories: [['northwind', 'api']] }).check
       assert.deepStrictEqual(reasonOf(unnamed, 'reach'), { kind: 'not_installed', owner: 'northwind', url: null })
+    }),
+  )
+
+  it.effect('signed in by the App, asks GitHub where it is installed, since any token reads a public repository', () =>
+    Effect.gen(function* () {
+      const installations = (...installs: ReadonlyArray<Record<string, unknown>>): Route => [
+        'GET',
+        `${GH}/user/installations?per_page=100&page=1`,
+        { json: { total_count: installs.length, installations: installs } },
+      ]
+      const check = (routes: ReadonlyArray<Route>) =>
+        gitHub([me(), ['GET', NORTHWIND, { json: repository() }], ...routes], {
+          auth: 'device_flow',
+          appSlug: 'althar',
+          repositories: [['northwind', 'api']],
+        }).check
+      const NOT_INSTALLED = { kind: 'not_installed', owner: 'northwind', url: 'https://github.com/apps/althar/installations/new' } as const
+
+      // A public repository answers, but the App is on no owner: not installed, with its page.
+      assert.deepStrictEqual(reasonOf(yield* check([installations()]), 'reach'), NOT_INSTALLED)
+      // On another owner only.
+      const elsewhere = installations({ id: 1, account: { login: 'initech' }, repository_selection: 'all' })
+      assert.deepStrictEqual(reasonOf(yield* check([elsewhere]), 'reach'), NOT_INSTALLED)
+      // On every repository of the owner, whatever case GitHub spells it in: reached, and the App's permissions hold.
+      const everywhere = yield* check([installations({ id: 2, account: { login: 'Northwind' }, repository_selection: 'all' })])
+      assert.deepStrictEqual(states(everywhere), ['account ok', 'reach ok', 'push ok', 'changes ok', 'checks ok', 'issues ok'])
+      // On some of its repositories: those it was let into, page after page.
+      const some = installations({ id: 3, account: { login: 'northwind' }, repository_selection: 'selected' })
+      const chosen = (names: ReadonlyArray<string>): ReadonlyArray<Route> => [
+        some,
+        [
+          'GET',
+          `${GH}/user/installations/3/repositories?per_page=100&page=1`,
+          { json: { repositories: Array.from({ length: 100 }, (_, n) => ({ full_name: `northwind/other-${n}` })) } },
+        ],
+        [
+          'GET',
+          `${GH}/user/installations/3/repositories?per_page=100&page=2`,
+          { json: { repositories: names.map((full_name) => ({ full_name })) } },
+        ],
+      ]
+      assert.deepStrictEqual(reasonOf(yield* check(chosen(['northwind/web'])), 'reach'), NOT_INSTALLED)
+      assert.deepStrictEqual(states(yield* check(chosen(['northwind/API']))).slice(0, 2), ['account ok', 'reach ok'])
+      // More chosen repositories than it reads: one not among them isn't known, rather than not installed.
+      const endless = yield* check([
+        some,
+        [
+          'GET',
+          /\/user\/installations\/3\/repositories\?per_page=100&page=\d+$/,
+          { json: { repositories: Array.from({ length: 100 }, (_, n) => ({ full_name: `northwind/other-${n}` })) } },
+        ],
+      ])
+      assert.strictEqual(reasonOf(endless, 'reach')?.kind, 'failed')
+      // The repositories it reaches, by their paths as asked.
+      assert.deepStrictEqual(everywhere.reached, ['northwind/api'])
+      assert.deepStrictEqual((yield* check([installations()])).reached, [])
+      // Installed there, yet the repository isn't there for this account: not seen, rather than not installed.
+      const gone = yield* gitHub(
+        [
+          me(),
+          installations({ id: 2, account: { login: 'northwind' }, repository_selection: 'all' }),
+          ['GET', NORTHWIND, { status: 404, json: { message: 'Not Found' } }],
+        ],
+        { auth: 'device_flow', appSlug: 'althar', repositories: [['northwind', 'api']] },
+      ).check
+      assert.deepStrictEqual(reasonOf(gone, 'reach'), { kind: 'unseen', names: ['northwind/api'], url: null })
+      // GitHub didn't say where it is installed: why, rather than a guess either way.
+      const unsaid = yield* check([
+        ['GET', `${GH}/user/installations?per_page=100&page=1`, { status: 502, json: { message: 'Server Error' } }],
+      ])
+      assert.deepStrictEqual(reasonOf(unsaid, 'reach'), { kind: 'failed', message: 'Server Error' })
     }),
   )
 
@@ -286,8 +368,128 @@ describe('checking a GitHub connection', () => {
         { repositories: [['northwind', 'api']] },
       )
       const report = yield* check
-      assert.deepStrictEqual(reasonOf(report, 'push'), { kind: 'role', role: null })
+      assert.deepStrictEqual(reasonOf(report, 'push'), { kind: 'role', role: null, names: ['northwind/api'] })
       assert.deepStrictEqual(states(report), ['account ok', 'reach ok', 'push no', 'changes ok', 'checks ok', 'issues ok'])
+    }),
+  )
+
+  /** git's first question of a push to northwind/api, answered as a test says. */
+  const RECEIVE = 'https://github.com/northwind/api.git/info/refs?service=git-receive-pack'
+
+  it.effect('asks each repository it sees whether this token may push there, as git does before a push', () =>
+    Effect.gen(function* () {
+      // A public repository: any token reads it, and GitHub says the account may push; the token was kept to reading.
+      const tokens = 'https://github.com/settings/personal-access-tokens'
+      const { check, sent } = gitHub([me(), ['GET', NORTHWIND, { json: repository() }], ['GET', RECEIVE, { status: 403, text: '' }]], {
+        repositories: [['northwind', 'api']],
+      })
+      const report = yield* check
+      assert.deepStrictEqual(reasonOf(report, 'push'), { kind: 'no_push', names: ['northwind/api'], url: tokens })
+      // Signed in as git is, on the web host, never with the token in the address; nothing is sent.
+      const asked = sent.find((request) => request.url === RECEIVE)
+      assert.strictEqual(asked?.method, 'GET')
+      assert.strictEqual(asked?.headers.authorization, `Basic ${Buffer.from('x-access-token:secret-token').toString('base64')}`)
+      assert.isUndefined(asked?.body)
+      // Taken: a fine-grained token's push is known, not guessed.
+      const taken = yield* gitHub(
+        [me(), ['GET', NORTHWIND, { json: repository() }], ['GET', RECEIVE, { text: '001e# service=git-receive-pack' }]],
+        {
+          repositories: [['northwind', 'api']],
+        },
+      ).check
+      assert.deepStrictEqual(
+        taken.lines.find((one) => one.need === 'push'),
+        line('push', 'ok', { repositories: [{ path: 'northwind/api', state: 'ok', reason: null }] }),
+      )
+      // Refused by git's sign-in too, as a token that reads the API but not git is.
+      const unsigned = yield* gitHub([me(), ['GET', NORTHWIND, { json: repository() }], ['GET', RECEIVE, { status: 401, text: '' }]], {
+        repositories: [['northwind', 'api']],
+      }).check
+      assert.strictEqual(reasonOf(unsigned, 'push')?.kind, 'no_push')
+      // Unanswered, or rate limited, says nothing: the check goes by what else it knows.
+      for (const answer of [
+        { status: 500, text: '' },
+        { status: 429, text: '' },
+        { status: 403, text: '', headers: { 'retry-after': '60' } },
+      ]) {
+        const unsaid = yield* gitHub([me(), ['GET', NORTHWIND, { json: repository() }], ['GET', RECEIVE, answer]], {
+          repositories: [['northwind', 'api']],
+        }).check
+        assert.deepStrictEqual(
+          unsaid.lines.find((one) => one.need === 'push'),
+          line('push', 'unknown', { reason: UNSAID, repositories: [{ path: 'northwind/api', state: 'unknown', reason: UNSAID }] }),
+        )
+      }
+    }),
+  )
+
+  it.effect('keeps each repository’s own outcome, and asks only those a task’s work is pushed to', () =>
+    Effect.gen(function* () {
+      const WEB = `${GH}/repos/northwind/web`
+      const UPSTREAM = `${GH}/repos/acme/api`
+      const receive = (path: string) => `https://github.com/${path}.git/info/refs?service=git-receive-pack`
+      const { check, sent } = gitHub(
+        [
+          me({ 'x-oauth-scopes': 'repo' }),
+          // One the account may only read, one the token may only read, and a fork's upstream nobody pushes to.
+          ['GET', NORTHWIND, { json: repository({ permissions: { push: false } }) }],
+          ['GET', WEB, { json: repository({ id: 8, full_name: 'northwind/web' }) }],
+          ['GET', UPSTREAM, { json: repository({ id: 9, full_name: 'acme/api', permissions: { push: false } }) }],
+          ['GET', receive('northwind/web'), { status: 403, text: '' }],
+        ],
+        {
+          repositories: [
+            ['northwind', 'api'],
+            ['northwind', 'web'],
+            ['acme', 'api'],
+          ],
+          pushes: [
+            ['northwind', 'api'],
+            ['northwind', 'web'],
+          ],
+        },
+      )
+      const report = yield* check
+      const push = report.lines.find((one) => one.need === 'push')
+      assert.deepStrictEqual(push?.repositories, [
+        { path: 'northwind/api', state: 'no', reason: { kind: 'role', role: null, names: ['northwind/api'] }, accountPush: false },
+        {
+          path: 'northwind/web',
+          state: 'no',
+          reason: { kind: 'no_push', names: ['northwind/web'], url: 'https://github.com/settings/tokens' },
+          accountPush: true,
+        },
+      ])
+      // The upstream is read, never asked whether it takes a push.
+      assert.isUndefined(sent.find((request) => request.url === receive('acme/api')))
+    }),
+  )
+
+  it.effect('says Althar’s app or a classic token can’t push where git refuses it, but a missing scope by its scope', () =>
+    Effect.gen(function* () {
+      const routes: ReadonlyArray<Route> = [
+        ['GET', NORTHWIND, { json: repository() }],
+        ['GET', RECEIVE, { status: 403, text: '' }],
+      ]
+      const installed: Route = [
+        'GET',
+        `${GH}/user/installations?per_page=100&page=1`,
+        { json: { total_count: 1, installations: [{ id: 1, account: { login: 'northwind' }, repository_selection: 'all' }] } },
+      ]
+      const app = yield* gitHub([me(), installed, ...routes], {
+        auth: 'device_flow',
+        appSlug: 'althar',
+        repositories: [['northwind', 'api']],
+      }).check
+      assert.deepStrictEqual(reasonOf(app, 'push'), { kind: 'no_push', names: ['northwind/api'], url: null })
+      const classic = yield* gitHub([me({ 'x-oauth-scopes': 'repo' }), ...routes], { repositories: [['northwind', 'api']] }).check
+      assert.deepStrictEqual(reasonOf(classic, 'push'), {
+        kind: 'no_push',
+        names: ['northwind/api'],
+        url: 'https://github.com/settings/tokens',
+      })
+      const scopeless = yield* gitHub([me({ 'x-oauth-scopes': 'read:org' }), ...routes], { repositories: [['northwind', 'api']] }).check
+      assert.strictEqual(reasonOf(scopeless, 'push')?.kind, 'scope')
     }),
   )
 
@@ -312,7 +514,7 @@ describe('checking a GitHub connection', () => {
       assert.deepStrictEqual(report.lines, [
         line('account', 'ok', { fact: 'you' }),
         line('reach', 'ok', { fact: 'northwind' }),
-        line('push', 'unknown', { reason: UNSAID }),
+        line('push', 'unknown', { reason: UNSAID, repositories: [{ path: 'northwind/api', state: 'unknown', reason: UNSAID }] }),
         line('changes', 'unknown', { reason: UNSAID }),
         line('checks', 'ok'),
         line('issues', 'unknown', { reason: UNSAID }),
@@ -414,6 +616,7 @@ describe('checking a GitLab connection', () => {
         ],
         expiresAt: '2025-12-31T00:00:00.000Z',
         scopes: ['api'],
+        reached: ['northwind/api', 'northwind/platform/web'],
       })
     }),
   )

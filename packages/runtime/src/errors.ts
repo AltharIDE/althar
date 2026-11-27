@@ -326,6 +326,23 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
   detail: Schema.optional(Schema.String),
   /** For `protected`, the project's Repository files switches that are off and would let them go. */
   needs: Schema.optional(Schema.Array(Schema.Literals(['writeSkills', 'writeOpenSpec', 'pushProtected']))),
+  /**
+   * For one Althar pushed with a connection's sign-in, as opening a pull request does: whose it is, how it signs in (a token
+   * pasted or taken from gh or glab, or Althar's app), and the repository it was refused for, as its host names it.
+   */
+  signIn: Schema.optional(
+    Schema.Struct({
+      account: Schema.String,
+      kind: Schema.Literals(['token', 'app']),
+      product: Schema.String,
+      repository: Schema.String,
+      /**
+       * Why, where the host established it when asked again: the account's role there, or the sign-in while the account may
+       * push. Absent where it didn't say, as when GitHub gives no permissions for the repository.
+       */
+      cause: Schema.optional(Schema.Literals(['role', 'token'])),
+    }),
+  ),
 }) {}
 
 /**

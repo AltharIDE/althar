@@ -18,6 +18,23 @@ const usageFor = (mode: string) => {
   return { key: env.ALTHAR_POSTHOG_KEY ?? '', host: env.ALTHAR_POSTHOG_HOST ?? '' }
 }
 
+/**
+ * The public ids of Althar's own apps on code hosts and trackers, for their browser sign-in, from the environment or
+ * apps/desktop/.env; the release workflow gives the repository variables of the same names. An empty one leaves its
+ * service to gh's or glab's sign-in and a pasted token. None is a secret: each is in every build of the app.
+ */
+const signInFor = (mode: string) => {
+  const env = loadEnv(mode, import.meta.dirname, 'ALTHAR_')
+  return {
+    github: env.ALTHAR_GITHUB_CLIENT_ID ?? '',
+    githubApp: env.ALTHAR_GITHUB_APP ?? '',
+    gitlab: env.ALTHAR_GITLAB_CLIENT_ID ?? '',
+    linear: env.ALTHAR_LINEAR_CLIENT_ID ?? '',
+    // Copilot's own app, never the GitHub App sign-in's: its token is the OAuth app's, which Copilot takes.
+    copilot: env.ALTHAR_COPILOT_CLIENT_ID || 'Ov23liI3MfkqFXCKYuNh',
+  }
+}
+
 export default defineConfig(({ mode }) => ({
   define: {
     // A packaged build leaves out the end-to-end tests' hooks, such as the fake agents.
@@ -28,12 +45,7 @@ export default defineConfig(({ mode }) => ({
     __ALTHAR_REPORT_URL__: JSON.stringify(process.env.ALTHAR_REPORT_URL ?? ''),
     __ALTHAR_REPORT_EMAIL__: JSON.stringify(process.env.ALTHAR_REPORT_EMAIL ?? 'reports@althar.ai'),
     // Public application identity travels with the app; people signing in never have to configure an environment variable.
-    __ALTHAR_COPILOT_CLIENT_ID__: JSON.stringify(
-      (() => {
-        const env = loadEnv(mode, import.meta.dirname, 'ALTHAR_')
-        return env.ALTHAR_COPILOT_CLIENT_ID || env.ALTHAR_GITHUB_CLIENT_ID || 'Ov23liI3MfkqFXCKYuNh'
-      })(),
-    ),
+    __ALTHAR_SIGN_IN__: JSON.stringify(signInFor(mode)),
   },
   build: {
     ssr: true,

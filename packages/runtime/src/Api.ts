@@ -17,6 +17,7 @@ import {
   BACKGROUND,
   LANE_HEADER,
   ClientAuthority,
+  PICTURE_BYTES,
   SOCKET_CALLS,
   SOCKET_CODE_HOSTS,
   SOCKET_CODE_SERVICES,
@@ -54,6 +55,7 @@ import { SqlClient } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
 import { AccountSignIns } from './AccountSignIns'
 import { Artifacts } from './Artifacts'
+import { pictureType } from './artifactFiles'
 import { Automations } from './Automations'
 import { Changes } from './Changes'
 import {
@@ -201,6 +203,7 @@ import { checkHealth } from './mcpHealth'
 import { Canvases } from './Canvases'
 import { CanvasSaves } from './CanvasSaves'
 import { Elsewhere } from './Elsewhere'
+import { openWords } from './elsewhere/open'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
 import { cancelWaitingTurn, upNextMove } from './upNextMoves'
@@ -355,7 +358,7 @@ export const handlers = apiLayer(
       identity.actorId === instance.personId && (identity.role !== 'socket' || identity.deviceId === instance.deviceId)
         ? effect
         : Effect.fail(
-            new ApiError({ reason: 'Forbidden', message: 'Manage connection devices from a trusted client or the host console.' }),
+            new ApiError({ reason: 'Forbidden', message: 'Pair and remove devices from a window over SSH, or on the home itself.' }),
           )
     const nudges = yield* Nudges
     const actorId = yield* Effect.orDie(Schema.decodeUnknownEffect(ActorId)(identity.actorId))
@@ -523,6 +526,15 @@ export const handlers = apiLayer(
     const timedCall = lagLogged()
       ? <A, E, R>(effect: Effect.Effect<A, E, R>) => slowCall(callName, effect)
       : <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
+    /**
+     * Refused, in the composer's words, while another process has a conversation brought into the thread open
+     * (elsewhere/open.ts): the window puts the message back in the composer, and the person sends it again once it's closed.
+     */
+    const closedElsewhere = (threadId: string) =>
+      Effect.flatMap(elsewhere.openElsewhere(threadId), (open) =>
+        open === null ? Effect.void : Effect.fail(new ApiError({ reason: 'OpenElsewhere', why: open, message: openWords(open) })),
+      )
+
     const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, Exclude<R, QueryServices>> =>
       Effect.provideContext(
         Effect.catchCause(timedCall(effect), (cause) => {
@@ -1109,15 +1121,19 @@ export const handlers = apiLayer(
             return (yield* host.repositories()).map((repository) => ({ ...repository, path: [...repository.path] }))
           }),
         ),
+      // A host that can't tell lists all it says it does.
+      ReadHostReach: ({ connectionId }) =>
+        api(Effect.flatMap(codeHostOf(connectionId), (host) => host.reach?.() ?? Effect.succeed({ limited: null }))),
       ListRepositoryOwners: ({ connectionId }) => api(Effect.flatMap(codeHostOf(connectionId), (host) => host.owners())),
-      CloneRepository: ({ commandId, grant, from }) =>
+      CloneRepository: ({ commandId, grant, from, folder }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
               const parent = yield* folders.place(grant)
               const source = yield* cloneSource(from)
-              const path = yield* cloneRepository({ parent, ...source })
+              // A name of the window's, in place of the repository's: refused, as one taken is, where it is anything but a name.
+              const path = yield* cloneRepository({ parent, ...source, ...(folder === undefined ? {} : { folder }) })
               return { grant: yield* folders.allow(path, 'repository'), path }
             }),
           ),
@@ -1471,6 +1487,8 @@ export const handlers = apiLayer(
           commandId,
           api(
             Effect.gen(function* () {
+              // Handed over with words, a conversation brought in from another tool that it still has open waits, as a send does.
+              if (body !== undefined) yield* closedElsewhere(threadId)
               // Its images and files are read and kept first, outside any transaction; one that can't be sent refuses the switch.
               const kept = body === undefined || images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               const copied = body === undefined ? [] : yield* filesFor(threadId, files)
@@ -1914,6 +1932,8 @@ export const handlers = apiLayer(
                   return
                 }
               }
+              // A conversation brought in from another tool that it still has open waits, before anything of it is kept.
+              yield* closedElsewhere(threadId)
               // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
               const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               const copied = yield* filesFor(threadId, files)
@@ -2508,7 +2528,8 @@ export const handlers = apiLayer(
             ),
           ),
         ),
-      CheckConnection: ({ connectionId }) => Effect.andThen(codeHostConnection(connectionId), api(connections.check(connectionId))),
+      CheckConnection: ({ connectionId, project }) =>
+        Effect.andThen(codeHostConnection(connectionId), api(connections.check(connectionId, project))),
       Disconnect: ({ commandId, connectionId }) =>
         Effect.andThen(codeHostConnection(connectionId), once(commandId, api(connections.remove(connectionId, actorId)))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
@@ -3000,6 +3021,17 @@ export const handlers = apiLayer(
       ReadLaunchPreviewSocket: ({ socket }) => previews.read(socket),
       WriteLaunchPreviewSocket: ({ socket, data }) => previews.write(socket, data),
       CloseLaunchPreviewSocket: ({ socket }) => previews.end(socket),
+      // A picture a thread shows, by its digest, for a window on another computer or a phone: only what a window draws.
+      ReadPicture: ({ digest }) =>
+        api(
+          Effect.gen(function* () {
+            const bytes = yield* artifacts.read(digest)
+            const type = bytes === null ? null : pictureType(bytes)
+            if (bytes === null || type === null || bytes.byteLength > PICTURE_BYTES)
+              return yield* new ApiError({ reason: 'NotFound', message: 'This picture isn’t kept here.' })
+            return { mediaType: type, bodyBase64: Buffer.from(bytes).toString('base64') }
+          }),
+        ),
       ReadWorkerFile: ({ projectId, taskId, workspaceId, relativePath }) =>
         api(
           Effect.gen(function* () {
@@ -3165,7 +3197,7 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
               if (identity.role === 'socket' && !Context.get(rpc.annotations, SocketAllowed))
                 return yield* new ApiError({
                   reason: 'PersonRequired',
-                  message: 'This call needs the person in the window or on a paired device.',
+                  message: 'This home doesn’t take that from this connection yet.',
                 })
               const background = headers[LANE_HEADER] === BACKGROUND && BEHIND_CALLS.has(rpc._tag)
               const prioritized = effect.pipe(

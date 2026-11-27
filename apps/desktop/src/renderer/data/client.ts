@@ -91,6 +91,7 @@ import {
   type Machine,
   type MadeRepository,
   type PreparedFolder,
+  type HostReach,
   type HostRepository,
   type RepositoryOwner,
   type ClonedRepository,
@@ -207,12 +208,16 @@ export interface Client {
   readonly prepareFolder: (grant: string, path?: string) => Promise<PreparedFolder>
   /** Every repository a code host's connection reaches, last pushed to first. */
   readonly listHostRepositories: (connectionId: string) => Promise<ReadonlyArray<HostRepository>>
+  /** Whether that list is every repository the account has, or fewer, as the connection was let reach them. */
+  readonly readHostReach: (connectionId: string) => Promise<HostReach>
   /** Where a code host's connection can make a repository. */
   readonly listRepositoryOwners: (connectionId: string) => Promise<ReadonlyArray<RepositoryOwner>>
   /** Clones a repository into a folder of its name in the folder a grant names: from a connection's host, or by its URL. */
   readonly cloneRepository: (
     grant: string,
     from: { readonly connectionId: string; readonly path: ReadonlyArray<string> } | { readonly url: string },
+    /** The folder's name, in place of the repository's own, as for two chosen of one name. */
+    folder?: string,
   ) => Promise<ClonedRepository>
   /** Puts a repository only on this computer on a code host: a project's, or one in a folder chosen, before its project is made. */
   readonly publishRepository: (input: {
@@ -698,7 +703,8 @@ export interface Client {
   /** Connects with gh's or glab's sign-in on this device. */
   readonly connectCli: (product: Product, webUrl: string, connectionId?: string) => Promise<ConnectionSummary>
   /** What a connection can do, as its service says. */
-  readonly checkConnection: (connectionId: string) => Promise<ConnectionCheck>
+  /** A connection's check; for one project, by its name, only where that project's work goes. */
+  readonly checkConnection: (connectionId: string, project?: string) => Promise<ConnectionCheck>
   readonly disconnect: (connectionId: string) => Promise<void>
   /** A project's rules. */
   /** Renames a project; its mark and its worktrees' folders stay. */
@@ -1122,10 +1128,7 @@ export const connect = async (
           get(target, tag, receiver): unknown {
             // What the home says this connection may call, where it says; else what this app's own contracts allow a socket.
             if (typeof tag === 'string' && tag in target && !(connection?.calls?.includes(tag) ?? socketCanCall(tag)))
-              return () =>
-                Effect.fail(
-                  new ApiError({ reason: 'PersonRequired', message: 'This connection cannot do that. Use a trusted person client.' }),
-                )
+              return () => Effect.fail(refusedHere(tag))
             return Reflect.get(target, tag, receiver)
           },
         })
@@ -1144,8 +1147,10 @@ export const connect = async (
     prepareFolder: (grant, path) =>
       command((commandId) => api.PrepareFolder({ commandId, grant, ...(path === undefined ? {} : { path }) })),
     listHostRepositories: (connectionId) => settle(api.ListHostRepositories({ connectionId })),
+    readHostReach: (connectionId) => settle(api.ReadHostReach({ connectionId })),
     listRepositoryOwners: (connectionId) => settle(api.ListRepositoryOwners({ connectionId })),
-    cloneRepository: (grant, from) => command((commandId) => api.CloneRepository({ commandId, grant, from })),
+    cloneRepository: (grant, from, folder) =>
+      command((commandId) => api.CloneRepository({ commandId, grant, from, ...(folder === undefined ? {} : { folder }) })),
     publishRepository: (input) => command((commandId) => api.PublishRepository({ commandId, ...input })),
     openProject: (grant, options = {}) =>
       command((commandId) =>
@@ -1410,7 +1415,8 @@ export const connect = async (
     findServer: (service, webUrl) => settle(api.FindServer({ service, webUrl })),
     connectCli: (product, webUrl, connectionId) =>
       command((commandId) => api.ConnectCli({ commandId, product, webUrl, ...(connectionId === undefined ? {} : { connectionId }) })),
-    checkConnection: (connectionId) => settle(api.CheckConnection({ connectionId })),
+    checkConnection: (connectionId, project) =>
+      settle(api.CheckConnection({ connectionId, ...(project === undefined ? {} : { project }) })),
     disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
     renameProject: (projectId, name) => command((commandId) => api.RenameProject({ commandId, projectId, name })),
     setProjectInk: (projectId, ink) => command((commandId) => api.SetProjectInk({ commandId, projectId, ink })),
@@ -1607,6 +1613,14 @@ export const receivePort = (
     target.addEventListener('message', onMessage)
     signal?.addEventListener('abort', aborted, { once: true })
   })
+
+/**
+ * A call the window's home doesn't take from it, refused before it goes: in plain words, and with a reason of its own,
+ * so a screen can say calmly what isn't shown here rather than an error.
+ */
+const HOME_KEEPS = 'HomeKeeps'
+export const refusedHere = (tag: string) =>
+  new ApiError({ reason: HOME_KEEPS, message: 'This home doesn’t take that from a window on another computer yet.', detail: tag })
 
 /**
  * Whether this window may make a call: any, on this computer's own runtime;

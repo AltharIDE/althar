@@ -17,7 +17,7 @@ import {
 
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { messageOf } from '../../data/client'
+import { canCall, messageOf } from '../../data/client'
 import type { StartModel } from '../start/useStart'
 import s from './Settings.module.css'
 import { text } from './text'
@@ -80,7 +80,8 @@ function ServerOpened({
         ? {
             onKeepOut: (agent: string, out: boolean) => model.keep('server', agent as SyncedAgent, name, out),
             onUseWay: (agent: string) => model.pick('server', name, agent as SyncedAgent),
-            onSignIn: (agent: string) => model.signIn(agent as SyncedAgent, name),
+            // A server's sign-in runs the agent's own command where it is: a window on another computer's home has none to open.
+            ...(canCall(client, 'SignInToolServer') ? { onSignIn: (agent: string) => model.signIn(agent as SyncedAgent, name) } : {}),
             onRemove: () => {
               setRemoving(true)
               setRemoveError(null)
@@ -99,7 +100,7 @@ function ServerOpened({
 }
 
 /** The person's MCP servers: which roles and projects get each, what each agent's own file says of it, adding and removing one. */
-export function ServersSection({ start }: { start: StartModel }) {
+export function ServersSection({ start, whose = 'Your agents’' }: { start: StartModel; whose?: string }) {
   const model = useAgentTools({ check: true })
   const { tools } = model
   const people = useToolPeople(start, tools)
@@ -121,7 +122,7 @@ export function ServersSection({ start }: { start: StartModel }) {
         projects={people.projects}
         sync={tools === undefined ? { on: false, targets: [] } : syncOf(tools.serverSync)}
         loading={tools === undefined && !model.loadFailed}
-        error={model.loadFailed ? text.serversUnread : null}
+        error={model.loadError === null ? null : text.serversUnread(whose, model.loadError)}
         onRetry={model.reload}
         open={open}
         onOpenChange={setOpen}
@@ -168,7 +169,7 @@ export function ServersSection({ start }: { start: StartModel }) {
 }
 
 /** The person's skills: a tile each, a repository's own beside them, and adding one from GitHub. */
-export function SkillsSection({ start }: { start: StartModel }) {
+export function SkillsSection({ start, whose = 'Your' }: { start: StartModel; whose?: string }) {
   const model = useAgentTools()
   const skills = useSkills({ check: true })
   const { tools } = model
@@ -185,6 +186,8 @@ export function SkillsSection({ start }: { start: StartModel }) {
   }, [skills.added, model])
   if (tools !== undefined && !tools.enabled && !skills.enabled) return <p className={s.quiet}>{text.skillsOff}</p>
   const tiles = (tools?.skills ?? []).map((row) => skillTileOf(row, skills.available.includes(row.name)))
+  // Why the skills couldn't be read: the store's own words, else the agents' settings'.
+  const unread = skills.loadError ?? model.loadError
   // Reviewing a newer version, or finding one to add, takes the dialog; it shuts once the skill is added.
   const reviewing = adding || skills.card !== null
   return (
@@ -200,7 +203,7 @@ export function SkillsSection({ start }: { start: StartModel }) {
         projects={people.projects}
         sync={tools === undefined ? { on: false, targets: [] } : syncOf(tools.skillSync)}
         loading={(tools === undefined && !model.loadFailed) || (!skills.loaded && !skills.loadFailed)}
-        error={model.loadFailed || skills.loadFailed ? text.skillsUnread : null}
+        error={unread === null ? null : text.skillsUnread(whose, unread)}
         onRetry={() => {
           model.reload()
           skills.reload()

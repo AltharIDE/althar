@@ -23,6 +23,7 @@ import { Instance } from './Instance'
 import { errandTaskPull } from './errandTask'
 import { taskWaitStatus } from './errandTaskWaits'
 import { taskWaitsReady } from './errandWaits'
+import { settleHeldErrands } from './errandSettle'
 import { watchReleaseErrands } from './errandWatch'
 import { makeKeyedLock } from './keyedLock'
 import { checksOf, nameOf } from './pullRequestWords'
@@ -283,9 +284,12 @@ const entriesOf = (projectId: string) =>
  */
 const placeAt = (projectId: string, repository: string, number: number) =>
   Effect.gen(function* () {
-    const { hosted } = yield* hostedOf(projectId)
+    const { hosted, forks } = yield* hostedOf(projectId)
     const [product, path] = [repository.slice(0, repository.indexOf(':')), repository.slice(repository.indexOf(':') + 1)]
-    const found = hosted.find((one) => one.host.product === product && one.path.join('/').toLowerCase() === path.toLowerCase())
+    // Where its work goes first (a fork's upstream, DEV-169), then the fork itself, where a step kept from before names it.
+    const found = [...hosted, ...forks].find(
+      (one) => one.host.product === product && one.path.join('/').toLowerCase() === path.toLowerCase(),
+    )
     if (found === undefined)
       return yield* refused(
         `${path} isn’t one of the project’s repositories on a host Althar is connected to now. The person connects it in Settings.`,
@@ -1509,6 +1513,7 @@ export class MergeLine extends Context.Service<
                 )
               }
               yield* watchReleaseErrands(projectId, errands, taskNews.ready, (threadId, said) => wakeOf(threadId).push(said))
+              yield* settleHeldErrands(projectId, errands)
               for (const [threadId, said] of wakes) yield* wake(threadId, said)
             }),
           ),

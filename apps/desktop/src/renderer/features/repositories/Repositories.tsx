@@ -12,6 +12,7 @@ import { productBrand } from '../../shared/products'
 import { hostChoices, PutOnHost, thingOn } from '../../shared/PutOnHost'
 import { serviceOfProduct } from '../connections/ways'
 import { type Opening, openingFor } from '../connections/ConnectDialog'
+import { useHomeName } from '../homes/useHomes'
 import { HEADING } from '../projectSettings/sections'
 import { CloneInto } from './CloneInto'
 import s from './Repositories.module.css'
@@ -25,6 +26,14 @@ import type { RepositoriesModel } from './useRepositories'
  * is, and a host its work goes to is connected over the page, as the
  * section connects a tracker.
  */
+
+/** Where a clone is, said of the home a window on another computer is on: on runner-1, not this Mac. */
+const placedOn = (home: string) => ({
+  here: `On ${home}`,
+  elsewhere: `Not on ${home}`,
+  stays: `Stays on ${home}`,
+  staysHere: `Its work stays on ${home}.`,
+})
 
 export const text = {
   /** The project, where its name isn't known. */
@@ -128,6 +137,7 @@ export function Repositories({
   /** Connects a host the work goes to, over the page: its walk in, or all of them where it is connected. */
   onConnect: (opening: Opening) => void
 }) {
+  const where = useHomeName()
   // A repository only on this computer being put on a host: which, and through which connection.
   const [putting, setPutting] = useState<{ readonly repository: string; readonly connection: string } | null>(null)
   // A repository being chosen to clone into it.
@@ -167,7 +177,8 @@ export function Repositories({
         : { putOnHost: putOnHostIn(model.projectId, repositories, connections, putting, setPutting, onConnect) })}
       {...(model.error === null && toward.failed === null ? {} : { error: model.error ?? toward.failed?.message })}
       headingLevel={HEADING.part}
-      mapText={text.map}
+      // Where each clone is: this computer, or the home the window is on, by its name.
+      mapText={{ ...text.map, ...(where.remote ? placedOn(where.name) : {}) }}
     />
   )
 }

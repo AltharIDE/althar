@@ -451,9 +451,7 @@ function First({
           folderWay
             ? project.picked
             : way === 'clone'
-              ? setup.chosen === null
-                ? []
-                : [setup.chosen]
+              ? setup.chosen
               : draft?.fresh != null || draft?.folders.some((folder) => folder.came === 'new') === true
                 ? ['fresh']
                 : []

@@ -11,6 +11,7 @@ import type { ConnectionsModel } from '../connections/useConnections'
 import type { Tracker } from '../project/front'
 import { RulesSection } from '../rules/RulesSection'
 import { ChangedBy } from '../settings/ChangedBy'
+import { farText, HomeHolds, type Unshown } from '../homes/HomeHolds'
 import { type RulesModel, useRules } from '../rules/useRules'
 import { CodeSection } from './CodeSection'
 import { GeneralSection } from './GeneralSection'
@@ -35,6 +36,30 @@ export const text = {
   label: 'Project settings',
   remove: 'Remove from Althar…',
 }
+
+/**
+ * Each section, where a window on another computer's home can't show it: what isn't shown, and what still holds there.
+ * Where it is shown but can't be changed from here, it says so in one line of its own (HomeHolds).
+ */
+export const unshown = {
+  general: { icon: 'gear', title: (home: string) => `This project’s name stays on ${home} for now`, line: farText('it') },
+  tasks: {
+    icon: 'work',
+    title: (home: string) => `How this project’s tasks go stays on ${home} for now`,
+    line: `${farText('it')} Its tasks there still go as it’s set.`,
+  },
+  rules: {
+    icon: 'lock',
+    title: (home: string) => `This project’s rules stay on ${home} for now`,
+    line: `${farText('them')} Its agents there still follow them.`,
+  },
+  running: { icon: 'play', title: (home: string) => `What this project runs stays on ${home} for now`, line: farText('it') },
+  notes: {
+    icon: 'quote',
+    title: (home: string) => `The coordinator’s notes stay on ${home} for now`,
+    line: `${farText('them')} The coordinator still goes by them.`,
+  },
+} satisfies Record<string, Unshown>
 
 export interface ProjectSettingsPageProps {
   readonly projectId: string
@@ -158,26 +183,44 @@ function SectionBody({
 }) {
   switch (section) {
     case 'general':
-      return <GeneralSection model={model} seed={projectId} />
+      return (
+        <HomeHolds changes={['RenameProject', 'SetProjectInk']} unshown={unshown.general}>
+          <GeneralSection model={model} seed={projectId} />
+        </HomeHolds>
+      )
     case 'tasks':
-      return <TasksSection model={model} seed={projectId} rulesModel={rules} repositories={repositories} onCode={() => onSection('code')} />
+      return (
+        <HomeHolds reads={['GetProjectRules']} changes={['SetProjectRules']} unshown={unshown.tasks}>
+          <TasksSection model={model} seed={projectId} rulesModel={rules} repositories={repositories} onCode={() => onSection('code')} />
+        </HomeHolds>
+      )
     case 'code':
       return <CodeSection projectId={projectId} trackers={trackers} list={list} onConnect={onConnect} onManage={onConnections} />
     case 'rules':
-      return <RulesSection model={rules} />
+      return (
+        <HomeHolds reads={['GetProjectRules']} changes={['SetProjectRules']} unshown={unshown.rules}>
+          <RulesSection model={rules} />
+        </HomeHolds>
+      )
     case 'running':
       return (
-        <RunningSection
-          projectId={projectId}
-          project={model.name ?? ''}
-          runnables={runnables}
-          repositories={repositories}
-          worktrees={model.project?.worktrees ?? null}
-          {...(model.rules === null ? {} : { worksIn: model.rules.worksIn })}
-          onWorksIn={() => onSection('tasks')}
-        />
+        <HomeHolds changes={['KeepRunnable', 'DropRunnable', 'OrderRunnables', 'SetRepository']} unshown={unshown.running}>
+          <RunningSection
+            projectId={projectId}
+            project={model.name ?? ''}
+            runnables={runnables}
+            repositories={repositories}
+            worktrees={model.project?.worktrees ?? null}
+            {...(model.rules === null ? {} : { worksIn: model.rules.worksIn })}
+            onWorksIn={() => onSection('tasks')}
+          />
+        </HomeHolds>
       )
     case 'notes':
-      return <NotesSection model={model} />
+      return (
+        <HomeHolds reads={['GetProjectNotes']} changes={['EditProjectNote', 'DropProjectNote']} unshown={unshown.notes}>
+          <NotesSection model={model} />
+        </HomeHolds>
+      )
   }
 }

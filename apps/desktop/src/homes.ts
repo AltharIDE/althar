@@ -175,6 +175,11 @@ export const LAST_WITHOUT_MAKING_PROJECTS = '0.1.0'
  * on it, or older, is offered its update for that once a release past it is out.
  */
 export const LAST_WITHOUT_SETTING_UP = '0.2.0'
+/**
+ * The newest host release whose window can't change the home's own settings (how its tasks go, its pull requests, its
+ * presets, its agents at once, its task folders): a home on it, or older, is offered its update once a release past it is out.
+ */
+export const LAST_WITHOUT_HOME_SETTINGS = '0.2.1'
 
 const newer = (left: string, right: string) => {
   const a = left.split('.').map(Number)

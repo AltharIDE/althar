@@ -1,7 +1,15 @@
 import { expect, it, vi } from 'vitest'
 import { ApiError, type FolderReading } from '@althar/contracts'
 
-import { draftActions, draftsOf, errorOf, foldersOf, type DraftClone } from '../src/renderer/features/newProject/draft'
+import {
+  cloneFolders,
+  draftActions,
+  draftsOf,
+  errorOf,
+  foldersOf,
+  type DraftClone,
+  type DraftFolder,
+} from '../src/renderer/features/newProject/draft'
 import { makeQueryClient } from '../src/renderer/data/reads'
 import { fakeClient, fakeHost } from './fixtures'
 
@@ -122,7 +130,7 @@ it.each(['grant-refused', 'read-refused', 'not-repository', 'no-remote', 'differ
       },
       { grantFound: vi.fn(async () => (why === 'grant-refused' ? null : 'grant_found')) },
     )
-    at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clone }))
+    at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [clone] }))
     await at.actions.create('clay', plan)
     expect(at.client.cloneRepository).toHaveBeenCalledOnce()
     expect(at.client.openProject).toHaveBeenCalledOnce()
@@ -140,7 +148,7 @@ it('prepares a discovered unborn repository at its own path and opens it without
       project: { id: 'existing', name: 'Existing' },
     })),
   })
-  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clone }))
+  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [clone] }))
   await at.actions.create('clay', plan)
   expect(at.client.cloneRepository).not.toHaveBeenCalled()
   expect(at.client.prepareFolder).toHaveBeenCalledWith(expect.any(String), '/existing/repo')
@@ -149,7 +157,7 @@ it('prepares a discovered unborn repository at its own path and opens it without
 
 it('cancels cloning if neither a usual place nor a chosen place exists, and clears busy state', async () => {
   const at = fixture({}, { clonePlace: vi.fn(async () => null), pickClonePlace: vi.fn(async () => null) })
-  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clone: { ...clone, here: null } }))
+  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [{ ...clone, here: null }] }))
   expect(await at.actions.create('clay', plan)).toBeNull()
   expect(at.store.get()).toMatchObject({ creating: false, steps: { source: 'idle', home: 'idle', issues: 'idle' } })
   expect(at.client.cloneRepository).not.toHaveBeenCalled()
@@ -188,8 +196,119 @@ it('keeps the chosen clone place after a cancelled picker, and clones there inst
   await at.actions.chooseCloneInto()
   await at.actions.chooseCloneInto()
   expect(at.store.get()?.cloneInto).toEqual(place)
-  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clone: { ...clone, here: null } }))
+  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [{ ...clone, here: null }] }))
   await at.actions.create('clay', plan)
   expect(at.client.cloneRepository).toHaveBeenCalledWith('grant_place', clone.from)
   expect(at.host.clonePlace).not.toHaveBeenCalled()
+})
+
+it('clones each chosen into one place, asked for once, makes the project of them all, and clones only those left on Create again', async () => {
+  const other: DraftClone = { ...clone, id: 'other', remote: 'ada/web', from: { connectionId: 'github', path: ['ada', 'web'] }, here: null }
+  const at = fixture({
+    cloneRepository: vi
+      .fn()
+      .mockResolvedValueOnce({ grant: 'grant_repo', path: '/Users/ada/code/repo' })
+      .mockRejectedValueOnce(new ApiError({ reason: 'CloneRefused', why: 'denied', message: 'Denied' }))
+      .mockResolvedValue({ grant: 'grant_web', path: '/Users/ada/code/web' }),
+  })
+  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [{ ...clone, here: null }, other] }))
+  // The second refused: the first stays cloned, said as such, and the project isn't made.
+  expect(await at.actions.create('clay', plan)).toBeNull()
+  expect(at.store.get()?.error).toEqual({ said: 'Denied' })
+  expect(at.store.get()?.folders).toMatchObject([{ path: '/Users/ada/code/repo', came: 'clone', clone: 'clone' }])
+  expect(at.client.openProject).not.toHaveBeenCalled()
+  // Again: only the one left is cloned, and the project is made of both, in the order chosen.
+  expect(await at.actions.create('clay', plan)).not.toBeNull()
+  expect(vi.mocked(at.client.cloneRepository).mock.calls.map(([, from]) => from)).toEqual([clone.from, other.from, other.from])
+  expect(at.host.clonePlace).toHaveBeenCalledTimes(2)
+  expect(at.client.openProject).toHaveBeenCalledWith(
+    'grant_repo',
+    expect.objectContaining({
+      repositories: [
+        { grant: 'grant_repo', path: '/Users/ada/code/repo' },
+        { grant: 'grant_web', path: '/Users/ada/code/web' },
+      ],
+    }),
+  )
+})
+
+it('clones two of one name into folders of their own, the later one by its owner’s name and its own', async () => {
+  const one: DraftClone = { ...clone, id: 'a', remote: 'org-a/api', from: { connectionId: 'github', path: ['org-a', 'api'] }, here: null }
+  const two: DraftClone = { ...clone, id: 'b', remote: 'org-b/api', from: { connectionId: 'github', path: ['org-b', 'api'] }, here: null }
+  const at = fixture()
+  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [one, two] }))
+  expect(await at.actions.create('clay', plan)).not.toBeNull()
+  expect(vi.mocked(at.client.cloneRepository).mock.calls).toEqual([
+    ['grant_code', one.from],
+    ['grant_code', two.from, 'org-b-api'],
+  ])
+  expect(at.store.get()?.folders.map((folder) => folder.path)).toEqual(['/Users/ada/code/api', '/Users/ada/code/org-b-api'])
+})
+
+it('keeps a clone that landed though making it ready failed, and makes it ready on Create again without cloning it again', async () => {
+  const at = fixture({
+    prepareFolder: vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError({ reason: 'GitFailed', message: 'Git couldn’t commit.' }))
+      .mockResolvedValue({ did: 'committed', path: '/Users/ada/code/repo', branch: 'main', files: 0 }),
+  })
+  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [{ ...clone, here: null }] }))
+  expect(await at.actions.create('clay', plan)).toBeNull()
+  expect(at.store.get()?.error).toEqual({ said: 'Git couldn’t commit.' })
+  expect(at.store.get()?.folders).toMatchObject([{ path: '/Users/ada/code/repo', grant: 'grant_repo', came: 'clone', clone: 'clone' }])
+  expect(await at.actions.create('clay', plan)).not.toBeNull()
+  expect(at.client.cloneRepository).toHaveBeenCalledOnce()
+  expect(at.client.prepareFolder).toHaveBeenLastCalledWith('grant_repo', '/Users/ada/code/repo')
+  expect(at.store.get()?.folders).toMatchObject([{ git: 'ready' }])
+})
+
+it('names each clone a folder no other takes, the owner’s name taken too, and keeps those cloned already on Create again', async () => {
+  const of = (id: string, remote: string): DraftClone => ({
+    ...clone,
+    id,
+    remote,
+    from: { connectionId: 'github', path: remote.split('/') },
+    here: null,
+  })
+  const a = of('a', 'org-a/api')
+  const c = of('c', 'org-c/org-b-api')
+  const b = of('b', 'org-b/api')
+  const at = fixture({
+    cloneRepository: vi
+      .fn()
+      .mockImplementationOnce(async () => ({ grant: 'grant_api', path: '/Users/ada/code/api' }))
+      .mockImplementationOnce(async () => ({ grant: 'grant_org-b-api', path: '/Users/ada/code/org-b-api' }))
+      .mockRejectedValueOnce(new ApiError({ reason: 'CloneRefused', why: 'denied', message: 'Denied' }))
+      .mockImplementation(async (_grant: string, _from: unknown, folder?: string) => ({
+        grant: `grant_${folder}`,
+        path: `/Users/ada/code/${folder}`,
+      })),
+  })
+  at.store.change(at.draft.id, (now) => ({ ...now, way: 'clone', clones: [a, c, b] }))
+  expect(await at.actions.create('clay', plan)).toBeNull()
+  expect(await at.actions.create('clay', plan)).not.toBeNull()
+  expect(vi.mocked(at.client.cloneRepository).mock.calls.map(([, from, folder]) => [from, folder])).toEqual([
+    [a.from, undefined],
+    [c.from, undefined],
+    [b.from, 'org-b-api-2'],
+    [b.from, 'org-b-api-2'],
+  ])
+  // One cloned already keeps its folder, whatever the order chosen now: the others take what is left.
+  const kept: DraftFolder = {
+    path: '/Users/ada/code/api',
+    grant: 'grant_api',
+    name: 'api',
+    where: '~/code/api',
+    remote: 'org-b/api',
+    project: null,
+    found: null,
+    git: 'ready',
+    empty: false,
+    came: 'clone',
+    clone: 'b',
+  }
+  expect([...cloneFolders([a, b], [kept])]).toEqual([
+    ['b', 'api'],
+    ['a', 'org-a-api'],
+  ])
 })

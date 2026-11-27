@@ -263,3 +263,69 @@ describe('what a push that failed says, in its parts', () => {
     ])
   })
 })
+
+describe('a push with a connection’s sign-in, refused', () => {
+  const said = (
+    why: 'forbidden' | 'denied',
+    kind: 'token' | 'app',
+    more: { product?: string; host?: string; said?: string; cause?: 'role' | 'token' } = {},
+  ) =>
+    words(
+      new PushRefused({
+        taskId: 'task_1',
+        why,
+        remote: 'AltharIDE/althar/feature',
+        host: more.host ?? 'GitHub',
+        ...(more.said === undefined ? {} : { said: more.said }),
+        detail: "git push: unable to access 'https://github.com/AltharIDE/althar.git/': The requested URL returned error: 403",
+        signIn: {
+          account: 'sam',
+          kind,
+          product: more.product ?? 'github',
+          repository: 'AltharIDE/althar',
+          ...(more.cause === undefined ? {} : { cause: more.cause }),
+        },
+      }),
+      (id) => id,
+    ).message
+
+  it('says a bare refusal as only that: whose sign-in, which repository, and what puts it right, never git’s line', () => {
+    assert.strictEqual(
+      said('forbidden', 'token'),
+      'GitHub refused a push to AltharIDE/althar with sam’s token. Give the token write access to AltharIDE/althar (a fine-grained token’s Contents: Read and write, made for AltharIDE), or connect GitHub with one that can push there, then try again.',
+    )
+    assert.strictEqual(
+      said('forbidden', 'app'),
+      'GitHub refused a push to AltharIDE/althar with Althar’s GitHub app, signed in as sam. Give Althar’s app access to AltharIDE/althar on AltharIDE, then try again.',
+    )
+    assert.strictEqual(
+      said('forbidden', 'token', { product: 'gitlab', host: 'GitLab' }),
+      'GitLab refused a push to AltharIDE/althar with sam’s token. Give the token write access to AltharIDE/althar, or connect GitLab with one that can push there, then try again.',
+    )
+    // Another line of the host's own goes with it.
+    assert.include(said('forbidden', 'token', { said: 'Your IP address is not allowed' }), 'It said: Your IP address is not allowed.')
+    for (const why of ['forbidden', 'denied'] as const) assert.notInclude(said(why, 'token'), 'unable to access')
+  })
+
+  it('says the token reads but may not write only where the host said so, and a role where the account may only read', () => {
+    assert.strictEqual(
+      said('forbidden', 'token', { said: 'Write access to repository not granted.' }),
+      'GitHub refused sam’s token for AltharIDE/althar: it can read the repository but not push to it. Give the token write access to AltharIDE/althar (a fine-grained token’s Contents: Read and write, made for AltharIDE), or connect GitHub with one that can push there, then try again.',
+    )
+    assert.strictEqual(
+      said('forbidden', 'token', { cause: 'role' }),
+      'GitHub won’t take a push to AltharIDE/althar from sam: the account may only read there. Ask its owners for write access, or connect GitHub as an account that can push, then try again.',
+    )
+  })
+
+  it('says the sign-in can read but not push where the host said the account may push and git still refused it', () => {
+    assert.include(said('forbidden', 'token', { cause: 'token' }), 'it can read the repository but not push to it.')
+  })
+
+  it('says a sign-in the host didn’t take, for the repository it was pushing to', () => {
+    assert.strictEqual(
+      said('denied', 'token'),
+      'GitHub didn’t take sam’s token for a push to AltharIDE/althar. Connect GitHub again in Settings › Code hosts, then try again.',
+    )
+  })
+})

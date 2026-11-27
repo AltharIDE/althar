@@ -103,11 +103,11 @@ describe('pairing a phone from the homes menu', () => {
   it('says why a window that may not make codes can’t, with nothing to try again', async () => {
     const { client } = fakeClient({
       phoneAccess: vi.fn(async () => {
-        throw new ApiError({ reason: 'Forbidden', message: 'Manage connection devices from a trusted client or the host console.' })
+        throw new ApiError({ reason: 'Forbidden', message: 'Pair and remove devices from a window over SSH, or on the home itself.' })
       }),
     })
     withServices(<PhonesDialog home="studio" onClose={() => undefined} />, client)
-    expect(await screen.findByText('Manage connection devices from a trusted client or the host console.')).toBeTruthy()
+    expect(await screen.findByText('Pair and remove devices from a window over SSH, or on the home itself.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
   })
 

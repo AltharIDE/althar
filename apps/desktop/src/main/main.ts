@@ -1037,6 +1037,24 @@ const chromeArgs = () => {
   ]
 }
 
+/* The home sessions that serve pictures already: a scheme is handled once in a session. */
+const pictureSessions = new Set<string>()
+
+/**
+ * A window on a home draws the pictures its threads show by the same address a local one does; its session answers them
+ * from a store of that home's own here, fetching what it doesn't hold from the home (homes/pictures.ts).
+ */
+const servePicturesOf = (window: BrowserWindow, home: WindowHome) => {
+  const partition = homePartition(home)
+  if (partition === undefined || home.kind === 'local' || pictureSessions.has(partition)) return
+  pictureSessions.add(partition)
+  const homeId = home.home.homeId
+  window.webContents.session.protocol.handle(
+    PICTURE_SCHEME,
+    servePicture(join(locations().profile, 'home-pictures', homeId), resize, (digest) => homes.readPicture(homeId, digest)),
+  )
+}
+
 const openWindow = (home: WindowHome = { kind: 'local' }) => {
   const partition = homePartition(home)
   const window = new BrowserWindow({
@@ -1066,6 +1084,7 @@ const openWindow = (home: WindowHome = { kind: 'local' }) => {
   }
   windows.add(window)
   homes.register(window, home)
+  servePicturesOf(window, home)
   window.on('focus', () => focusedLast(windows, window))
   window.on('close', () => closingWindows.add(window))
   // The window's own buttons say maximize or restore by what the window is (windowOptions.ts).
