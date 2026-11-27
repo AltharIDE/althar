@@ -2,60 +2,80 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { type AppPreferences, DEFAULT_PREFERENCES, type PreferenceKey } from '../src/main/appPreferences'
+import { claimOnce } from '../src/main/claimOnce'
 import { type ExperimentalStore, experimentalText, useExperimental } from '../src/renderer/features/homes/Experimental'
 
 /*
- * Homes being experimental is said once for the computer: the app's own
- * preference, which every window reads afresh, a home's window too, whose
- * storage is kept apart from this computer's.
+ * Homes being experimental is said once for the computer: claimed in the
+ * main process for the whole profile, before it is kept, so windows and
+ * dialogs asking together never both say it.
  */
 
 afterEach(cleanup)
 
-/** The main process's preferences, shared by every window. */
-const profile = (): ExperimentalStore & { kept: AppPreferences } => {
-  const store = {
-    kept: { ...DEFAULT_PREFERENCES },
-    preferences: vi.fn(async () => ({ ...store.kept })),
-    setPreference: vi.fn(async <K extends PreferenceKey>(key: K, value: AppPreferences[K]) => {
-      store.kept = { ...store.kept, [key]: value }
-      return { ...store.kept }
-    }),
-  }
-  return store as ExperimentalStore & { kept: AppPreferences }
+/** A write to disk held until let go, as a slow one is. */
+const slowDisk = (said = false) => {
+  let release: () => void = () => undefined
+  const kept = { said }
+  const keep = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        release = () => {
+          kept.said = true
+          resolve()
+        }
+      }),
+  )
+  return { kept, keep, release: () => release() }
 }
 
 /** Connect a home's or Manage homes' head, in one window or another. */
 function Dialog({ store }: { store: ExperimentalStore }) {
-  return <div>{useExperimental(store)}</div>
+  return <div data-testid="dialog">{useExperimental(store)}</div>
 }
 
-describe('Homes are still experimental', () => {
-  // Connect a home and Manage homes say it by the same hook, so either may open first.
-  it('is said once, whichever dialog opens first and in whichever window', async () => {
-    const shared = profile()
-    // This computer's window, under StrictMode as the app runs.
-    const first = render(
-      <StrictMode>
-        <Dialog store={shared} />
-      </StrictMode>,
-    )
-    expect(await screen.findByText(experimentalText.title)).toBeTruthy()
-    await waitFor(() => expect(shared.kept.homesExperimentalSaid).toBe(true))
-    // Kept while that dialog is open.
-    expect(screen.getByText(experimentalText.title)).toBeTruthy()
-    first.unmount()
-    // The other dialog, in a home's window: its own storage, the same preferences.
-    render(<Dialog store={shared} />)
-    await waitFor(() => expect(shared.preferences).toHaveBeenCalledTimes(3))
-    expect(screen.queryByText(experimentalText.title)).toBeNull()
+describe('claiming it, in the main process', () => {
+  it('gives it to the first ask only, while the write is still under way', async () => {
+    const disk = slowDisk()
+    const claim = claimOnce(async () => disk.kept.said, disk.keep)
+    // Two windows at once, then a third dialog while the write waits.
+    const [one, two] = await Promise.all([claim(), claim()])
+    expect([one, two]).toEqual([true, false])
+    expect(await claim()).toBe(false)
+    expect(disk.keep).toHaveBeenCalledTimes(1)
+    disk.release()
+    await waitFor(() => expect(disk.kept.said).toBe(true))
   })
 
-  it('isn’t said where the preferences can’t be read', async () => {
-    const store = { ...profile(), preferences: vi.fn(async () => Promise.reject(new Error('gone'))) }
-    render(<Dialog store={store} />)
-    await waitFor(() => expect(store.preferences).toHaveBeenCalled())
+  it('gives it to none where it was said at an earlier launch, or can’t be read', async () => {
+    const disk = slowDisk(true)
+    expect(await claimOnce(async () => disk.kept.said, disk.keep)()).toBe(false)
+    expect(disk.keep).not.toHaveBeenCalled()
+    expect(await claimOnce(() => Promise.reject(new Error('gone')), disk.keep)()).toBe(false)
+  })
+})
+
+describe('Homes are still experimental, in the dialogs', () => {
+  it('shows in one dialog of two opened together in two windows, under StrictMode, with the write held', async () => {
+    const disk = slowDisk()
+    const store: ExperimentalStore = { claimHomesExperimental: claimOnce(async () => disk.kept.said, disk.keep) }
+    render(
+      <>
+        <StrictMode>
+          <Dialog store={store} />
+        </StrictMode>
+        <Dialog store={store} />
+      </>,
+    )
+    expect(await screen.findByText(experimentalText.title)).toBeTruthy()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(screen.getAllByText(experimentalText.title)).toHaveLength(1)
+    disk.release()
+    expect(screen.getAllByText(experimentalText.title)).toHaveLength(1)
+  })
+
+  it('isn’t said where nothing claims it', () => {
+    render(<Dialog store={{}} />)
     expect(screen.queryByText(experimentalText.title)).toBeNull()
   })
 })

@@ -4,40 +4,35 @@ import { Notice } from '@althar/ui'
 import type { Host } from '../../data/services'
 
 /*
- * Homes are still experimental: said at the head of Connect a home and of
- * Manage homes the first time either opens, and kept while that dialog is
- * open. Whether it was said is the app's own preference, in the profile's
- * desktop.json, so it is said once for the computer: a home's window keeps
- * its storage apart from this computer's, and reads the same preference.
- * Read afresh as the dialog opens, so another window's saying it counts.
+ * Homes are still experimental: said at the head of Connect a home or of
+ * Manage homes, whichever opens first in any window, once for the computer,
+ * and kept while that dialog is open. The main process claims it for the
+ * whole profile (claimOnce.ts), at once and before it is kept in
+ * desktop.json, so two windows opening a home's dialog together, or Manage
+ * homes then Connect a home while the write is under way, never both say it.
  */
 
-/** Where it is kept: the app's preferences, through the main process. */
-export type ExperimentalStore = Pick<Host, 'preferences' | 'setPreference'>
+/** Where it is claimed: the main process, for every window. */
+export type ExperimentalStore = Pick<Host, 'claimHomesExperimental'>
 
 export const experimentalText = {
   title: 'Homes are still experimental',
   body: 'Expect some rough edges. Report a problem tells us what you run into.',
 }
 
-/** The notice, the first time a home is connected or managed in any window; null after, and while that is read. */
+/** The notice, for the one dialog that claimed it; null for every other, and while it is asked. */
 export function useExperimental(store: ExperimentalStore | undefined, className?: string) {
   const [shown, setShown] = useState(false)
   useEffect(() => {
-    if (store === undefined) return
-    let live = true
-    store.preferences().then(
-      (preferences) => {
-        if (!live || preferences.homesExperimentalSaid) return
-        setShown(true)
-        // Not kept: said again next time, which is no harm.
-        store.setPreference('homesExperimentalSaid', true).catch(() => undefined)
+    const claim = store?.claimHomesExperimental
+    if (claim === undefined) return
+    // Its answer is the dialog's even where the effect ran again since, as StrictMode runs it: the claim is spent either way.
+    claim().then(
+      (claimed) => {
+        if (claimed) setShown(true)
       },
       () => undefined,
     )
-    return () => {
-      live = false
-    }
   }, [store])
   return shown ? (
     <Notice icon="flask" title={experimentalText.title} {...(className === undefined ? {} : { className })}>

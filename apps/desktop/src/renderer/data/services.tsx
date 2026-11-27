@@ -261,6 +261,8 @@ export interface Host {
   readonly preferences: () => Promise<AppPreferences>
   /** Changes one, kept and acted on at once; all of them as they now stand. */
   readonly setPreference: <K extends PreferenceKey>(key: K, value: AppPreferences[K]) => Promise<AppPreferences>
+  /** Homes are still experimental: true for the one dialog in the profile, in any window, that says it first (main's claimOnce). */
+  readonly claimHomesExperimental?: () => Promise<boolean>
   /** An editor's icon as a picture's address, by its id (`ListEditors`); null where it can't be drawn. */
   readonly editorPicture: (id: string) => Promise<string | null>
   /** The Mac's alert sounds a notification can play, by name; none off a Mac. */
