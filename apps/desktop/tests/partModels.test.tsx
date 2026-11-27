@@ -82,9 +82,15 @@ describe('a task’s parts where it has little or several kinds of work', () => 
   it.each([
     {
       said: 'a followed pull request open',
-      changes: [change({ state: 'open' })],
+      changes: [change({ state: 'open', change: { id: 'ws_1', name: null } })],
       here: [],
       note: 'Its commits go to a new pull request into it.',
+    },
+    {
+      said: 'only a named change’s pull request open, which the header’s Work toward doesn’t move',
+      changes: [change({ state: 'open', change: { id: 'ws_2', name: 'Docs' } })],
+      here: [],
+      note: 'Its branch moves onto it.',
     },
     {
       said: 'its branch pushed, with no pull request',
@@ -102,8 +108,14 @@ describe('a task’s parts where it has little or several kinds of work', () => 
     },
     {
       said: 'one repository with a pull request open and one without',
-      changes: [change({ state: 'open' })],
+      changes: [change({ state: 'open', change: { id: 'ws_1', name: null } })],
       here: [{ repository: 'web', name: 'web', branch: 'althar/retry', head: null }],
+      note: 'With an open pull request, its commits go to a new one into it; without, its branch moves onto it.',
+    },
+    {
+      said: 'a pull request open that Althar can’t place',
+      changes: [change({ state: 'open' })],
+      here: [],
       note: 'With an open pull request, its commits go to a new one into it; without, its branch moves onto it.',
     },
   ])('says what working toward another branch does with $said', async ({ changes, here, note }) => {

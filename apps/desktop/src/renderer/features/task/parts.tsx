@@ -193,10 +193,18 @@ const draftsIn = (items: ReadonlyArray<ThreadItem>) =>
 
 const SHOWN = 5
 
-/** Whether its repositories have an open pull request it follows: what decides what working toward another branch does. */
+/**
+ * Whether its first change, the one the header's Work toward moves, has an open pull request it follows: what decides
+ * what working toward another branch does there. Only where every repository of it is known to have one, or none, is it
+ * said for sure; a pull request Althar can't place, a named change's, or a repository without one beside it says both.
+ */
 const openOf = (task: ThreadSnapshot['task']): 'all' | 'none' | 'some' => {
-  const open = task.changes.some((change) => change.state === 'open')
-  return !open ? 'none' : task.here.length === 0 ? 'all' : 'some'
+  const open = task.changes.filter((change) => change.state === 'open')
+  const first = open.filter((change) => change.change?.name === null)
+  const unplaced = open.some((change) => change.change === undefined)
+  if (first.length === 0 && !unplaced) return 'none'
+  const named = task.changes.some((change) => change.change?.name != null)
+  return !unplaced && !named && task.here.length === 0 ? 'all' : 'some'
 }
 
 /** The branch a worktree started from, as the branch it goes into: origin/main is main. */
