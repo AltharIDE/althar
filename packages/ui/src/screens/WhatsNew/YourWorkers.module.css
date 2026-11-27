@@ -1,0 +1,365 @@
+/*
+ * Your workers, drawn as an orrery: this computer at the middle, one worker
+ * close up, then rings of them. Everything follows the story's time, `--t`
+ * (0 to 1), which the drawing writes on itself; each part says when it comes
+ * and goes (`--a` to `--b` in, `--c` to `--d` out). In the drawing's own
+ * units: a font size in px is one unit.
+ *
+ * Its colours are its own names for the kit's tokens, so a page that draws it
+ * on a ground of its own (the site's changelog, on its warm dark) sets them.
+ */
+
+.figure {
+  position: relative;
+  --yw-ground: var(--n-2);
+  --yw-ink: var(--t-1);
+  --yw-ink-2: var(--t-2);
+  --yw-ink-3: var(--t-3);
+  --yw-orbit: var(--n-5);
+  --yw-live: var(--live);
+  --yw-bezel: #151413;
+  --yw-alu: var(--n-4);
+  --yw-alu-lo: var(--n-5);
+  --yw-alu-hi: var(--n-1);
+  --yw-shadow: #1c1a17;
+  --yw-screen: var(--paper);
+  --yw-menu: var(--n-2);
+  --yw-chip: var(--n-2);
+  --yw-term: var(--term);
+  --yw-term-edge: var(--term-raised);
+  --yw-term-1: var(--term-t1);
+  --yw-term-3: var(--term-t3);
+  --yw-term-live: var(--term-live);
+  --yw-term-rule: var(--term-raised);
+  --yw-ok: var(--ok-ink);
+  --yw-del: var(--del-ink-2);
+  --yw-mono: var(--mono);
+  --yw-sans: var(--font);
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
+  overflow: hidden;
+  container-type: inline-size;
+}
+.scene {
+  /* how close the view starts, and on what (.world) */
+  --near: 2.2;
+  --near-x: 634;
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--yw-mono);
+}
+/* On its own loop, it clears at the end of each round and comes back at the start. */
+.scene[data-looping] {
+  opacity: min(clamp(0, var(--t) / 0.012, 1), clamp(0, (0.99 - var(--t)) / 0.04, 1));
+}
+/*
+ * Narrow, the drawing reads larger, its sides cropped, as the home page's
+ * orrery is on a phone: the fleet runs off the sides, but close up, the
+ * view stands back far enough that this computer and runner-1 are whole in
+ * the middle two-thirds that show.
+ */
+@container (width < 560px) {
+  .scene {
+    --near: 1.45;
+    --near-x: 631;
+    width: 150%;
+    margin-left: -25%;
+  }
+  /* Cropped, the outer workers' labels would be cut: the machines say it alone. */
+  .doing {
+    display: none;
+  }
+}
+
+/* ---- when each part shows: in from --a to --b, out from --c to --d ---- */
+
+.fade,
+.node,
+.spoke,
+.card {
+  opacity: min(clamp(0, (var(--t) - var(--a)) / (var(--b) - var(--a)), 1), clamp(0, (var(--d) - var(--t)) / (var(--d) - var(--c)), 1));
+}
+
+/*
+ * The view: close on this computer and runner-1 at first (`--near` times as
+ * large, centred on `--near-x`, both machines whole in what shows), then
+ * pulled back to the whole orrery, eased (smoothstep) as the story goes from
+ * 0.4 to 0.6.
+ */
+.world {
+  --z: clamp(0, (var(--t) - 0.4) / 0.2, 1);
+  --e: calc(var(--z) * var(--z) * (3 - 2 * var(--z)));
+  transform-origin: 0 0;
+  transform: translate(500px, 284px) scale(calc(var(--near) - (var(--near) - 1) * var(--e)))
+    translate(calc(-1px * var(--near-x) + (var(--near-x) - 500) * 1px * var(--e)), -284px);
+}
+
+/* ---- the rings, drawing round as they come ---- */
+
+.orbit {
+  fill: none;
+  stroke: var(--yw-orbit);
+  stroke-width: 1;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: calc(1 - clamp(0, (var(--t) - var(--a)) / (var(--b) - var(--a)), 1));
+}
+
+/* Ticks along each ring, as the first screen's orrery has. */
+.ticks {
+  fill: none;
+  stroke: var(--yw-orbit);
+  stroke-width: 3.5;
+  stroke-dasharray: 0.6 13;
+}
+/* The light under this computer: it comes with the fleet, and grows as it does. */
+.glow {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: clamp(0, (var(--t) - 0.46) / 0.3, 1);
+  transform: scale(calc(0.35 + 0.65 * clamp(0, (var(--t) - 0.46) / 0.34, 1)));
+}
+
+/* ---- the wires, and the work running along them ---- */
+
+.wire {
+  stroke: var(--yw-live);
+  stroke-opacity: 0.3;
+  stroke-width: 0.9;
+}
+.packet {
+  stroke: var(--yw-live);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-dasharray: 5 95;
+  stroke-dashoffset: 100;
+  /* only once the fleet is coming: close up, the task's own pill is what travels */
+  opacity: clamp(0, (var(--t) - 0.5) / 0.06, 1);
+}
+.packet {
+  animation: run 2.4s linear infinite paused;
+}
+/* Its own motion runs only while it's on screen and not paused; paused, it holds where it was. */
+.scene[data-playing] .packet,
+.scene[data-playing] .ping {
+  animation-play-state: running;
+}
+.packet[data-back] {
+  animation-direction: reverse;
+}
+@keyframes run {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* ---- the workers: small machines, their light at work ---- */
+
+.machine {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(calc(0.3 + 0.7 * clamp(0, (var(--t) - var(--a)) / (var(--b) - var(--a)), 1)));
+}
+.box {
+  fill: var(--yw-term);
+  stroke: var(--yw-term-edge);
+  stroke-width: 0.8;
+}
+.light {
+  fill: var(--yw-term-live);
+}
+.ping {
+  fill: none;
+  stroke: var(--yw-live);
+  stroke-width: 1;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.ping {
+  animation: ping 2.4s var(--ease-out) infinite paused;
+}
+@keyframes ping {
+  from {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(3.6);
+  }
+}
+.doing {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  fill: var(--yw-ink-3);
+  paint-order: stroke;
+  stroke: var(--yw-ground);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+/* ---- what travels the first wire: the task out, its commits back ---- */
+
+.travel {
+  transform: translateX(calc(var(--dx) * clamp(0, (var(--t) - var(--ma)) / (var(--mb) - var(--ma)), 1)));
+}
+.pill {
+  fill: var(--yw-live);
+}
+.pillText {
+  font-size: 4.3px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  fill: #fff;
+}
+
+/* ---- runner-1, close up: its terminal, folding into it as the view pulls back ---- */
+
+.card {
+  transform-box: view-box;
+  transform: scale(calc(1 - 0.75 * clamp(0, (var(--t) - var(--c)) / (var(--d) - var(--c)), 1)));
+}
+.term {
+  fill: var(--yw-term);
+}
+.prompt {
+  font-size: 6px;
+  fill: var(--yw-term-3);
+}
+.name {
+  font-size: 6.5px;
+  font-weight: 600;
+  fill: var(--yw-term-1);
+}
+.state {
+  font-family: var(--yw-sans);
+  font-size: 5.4px;
+  fill: var(--yw-term-3);
+}
+.termLight {
+  fill: var(--yw-term-live);
+}
+.rule {
+  stroke: var(--yw-term-rule);
+  stroke-width: 0.6;
+}
+.log {
+  font-size: 5.4px;
+  fill: var(--yw-term-3);
+}
+.log[data-typed] {
+  fill: var(--yw-term-1);
+}
+.dollar {
+  fill: var(--yw-term-live);
+}
+
+/* ---- this computer: a MacBook, the task open on it, then the count ---- */
+
+.lid {
+  fill: var(--yw-bezel);
+  stroke: var(--yw-alu-lo);
+  stroke-width: 0.9;
+}
+.screen {
+  fill: var(--yw-screen);
+}
+.menuBar {
+  fill: var(--yw-menu);
+}
+.menuApp,
+.menuItems {
+  font-family: var(--yw-sans);
+  font-size: 3.1px;
+}
+.menuApp {
+  font-weight: 650;
+  fill: var(--yw-ink);
+}
+.menuItems {
+  fill: var(--yw-ink-2);
+}
+.notch {
+  fill: var(--yw-bezel);
+}
+.camera {
+  fill: #2c2f3d;
+}
+.hinge {
+  fill: var(--yw-bezel);
+  opacity: 0.8;
+}
+.baseLit {
+  fill: var(--yw-alu-hi);
+}
+.thumb {
+  fill: var(--yw-alu-lo);
+}
+.said {
+  fill: var(--yw-chip);
+}
+.task {
+  font-family: var(--yw-sans);
+  font-size: 8.5px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  fill: var(--yw-ink);
+}
+.branch {
+  font-size: 4.6px;
+  fill: var(--yw-ink-3);
+}
+.saidText {
+  font-family: var(--yw-sans);
+  font-size: 5.2px;
+  fill: var(--yw-ink-2);
+}
+.status {
+  font-family: var(--yw-sans);
+  font-size: 5.8px;
+  fill: var(--yw-ink-2);
+}
+.live {
+  fill: var(--yw-live);
+}
+.ok {
+  fill: var(--yw-ok);
+}
+.del {
+  fill: var(--yw-del);
+}
+.count {
+  font-family: var(--yw-sans);
+  font-size: 30px;
+  font-weight: 640;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  fill: var(--yw-live);
+}
+.countLabel {
+  font-size: 5.6px;
+  letter-spacing: 0.14em;
+  fill: var(--yw-ink-3);
+}
+
+/* The pause, in the drawing's corner, quiet until pointed at. */
+.pause {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .packet,
+  .ping {
+    animation: none;
+  }
+  .packet {
+    opacity: 0;
+  }
+}

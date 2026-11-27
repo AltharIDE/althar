@@ -5,7 +5,7 @@ import { ProjectTabs } from '../src/chrome/ProjectTabs/ProjectTabs'
 import { MARKED } from '../src/fixtures/marks'
 import { BETTER, FEATURES, FOLLOW, LEAD, RELEASE_0_10, RELEASE_0_9, RELEASES, ROADMAP } from '../src/fixtures/whatsNew'
 import { ComingNext } from '../src/screens/ComingNext/ComingNext'
-import { HostAndWorkers } from '../src/screens/WhatsNew/HostAndWorkers'
+import { YourWorkers } from '../src/screens/WhatsNew/YourWorkers'
 import { compareVersions, dated, firstSentence, named } from '../src/screens/WhatsNew/notes'
 import { Releases } from '../src/screens/WhatsNew/Releases'
 import { WhatsNew, type WhatsNewProps } from '../src/screens/WhatsNew/WhatsNew'
@@ -148,29 +148,76 @@ describe('What’s new', () => {
 })
 
 describe('the lead drawn', () => {
-  const laptop = (container: HTMLElement) => container.querySelector('[data-closed]')
+  const story = (container: HTMLElement) => Number((container.querySelector('svg') as SVGElement).style.getPropertyValue('--t'))
+  const count = (container: HTMLElement) => container.querySelector('.count')?.textContent
 
-  it('goes round its beats while on screen: the laptop closes, and opens on the finished task', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
-    const { container } = render(<HostAndWorkers />)
+  it('stands where its host puts it: one worker close up, then the fleet all at work', () => {
+    const { container, rerender } = render(<YourWorkers at={0.3} />)
+    // runner-1 has the task: one agent at work.
+    expect(story(container)).toBeCloseTo(0.3 * 0.86, 3)
+    expect(count(container)).toBe('1')
+    rerender(<YourWorkers at={1} />)
+    expect(count(container)).toBe('44')
+  })
+
+  it('plays its own loop while on screen: the task goes out, then the fleet joins', async () => {
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] })
+    const { container } = render(<YourWorkers />)
     // The observer sees it on screen a moment after it's drawn.
     await act(async () => {
       await Promise.resolve()
     })
-    expect(laptop(container)).toHaveAttribute('data-closed', 'false')
-    // From its rest at 10 s, through the loop's end at 13.6 s, to the laptop closing at 3.4 s into the next.
     await act(async () => {
-      vi.advanceTimersByTime(3_600 + 3_400 + 10)
+      vi.advanceTimersByTime(17_000 * 0.3)
     })
-    expect(laptop(container)).toHaveAttribute('data-closed', 'true')
+    expect(story(container)).toBeGreaterThan(0.28)
+    expect(story(container)).toBeLessThan(0.32)
+    expect(count(container)).toBe('1')
     await act(async () => {
-      vi.advanceTimersByTime(8_200 - 3_400)
+      vi.advanceTimersByTime(17_000 * 0.5)
     })
-    expect(laptop(container)).toHaveAttribute('data-closed', 'false')
-    expect(screen.getAllByText('Finished').length).toBeGreaterThan(0)
+    expect(Number(count(container))).toBeGreaterThan(30)
   })
 
-  it('rests on the finished task with motion reduced', () => {
+  it('can be paused, holding where it is and moving no more, and played on from there', async () => {
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] })
+    const { container } = render(<YourWorkers />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(17_000 * 0.2)
+    })
+    const svg = container.querySelector('svg') as SVGElement
+    expect(svg).toHaveAttribute('data-playing')
+    fireEvent.click(screen.getByRole('button', { name: 'Pause the animation' }))
+    const held = story(container)
+    expect(svg).not.toHaveAttribute('data-playing')
+    await act(async () => {
+      vi.advanceTimersByTime(17_000 * 0.3)
+    })
+    expect(story(container)).toBe(held)
+    fireEvent.click(screen.getByRole('button', { name: 'Play the animation' }))
+    await act(async () => {
+      vi.advanceTimersByTime(17_000 * 0.1)
+    })
+    expect(story(container)).toBeGreaterThan(held + 0.08)
+    expect(story(container)).toBeLessThan(held + 0.12)
+  })
+
+  it('pauses the work along its wires where the host plays its story', async () => {
+    const { container } = render(<YourWorkers at={1} />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const svg = container.querySelector('svg') as SVGElement
+    expect(svg).toHaveAttribute('data-playing')
+    fireEvent.click(screen.getByRole('button', { name: 'Pause the animation' }))
+    expect(svg).not.toHaveAttribute('data-playing')
+    expect(count(container)).toBe('44')
+  })
+
+  it('rests on the fleet with motion reduced', () => {
     vi.stubGlobal(
       'matchMedia',
       (query: string) =>
@@ -181,12 +228,12 @@ describe('the lead drawn', () => {
           removeEventListener() {},
         }) as unknown as MediaQueryList,
     )
-    const { container } = render(<HostAndWorkers text={{ computer: { name: 'This Mac', what: 'Close it.' } }} />)
-    expect(laptop(container)).toHaveAttribute('data-closed', 'false')
-    expect(screen.getByText('This Mac')).toBeInTheDocument()
-    // The finished task is back on this computer; runner-2 still works on the other.
-    expect(screen.getAllByText('Finished').length).toBeGreaterThan(0)
-    expect(container.querySelector('.one')).toHaveAttribute('data-busy', 'false')
+    const { container } = render(<YourWorkers />)
+    expect(story(container)).toBeCloseTo(0.88, 3)
+    expect(count(container)).toBe('44')
+    expect(screen.getByRole('figure')).toHaveAccessibleName(/dozens of workers/)
+    // Nothing moves, so there is nothing to pause.
+    expect(screen.queryByRole('button', { name: /animation/ })).toBeNull()
   })
 })
 

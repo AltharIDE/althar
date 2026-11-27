@@ -5,6 +5,8 @@
  * no internal labels.
  */
 
+import { PUBLISHED } from './published'
+
 export type Kind = 'new' | 'improved' | 'fixed'
 
 export const KIND_WORD: Record<Kind, string> = { new: 'New', improved: 'Improved', fixed: 'Fixed' }
@@ -20,7 +22,7 @@ export interface Change {
 
 export interface Release {
   version: string
-  /** ISO date it was published. */
+  /** ISO date it was published: once its publish time is recorded (published.ts), that time's day, UTC; before, the day it's planned for. */
   date: string
   /** What the release is about, in a few words. */
   title: string
@@ -30,8 +32,208 @@ export interface Release {
 const REPO = 'https://github.com/AltharIDE/althar'
 export const releaseUrl = (version: string) => `${REPO}/releases/tag/v${version}`
 
-/** The releases, newest first. */
-export const RELEASES: readonly Release[] = [
+/** The releases' notes as written, newest first; RELEASES dates each that is out by its publish time. */
+const WRITTEN: readonly Release[] = [
+  {
+    version: '0.10.0',
+    date: '2026-11-27',
+    title: 'Althar on your own machines',
+    changes: [
+      {
+        kind: 'new',
+        text: 'Your own workers, in early access: add a Linux machine of yours as a worker, and your tasks’ agents run on it instead of your Mac. Their work comes back to your Mac as commits.',
+      },
+      {
+        kind: 'new',
+        text: 'Add one from Settings › Computers, over SSH or with a one-time code: Althar installs it, signs its agents in, and checks it’s ready for your projects. Settings › Computers then shows what each worker is running and what it has free, and Remove uninstalls it from its machine.',
+      },
+      {
+        kind: 'new',
+        text: 'Choose where each task runs: your Mac, a worker, or Any free worker, which picks the one with the most to spare. Move it later from its menu.',
+      },
+      {
+        kind: 'new',
+        text: 'A task on a worker runs its setup, builds, tests and dev servers there, and you open its dev server’s page in Althar, live reload and all.',
+      },
+      {
+        kind: 'new',
+        text: 'Its helper agents and MCP servers go with it, its skills too with Codex and Claude, and up to eight repositories where its agent supports it.',
+      },
+      {
+        kind: 'new',
+        text: 'For now, workers run on 64-bit Linux with systemd, a task needs a worktree of its own to run on one, and reviews run where the project lives.',
+      },
+      {
+        kind: 'new',
+        text: 'Your own host, experimental: run Althar on a Linux server of yours, so your projects and their agents keep working with your laptop closed, and your workers can work for it too. Expect rough edges.',
+      },
+      {
+        kind: 'new',
+        text: 'Connect a home installs Althar on your server over SSH, step by step, or connects to one with a one-time code. It updates from Althar too.',
+      },
+      {
+        kind: 'new',
+        text: 'In a server’s window, sign its agents and code hosts in, and make projects there: clone repositories, copy this Mac’s over, or start empty.',
+      },
+      {
+        kind: 'new',
+        text: 'From a server’s window, start tasks, talk to their agents and read their changes. Answering an agent’s permission requests there takes a security key; merging there comes later.',
+      },
+      {
+        kind: 'new',
+        text: 'From a terminal: Althar’s command line starts or joins a task on your server over SSH and shows its agent at work. Leave, and it keeps going.',
+      },
+      {
+        kind: 'new',
+        text: 'Computer use: a task’s agent uses the apps on your Mac as you would, opening any app, clicking and typing, with one permission request a turn. Its card shows its latest screenshot, with Take over and Stop.',
+      },
+      {
+        kind: 'new',
+        text: 'Artifacts you talk to: open a design beside its own chat, point at a part and say what to change, and its agent draws a new version. Compare boards side by side, save it to a repository, or download it.',
+      },
+      {
+        kind: 'new',
+        text: 'Goals: type `/goal` and a task’s agent keeps working toward it, turn after turn, until it’s done, stuck, or you pause it.',
+      },
+      { kind: 'new', text: 'Slash commands in every composer: `/goal`, `/compact` and more.' },
+      { kind: 'new', text: 'What’s new: Althar has a tab of its own, with what each version brings and what’s coming next.' },
+      { kind: 'new', text: 'Sign in to GitHub, GitLab and Linear in your browser.' },
+      {
+        kind: 'new',
+        text: 'The thread shows what agents look up and hand off: their web searches, the pages they read, their sub-agents, and a summary each time they compact.',
+      },
+      {
+        kind: 'new',
+        text: 'Work on a contributor’s pull request from their fork, on GitHub or GitLab, where they allow edits from maintainers.',
+      },
+      {
+        kind: 'new',
+        text: 'Review bots you trust, such as CodeRabbit, Copilot or Claude’s review, pass their findings to the task’s agent. Trust one from the thread or the project’s settings.',
+      },
+      { kind: 'new', text: 'GPT-6.2 Sol, through Codex.' },
+      {
+        kind: 'new',
+        text: 'More agents: add any coding agent from the ACP registry, or your own by its command. Althar checks it works before giving it a task.',
+      },
+      {
+        kind: 'new',
+        text: 'Terminals in Althar: your runs and terminals sit along the bottom of the window, each opening in a drawer. Show or hide them from the Layout menu.',
+      },
+      {
+        kind: 'new',
+        text: 'Bring in work from Conductor, Orca, T3 Code, Paradev, Cursor and Codex: their worktrees become tasks, with Claude Code’s and Codex’s conversations as their history.',
+      },
+      { kind: 'new', text: 'Agents run Xcode, the iOS Simulator, the Android emulator and Gradle, to build and try mobile apps.' },
+      { kind: 'new', text: 'Comment on lines of a task’s diff and send them to its agent.' },
+      {
+        kind: 'new',
+        text: 'Dictate from anywhere: press a shortcut on any screen, speak, and put the words in a task or the coordinator after.',
+      },
+      { kind: 'new', text: 'ClickUp as an issue tracker, beside Linear, Jira and Trello.' },
+      {
+        kind: 'new',
+        text: 'One task can cover several issues: each is updated as the task starts, and closed or commented on when it merges.',
+      },
+      {
+        kind: 'new',
+        text: 'New projects three ways: start empty, from a folder, or clone, from your code hosts or a pasted address, several repositories at once.',
+      },
+      { kind: 'new', text: 'A project only on your computer merges its tasks there, and goes on a code host when you like.' },
+      { kind: 'new', text: 'A task stopped at its usage limit carries on by itself once the limit resets.' },
+      { kind: 'new', text: 'Tune the built-in presets: their agent, reviewer, effort and brief, with Reset.' },
+      { kind: 'new', text: 'About Althar shows how much space Althar takes, with Free up space.' },
+      { kind: 'new', text: 'Agents read `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`, to go through a gateway of your own.' },
+      { kind: 'improved', text: 'Althar answers at once however busy your computer is, the model picker, search and the board included.' },
+      { kind: 'improved', text: 'Switching an agent’s model shows the new one at once.' },
+      { kind: 'improved', text: 'Plan usage shows when each limit resets, and how far through it you are.' },
+      {
+        kind: 'improved',
+        text: 'When a plan runs low, Althar keeps the same model, through another account or agent, before it switches models, and the task says which.',
+      },
+      {
+        kind: 'improved',
+        text: 'Althar stays light when nothing’s running: an idle coordinator sleeps after half an hour and wakes when you message it, and Home opens fast in a long-used profile.',
+      },
+      { kind: 'improved', text: 'A full conversation is compacted while it’s idle and carries on, rather than starting over.' },
+      { kind: 'improved', text: 'Agents running at once share the CPU, so none starves the rest.' },
+      { kind: 'improved', text: 'Long threads open and scroll smoothly.' },
+      {
+        kind: 'improved',
+        text: 'The coordinator starts each session knowing the project: its notes, its open tasks, and each repository’s `AGENTS.md` and `CLAUDE.md`.',
+      },
+      { kind: 'improved', text: 'Agents know your local date and time.' },
+      { kind: 'improved', text: 'Up next starts work as soon as an agent is free.' },
+      { kind: 'improved', text: 'A waiting task says what it’s waiting for, on its card, its page and its plan.' },
+      { kind: 'improved', text: 'Up next says when your Mac’s memory or CPU is holding agents back.' },
+      { kind: 'improved', text: 'Abandon a task from its row in Up next.' },
+      { kind: 'improved', text: 'Stopped work waits in Up next with Resume, out of Needs you unless it asks something.' },
+      { kind: 'improved', text: 'A stopped task’s card says who stopped it and why.' },
+      { kind: 'improved', text: 'Sort the Running column by status.' },
+      { kind: 'improved', text: 'Each account offers the models it can really use.' },
+      { kind: 'improved', text: 'An agent that fails to start says why, and tries again by itself.' },
+      { kind: 'improved', text: 'Turn a change back into a prototype and into a change again, keeping its pull request.' },
+      {
+        kind: 'improved',
+        text: 'Choose a task’s reviewer, or none, in Change the team; a small change’s card lets you pick its team too.',
+      },
+      { kind: 'improved', text: 'Markdown files show their HTML as GitHub does: a README’s banner, tables of pictures, and alerts.' },
+      {
+        kind: 'improved',
+        text: 'Running settings: long lists search, each repository’s setup command shows and can be changed, and Ask the coordinator drafts your request to it.',
+      },
+      { kind: 'improved', text: 'An issue’s card says whether merging closes it or is only part of it.' },
+      { kind: 'improved', text: 'Only the checks your code host requires hold a change back; a failing optional one is a quiet note.' },
+      { kind: 'improved', text: 'Ship says what it will do before it does: a review or not, then a push, ready or merged.' },
+      { kind: 'improved', text: 'GitLab reviews post their summary and line comments together.' },
+      { kind: 'improved', text: 'Comments you haven’t sent stay in the composer across restarts.' },
+      { kind: 'improved', text: 'Asides work in projects of several repositories.' },
+      {
+        kind: 'improved',
+        text: 'The coordinator’s follow-ups wait for the right moment: they carry on once a review settles, checks pass or an agent finishes, and a tag waits for its merge.',
+      },
+      { kind: 'improved', text: 'A follow-up the coordinator can’t watch is turned down, with why.' },
+      { kind: 'improved', text: 'The coordinator’s merges and follow-ups sit in one line at the foot of its thread.' },
+      { kind: 'improved', text: 'The thread says what happened in a short line, never the agent’s raw output.' },
+      { kind: 'improved', text: 'A failed usage reading says so in a few words.' },
+      { kind: 'improved', text: 'Screenshots on a pull request sit two to a row, each with its caption.' },
+      {
+        kind: 'improved',
+        text: 'Anonymous usage data, if you leave it on, covers more of how work goes. The privacy page lists every event, and Settings turns it off.',
+      },
+      { kind: 'improved', text: 'When git fails, you see git’s own error, and a worktree whose link broke is repaired.' },
+      { kind: 'improved', text: 'The conversation bar lists recent conversations, with a search.' },
+      { kind: 'improved', text: 'Merging shows the queue at once, with a burst when it lands.' },
+      { kind: 'improved', text: 'A run shows it started at once; a failed one offers Help me fix it.' },
+      { kind: 'improved', text: 'The thread says when a task moves to another agent at a usage limit.' },
+      { kind: 'improved', text: 'Claude Code’s adapter is 0.113.0, and Codex’s is 2.12.1.' },
+      { kind: 'fixed', text: 'Dictation tries a failed transcription again before showing an error.' },
+      { kind: 'fixed', text: 'A lost agent connection ends the turn, rather than showing Following up.' },
+      { kind: 'fixed', text: 'Gemini can use Althar’s tools.' },
+      { kind: 'fixed', text: 'Signing in to Codex no longer fails while your computer’s DNS is slow to answer.' },
+      { kind: 'fixed', text: 'An aside’s permission request no longer moves the window.' },
+      { kind: 'fixed', text: 'The coordinator finds a fork’s pull requests on the repository it came from.' },
+      { kind: 'fixed', text: 'A fork is recognised whatever its remotes are called.' },
+      { kind: 'fixed', text: 'Screenshots over GitHub’s 10 MB limit still reach the pull request.' },
+      { kind: 'fixed', text: 'Ship shows for commits waiting before a task’s first pull request.' },
+      { kind: 'fixed', text: 'Run servers nothing owns any more are stopped, and a task’s runs stop when its worktree is cleaned up.' },
+      { kind: 'fixed', text: 'Board cards stay in their column while you drag the divider.' },
+      { kind: 'fixed', text: 'A message sent to an idle agent no longer flashes as queued.' },
+      { kind: 'fixed', text: 'The chat holds still while nothing changes.' },
+      { kind: 'fixed', text: 'Reviewing your own pull request posts on GitHub as a comment, with its verdict.' },
+      { kind: 'fixed', text: 'GitHub Copilot’s enterprise sign-in goes to your enterprise’s host.' },
+      { kind: 'fixed', text: 'Discarded and unplanned tasks no longer linger as held.' },
+      { kind: 'fixed', text: 'Keep for later is offered for every finished task again, work waiting to be accepted included.' },
+      {
+        kind: 'fixed',
+        text: 'A ready task’s card in the thread says what the board says: Checks running, Not ready to accept with the check that failed, or Merge conflict, rather than Needs you.',
+      },
+      { kind: 'fixed', text: 'Failing checks always reach the agent or you; no card says Fixing the checks while nobody was told.' },
+      { kind: 'fixed', text: 'Canvases step aside for dialogs, and an aside’s canvases and files open beside it.' },
+      { kind: 'fixed', text: 'Closing the browser beside a task brings the board back.' },
+      { kind: 'fixed', text: 'File paths shorten at a folder, never mid-name.' },
+      { kind: 'fixed', text: 'Long sign-in errors stay inside the account panel.' },
+    ],
+  },
   {
     version: '0.9.0',
     date: '2026-11-15',
@@ -404,6 +606,26 @@ export const RELEASES: readonly Release[] = [
     ],
   },
 ]
+
+/**
+ * A release as every page tells it: once its publish time is recorded, dated
+ * by that time's day (UTC), whatever day its notes were written for, so the
+ * page's stamp, its Markdown, llms.txt and the structured data all say the
+ * day it went out.
+ */
+export const asPublished = (release: Release, published: Readonly<Record<string, string>> = PUBLISHED): Release => {
+  const at = published[release.version]
+  return at === undefined ? release : { ...release, date: at.slice(0, 10) }
+}
+
+/** The releases, newest first. */
+export const RELEASES: readonly Release[] = WRITTEN.map((release) => asPublished(release))
+
+/** Whether a release is out: its publish time is recorded. The newest entry may be written before it goes out. */
+export const isOut = (release: Release): boolean => release.version in PUBLISHED
+
+/** The newest release that is out: what every page calls the current version. */
+export const CURRENT: Release = RELEASES.find(isOut) ?? RELEASES[RELEASES.length - 1]!
 
 export type Stage = 'now' | 'next' | 'later'
 

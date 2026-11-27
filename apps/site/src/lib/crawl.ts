@@ -1,4 +1,4 @@
-import { KIND_WORD as CHANGE_WORD, KINDS, RELEASES, releaseUrl, ROADMAP, STAGE_WORD, STAGES } from '../content/changelog'
+import { KIND_WORD as CHANGE_WORD, CURRENT, isOut, KINDS, RELEASES, releaseUrl, ROADMAP, STAGE_WORD, STAGES } from '../content/changelog'
 import { INSTALL, LINKS } from '../content/facts'
 import { DOES, FITS, NOT, STORY, SUMMARY, TAGLINE, WHY } from '../content/llms'
 import { PAGE_META, type PageMeta, type PagePath } from '../content/pages'
@@ -44,7 +44,7 @@ const xml = (text: string) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt
 
 /** The shifts change when a shift is added, the changelog with each release; the other pages carry no date we can stand behind. */
 const lastModified = (path: string): string | undefined =>
-  path === '/shifts' ? newestFirst(SHIFTS)[0]?.date : path === '/changelog' ? RELEASES[0]?.date : undefined
+  path === '/shifts' ? newestFirst(SHIFTS)[0]?.date : path === '/changelog' ? CURRENT.date : undefined
 
 export const sitemapXml = (origin: string): string => {
   const urls = indexed().map((page) => {
@@ -66,7 +66,7 @@ const stop = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`)
  * only this file.
  */
 export const llmsTxt = (origin: string): string => {
-  const latest = RELEASES[0]
+  const latest = CURRENT
   const pages = indexed().map((page) => {
     const markdown = MARKDOWN[page.path as PagePath]
     const also = markdown ? ` As Markdown: ${urlOf(origin, markdown)}` : ''
@@ -166,7 +166,7 @@ export const changelogMd = (origin: string): string => {
     '',
     `## ${release.version} · ${release.title}`,
     '',
-    `Released ${release.date}. [Release notes](${releaseUrl(release.version)})`,
+    isOut(release) ? `Released ${release.date}. [Release notes](${releaseUrl(release.version)})` : 'Not released yet.',
     ...KINDS.flatMap((kind) => {
       const lines = release.changes.filter((change) => change.kind === kind)
       return lines.length ? ['', `### ${CHANGE_WORD[kind]}`, '', ...lines.map((change) => `- ${change.text}`)] : []

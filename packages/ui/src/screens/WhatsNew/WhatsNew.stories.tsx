@@ -40,7 +40,7 @@ export const FromTheReleaseBefore: Story = {
   play: async ({ args, canvasElement }) => {
     const page = within(canvasElement)
     await expect(page.getByLabelText('Updated from 0.9.0 to 0.10.0')).toBeInTheDocument()
-    await expect(page.getByRole('heading', { level: 1, name: /^Your own host,\s+your own workers$/ })).toBeInTheDocument()
+    await expect(page.getByRole('heading', { level: 1, name: /^Your own workers$/ })).toBeInTheDocument()
     await expect(page.getByRole('link', { name: /Join the Discord/ })).toHaveAttribute('href', 'https://discord.gg/QA2g8MwKda')
     await userEvent.click(page.getByRole('button', { name: 'See what’s coming next' }))
     await expect(args.onComing).toHaveBeenCalledOnce()

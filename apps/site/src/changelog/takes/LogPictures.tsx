@@ -1,4 +1,5 @@
 import { Brand, BrandMark, Icon, Logo, planPeekText, reportProblemText, undoTurnText } from '@althar/ui'
+import { YourWorkers } from '@althar/ui/screens'
 import { sealSvg } from '@althar/ui/seal'
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 
@@ -1166,7 +1167,27 @@ function Undo() {
   )
 }
 
+/* ---- 0.10.0: your own workers ---- */
+
+/*
+ * The kit's drawing of it, as Althar's own What's new and the home page have
+ * it: one worker of yours running a task and sending its commits back, then
+ * a fleet of them round your computer, all at work. On the log's warm dark,
+ * in its colours (LogPictures.module.css .fleet).
+ */
+function Home() {
+  // Not a Frame: the drawing is a figure with its own label, and its pause must be reachable, so nothing around it is hidden.
+  return (
+    <div className={p.frame} data-nosnippet>
+      <div className={p.art} style={{ '--w': 64, '--n': 32 } as CSSProperties}>
+        <YourWorkers className={p.fleet} />
+      </div>
+    </div>
+  )
+}
+
 const PICTURES: Record<Picture, () => ReactNode> = {
+  home: Home,
   undo: Undo,
   browser: Browser,
   canvas: Canvas,

@@ -707,3 +707,32 @@
   .unAsk { transform: translate(-50%, -50%); }
   .unDraftWords, .unSum { animation: none; }
 }
+
+/* ---- 0.10.0: your own workers ---- */
+
+/* The kit's drawing of them (YourWorkers), in the log's colours: the warm dark for its ground, light lines, the pale cobalt. */
+.art .fleet {
+  --yw-ground: #120e0b;
+  --yw-ink: var(--t1);
+  --yw-ink-2: var(--t2);
+  --yw-ink-3: var(--t3);
+  --yw-orbit: rgba(255, 240, 215, 0.17);
+  --yw-live: var(--live);
+  --yw-bezel: #0b0a09;
+  --yw-alu: #3d3a36;
+  --yw-alu-lo: #2a2825;
+  --yw-alu-hi: #6b665e;
+  --yw-shadow: #000;
+  --yw-screen: var(--win);
+  --yw-menu: var(--bar);
+  --yw-chip: var(--raised);
+  --yw-term: #24211d;
+  --yw-term-edge: rgba(255, 240, 215, 0.22);
+  --yw-term-1: #f2f0ea;
+  --yw-term-3: #a9a39a;
+  --yw-term-live: #aab3ff;
+  --yw-term-rule: rgba(255, 240, 215, 0.1);
+  --yw-ok: var(--ok);
+  --yw-del: #e58b7a;
+  max-width: none;
+}
