@@ -32,7 +32,7 @@ const checks = (over: Partial<ChecksSummary> = {}): ChecksSummary => ({
 })
 
 describe('a task’s parts where it has little or several kinds of work', () => {
-  it('shows the first changed files, keeps binary files uncounted, and asks before removing uncommitted work', async () => {
+  it('folds its changed files into one bar, keeps binary files uncounted, and asks before removing uncommitted work', async () => {
     const files: ThreadSnapshot['task']['files'] = Array.from({ length: 6 }, (_, at) => ({
       path: `file-${at}.ts`,
       from: null,
@@ -55,15 +55,22 @@ describe('a task’s parts where it has little or several kinds of work', () => 
       openInEditor: { name: 'Zed', open },
     }).find((one) => one.id === 'worktree')
     render(<>{part?.body}</>)
-    expect(screen.getByText('file-0.ts')).toBeTruthy()
+    // The bar counts the lines of what isn't binary, and opens into every file.
+    expect(screen.getByText('6 files changed')).toBeTruthy()
+    expect(screen.getByText('+10')).toBeTruthy()
     expect(screen.queryByText('file-5.ts')).toBeNull()
-    expect(screen.getByText('1 more')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Show the 6 files' }))
+    expect(screen.getByText('file-5.ts')).toBeTruthy()
     const remove = part?.actions?.find((one) => one.label === 'Remove')
     expect(remove?.confirm?.says).toBe('2 files aren’t committed. They’d be lost.')
-    part?.actions?.find((one) => one.label === 'Open in Zed')?.onClick?.()
+    part?.actions?.find((one) => one.label === 'Zed')?.onClick?.()
     expect(open).toHaveBeenCalledOnce()
     part?.actions?.find((one) => one.label === 'See the changes')?.onClick?.()
     expect(seeChanges).toHaveBeenCalledOnce()
+    // See the changes is last, in violet; with nothing pushed, working toward another moves its branch onto it.
+    expect(part?.actions?.at(-1)).toMatchObject({ label: 'See the changes', variant: 'signal', kbd: 'Ctrl+D' })
+    await userEvent.click(screen.getByRole('button', { name: /Work toward/ }))
+    expect(screen.getByText('Its branch moves onto it.')).toBeTruthy()
     await userEvent.type(screen.getByRole('textbox', { name: 'Another branch to work toward' }), '   ')
     await userEvent.click(screen.getByRole('button', { name: 'Work toward it' }))
     expect(workToward).not.toHaveBeenCalled()

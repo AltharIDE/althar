@@ -115,6 +115,7 @@ describe('a task’s parts', () => {
     withServices(<Task />, client)
     const popover = await parts()
     await userEvent.click(popover.getByRole('button', { name: /^Worktree/ }))
+    await userEvent.click(await popover.findByRole('button', { name: /Work toward/ }))
     await userEvent.type(await popover.findByRole('textbox', { name: 'Another branch to work toward' }), 'release/0.8.0')
     await userEvent.click(popover.getByRole('button', { name: 'Work toward it' }))
     await waitFor(() => expect(client.workToward).toHaveBeenCalledWith(base.task.id, 'release/0.8.0'))

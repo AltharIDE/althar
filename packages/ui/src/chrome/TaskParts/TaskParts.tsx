@@ -354,7 +354,7 @@ export function TaskParts({ parts, kinds = [] }: { parts: ReadonlyArray<TaskPart
       label={taskPartsText.label}
       placement="below"
       align="end"
-      width={380}
+      width={400}
       padded={false}
       trigger={
         parts.length === 0 ? (

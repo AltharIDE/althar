@@ -8,7 +8,7 @@ import {
   type ThreadSnapshot,
   workerNameOf,
 } from '@althar/contracts'
-import { Button, device, Field, type PartKind, PartLines, PartShots, Segmented, type TaskPartModel } from '@althar/ui'
+import { Button, device, Field, type PartKind, PartLines, PartShots, Segmented, type TaskPartModel, WorktreeBody } from '@althar/ui'
 
 import type { MergeStanding } from '../../data/merges'
 import { outcomeOf } from '../../shared/outcome'
@@ -46,14 +46,16 @@ export const partsText = {
   /** The branch a running task works toward, changed (a task is a conversation plus parts). */
   towardField: 'Another branch to work toward',
   towardIt: 'Work toward it',
-  towardNote: 'Nothing pushed, its branch moves onto it; pushed, its commits go to a new pull request into it.',
+  /** What working toward another branch does, said for this task: whether its branch is pushed decides. */
+  towardNote: (pushed: boolean) => (pushed ? 'Its commits go to a new pull request into it.' : 'Its branch moves onto it.'),
   files: (n: number) => (n === 0 ? 'No changes' : `${n} ${n === 1 ? 'file' : 'files'} changed`),
   branch: 'Branch',
   where: 'Where',
   from: 'From',
   more: (n: number) => `${n} more`,
   seeChanges: 'See the changes',
-  openIn: (editor: string) => `Open in ${editor}`,
+  /** In the worktree's footer, the editor by its name, with the outside mark: VS Code ↗. */
+  openIn: (editor: string) => editor,
   remove: 'Remove',
   uncommitted: (n: number) => `${n} ${n === 1 ? 'file isn’t' : 'files aren’t'} committed. They’d be lost.`,
   removeAll: 'Its folder goes. Its branch stays.',
@@ -182,6 +184,9 @@ const draftsIn = (items: ReadonlyArray<ThreadItem>) =>
 
 const SHOWN = 5
 
+/** The branch a worktree started from, as the branch it goes into: origin/main is main. */
+const baseOf = (ref: string | null) => (ref === null || ref === '' ? null : ref.replace(/^(refs\/remotes\/)?origin\//, ''))
+
 /** The task's parts, from what the window knows of it. */
 export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyArray<TaskPartModel> => {
   const { task } = snapshot
@@ -222,37 +227,21 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
       ...(moving?.seen === undefined || move === undefined
         ? {}
         : { tone: 'you' as const, act: { label: t.switchIt, onClick: () => move(moving.to, moving.seen) } }),
-      facts: [
-        ...(task.branch === null ? [] : [[t.branch, <code key="b">{task.branch}</code>] as const]),
-        ...(task.toward === undefined ? [] : [[t.into, <code key="t">{task.toward}</code>] as const]),
-        // On a worker, its folder is there: the home's copy of it is no place to open.
-        [t.where, task.workerId == null ? <code key="w">{task.worktree}</code> : workerNameOf(task.workerId)],
-      ],
-      ...(task.files.length === 0 && act.workToward === undefined
-        ? {}
-        : {
-            body: (
-              <>
-                {task.files.length > 0 && (
-                  <PartLines
-                    lines={[
-                      ...task.files
-                        .slice(0, SHOWN)
-                        .map((file) => [file.path, file.binary ? '' : `+${file.add} −${file.del}`, 'path'] as const),
-                      ...(task.files.length > SHOWN ? [[t.more(task.files.length - SHOWN), ''] as const] : []),
-                    ]}
-                  />
-                )}
-                {act.workToward !== undefined && (
-                  <OneField label={t.towardField} button={t.towardIt} note={t.towardNote} onGo={act.workToward} done={() => undefined} />
-                )}
-              </>
-            ),
-          }),
+      // Direction C: branch → where it goes, its folder, what it changed as one bar.
+      body: (
+        <WorktreeBody
+          branch={task.branch}
+          target={task.toward ?? baseOf(task.baseRef)}
+          // On a worker, its folder is there: the home's copy of it is no place to open.
+          folder={task.workerId == null ? task.worktree : null}
+          {...(task.workerId == null ? {} : { place: workerNameOf(task.workerId) })}
+          files={task.files}
+          {...(act.workToward === undefined
+            ? {}
+            : { onToward: act.workToward, towardNote: t.towardNote(task.here.some((one) => one.remote?.pushed === true)) })}
+        />
+      ),
       actions: [
-        ...(task.files.length === 0
-          ? []
-          : [{ label: t.seeChanges, onClick: act.seeChanges, ...(act.changesKey === undefined ? {} : { kbd: act.changesKey }) }]),
         ...moves,
         ...(act.openInEditor === undefined
           ? []
@@ -284,6 +273,17 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
                 variant: 'quiet' as const,
                 end: true,
                 confirm: { says: uncommitted > 0 ? t.uncommitted(uncommitted) : t.removeAll, keep: t.keep, go: t.remove },
+              },
+            ]),
+        ...(task.files.length === 0
+          ? []
+          : [
+              {
+                label: t.seeChanges,
+                onClick: act.seeChanges,
+                variant: 'signal' as const,
+                end: true,
+                ...(act.changesKey === undefined ? {} : { kbd: act.changesKey }),
               },
             ]),
       ],

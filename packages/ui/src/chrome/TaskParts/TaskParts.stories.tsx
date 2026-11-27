@@ -6,31 +6,40 @@ import { TaskStatus } from '../../foundations/vocabulary'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 import { TaskHeader } from '../TaskHeader/TaskHeader'
 import { PartLines, type PartKind, TaskParts, type TaskPartModel } from './TaskParts'
+import { WorktreeBody, type WorktreeFile } from './WorktreeBody'
 
 /* A task's parts, just before the faces, which never move with Run and the menu (ADR-097). */
+
+const FILES: ReadonlyArray<WorktreeFile> = [
+  { path: 'apps/desktop/src/renderer/features/news/AltharPage.tsx', add: 42, del: 8 },
+  { path: 'apps/site/src/changelog/takes/Log.tsx', add: 23, del: 4 },
+  { path: 'apps/site/src/changelog/takes/LogData.ts', add: 118, del: 31 },
+  { path: 'apps/site/src/changelog/takes/LogPictures.module.css', add: 64, del: 0 },
+  { path: 'apps/site/src/changelog/takes/LogPictures.tsx', add: 15, del: 2 },
+  { path: 'apps/site/public/changelog/0-10-0/host.png', add: 0, del: 0, binary: true },
+  ...Array.from({ length: 15 }, (_, at) => ({ path: `packages/ui/src/screens/News/takes/Take${at + 1}.tsx`, add: 4 + at, del: at % 3 })),
+]
 
 const PARTS: ReadonlyArray<TaskPartModel> = [
   {
     id: 'worktree',
     icon: 'folder',
     name: 'Worktree',
-    detail: '6 files changed',
-    facts: [
-      ['Branch', <code key="b">althar/runs-pill</code>],
-      ['Where', <code key="w">~/Charrette/althar/runs-pill</code>],
-    ],
+    detail: '21 files changed',
     body: (
-      <PartLines
-        lines={[
-          ['packages/ui/src/chrome/RunPill/RunPill.tsx', '+48 −12'],
-          ['apps/desktop/src/renderer/features/run/runs.ts', '+31 −9'],
-          ['4 more', ''],
-        ]}
+      <WorktreeBody
+        branch="althar/changelog-entry-for-0-10-0-led-by-your-own-host"
+        target="main"
+        folder="/Users/balazs/Charrette/althar/changelog-entry-for-0-10-0-led-by-your-own-host/althar"
+        files={FILES}
+        onToward={fn()}
+        towardNote="Its commits go to a new pull request into it."
       />
     ),
     actions: [
-      { label: 'See the changes', onClick: fn() },
-      { label: 'Open in Zed', onClick: fn(), variant: 'quiet', icon: 'external' },
+      { label: 'Move to Local', onClick: fn(), variant: 'quiet' },
+      { label: 'VS Code', onClick: fn(), variant: 'quiet', icon: 'external' },
+      { label: 'See the changes', onClick: fn(), variant: 'signal', kbd: '⌘D', end: true },
     ],
   },
   {
@@ -148,11 +157,23 @@ export const InTheQueue: Story = {
   },
 }
 
-/** A part open in place: the worktree, with its branch, the files it changed, See the changes. */
+/** A part open in place: the worktree, its branch going into main, its folder, what it changed as one bar, See the changes last. */
 export const AWorktree: Story = {
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: /Parts, 6/ }))
     await userEvent.click(within(document.body).getByRole('button', { name: 'Worktree' }))
+  },
+}
+
+/** The worktree with its files listed, and pointed at another branch: the one line that holds for it. */
+export const AWorktreeOpened: Story = {
+  play: async (context) => {
+    await AWorktree.play?.(context)
+    const body = within(document.body)
+    await userEvent.click(body.getByRole('button', { name: 'Show the 21 files' }))
+    await expect(body.getAllByRole('listitem')).toHaveLength(21)
+    await userEvent.click(body.getByRole('button', { name: /Work toward another branch/ }))
+    await expect(body.getByText('Its commits go to a new pull request into it.')).toBeVisible()
   },
 }
 
@@ -163,7 +184,7 @@ const workerCopies = (pending: boolean): ReadonlyArray<TaskPartModel> => {
   return [
     {
       ...worktree,
-      facts: [...(worktree.facts ?? []).filter(([key]) => key !== 'Where'), ['Where', 'Linux worker 3f9a2c']],
+      body: <WorktreeBody branch="althar/runs-pill" target="main" folder={null} place="Linux worker 3f9a2c" files={FILES.slice(0, 6)} />,
       actions: [
         { label: 'See the changes', onClick: fn() },
         { label: pending ? 'Copying…' : 'Copy to this Mac…', onClick: fn(), disabled: pending, variant: 'quiet', icon: 'download' },
