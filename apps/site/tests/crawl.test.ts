@@ -74,11 +74,11 @@ describe('what crawlers are given', () => {
   it('dates a release by its publish time once it goes out, on every page that tells it, whatever day its notes were written for', async () => {
     // The newest release, before its publish time is recorded and after, whatever the real record says today.
     const newest = RELEASES[0]!
-    const at = '2099-01-02T09:15:00Z'
+    const at = '2020-01-02T09:15:00Z'
     const real = (await import('../src/content/published')).PUBLISHED
     const before = Object.fromEntries(Object.entries(real).filter(([version]) => version !== newest.version))
-    expect(asPublished(newest, before).date).not.toBe('2099-01-02')
-    expect(asPublished(newest, { [newest.version]: at }).date).toBe('2099-01-02')
+    expect(asPublished(newest, before).date).not.toBe('2020-01-02')
+    expect(asPublished(newest, { [newest.version]: at }).date).toBe('2020-01-02')
     // Every page reads the changelog afresh, with the record as given.
     const pages = async (published: Readonly<Record<string, string>>) => {
       vi.resetModules()
@@ -93,6 +93,8 @@ describe('what crawlers are given', () => {
         vi.doUnmock('../src/content/published')
       }
     }
+    // A day after the publish time, so the release is in the test's past.
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2020-01-03T09:15:00Z') })
     try {
       const coming = await pages(before)
       const written = coming.changelog.RELEASES[0]!
@@ -103,14 +105,15 @@ describe('what crawlers are given', () => {
 
       const out = await pages({ ...before, [newest.version]: at })
       expect(out.changelog.CURRENT.version).toBe(newest.version)
-      expect(out.changelog.CURRENT.date).toBe('2099-01-02')
-      expect(out.crawl.changelogMd(ORIGIN)).toContain(`Released 2099-01-02. [Release notes](${releaseUrl(newest.version)})`)
-      expect(out.crawl.llmsTxt(ORIGIN)).toContain(`${newest.version}, 2099-01-02:`)
+      expect(out.changelog.CURRENT.date).toBe('2020-01-02')
+      expect(out.crawl.changelogMd(ORIGIN)).toContain(`Released 2020-01-02. [Release notes](${releaseUrl(newest.version)})`)
+      expect(out.crawl.llmsTxt(ORIGIN)).toContain(`${newest.version}, 2020-01-02:`)
       const json = JSON.stringify(out.structured.structuredData('/changelog', ORIGIN))
-      expect(json).toContain('"datePublished":"2099-01-02"')
-      expect(json).toContain('"dateModified":"2099-01-02"')
+      expect(json).toContain('"datePublished":"2020-01-02"')
+      expect(json).toContain('"dateModified":"2020-01-02"')
       expect(json).not.toContain(`"datePublished":"${written.date}"`)
     } finally {
+      vi.useRealTimers()
       vi.resetModules()
     }
   })
