@@ -103,15 +103,42 @@ fn root_script(rule: Option<&str>, program: &Path) -> Option<String> {
 /// Takes the worker in `folder` off this computer, saying each step. Fails, once all it could do is done, where some of
 /// it stays.
 pub async fn uninstall(folder: &Path) -> io::Result<()> {
+    uninstall_with(folder, &units_folder()?).await
+}
+
+async fn uninstall_with(folder: &Path, units: &Path) -> io::Result<()> {
     let (folder, program) = places(folder)?;
+    // Nothing of a worker for this login: run as another (root, where the worker is `althar`'s), it says so, and
+    // takes nothing.
+    if !folder.exists() && !program.exists() && !units.join(SERVICE).exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "No worker is set up for this login at {}. Run this as the worker's own login.",
+                folder.display()
+            ),
+        ));
+    }
+    // Without its login's service manager, its services would go on running from files taken away under them: stop
+    // before anything is.
+    if !systemctl(&["show-environment"]).await {
+        return Err(io::Error::other(
+            "This login's service manager can't be reached, so the worker's services can't be stopped. Log in as the worker's login over SSH, or use `sudo machinectl shell <login>@`, and run this again.",
+        ));
+    }
     let mut stayed = Vec::new();
     // Its services first, so nothing starts a run or an update while its files go.
-    systemctl(&["disable", "--now", SERVICE, "althar-worker-update.timer"]).await;
+    if !systemctl(&["disable", "--now", SERVICE, "althar-worker-update.timer"]).await
+        && units.join(SERVICE).exists()
+    {
+        return Err(io::Error::other(
+            "The worker's services couldn't be stopped, so nothing was removed. `journalctl --user -u althar-worker.service` says why.",
+        ));
+    }
     let mut stop = vec!["stop", "althar-worker-update.service"];
     stop.extend(RUN_UNITS);
     systemctl(&stop).await;
     println!("Stopped the worker's services and its runs.");
-    let units = units_folder()?;
     for unit in UNITS {
         match fs::remove_file(units.join(unit)) {
             Ok(()) => {}
@@ -128,6 +155,9 @@ pub async fn uninstall(folder: &Path) -> io::Result<()> {
         (&folder, "its files and checkouts"),
         (&program, "its releases"),
     ] {
+        if !path.exists() {
+            continue;
+        }
         match remove_tree(path) {
             Ok(()) => println!("Removed {what} ({}).", path.display()),
             Err(error) => stayed.push(format!("{}: {error}", path.display())),
@@ -200,6 +230,24 @@ mod tests {
         ] {
             assert!(places(Path::new(folder)).is_err(), "{folder}");
         }
+    }
+
+    #[tokio::test]
+    async fn says_so_and_takes_nothing_where_this_login_has_no_worker() -> io::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let folder = temp.path().join("althar-worker");
+        let units = temp.path().join("units");
+        let error = uninstall_with(&folder, &units)
+            .await
+            .expect_err("nothing to take");
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(
+            error
+                .to_string()
+                .contains("No worker is set up for this login")
+        );
+        assert!(!folder.exists() && !units.exists());
+        Ok(())
     }
 
     #[test]

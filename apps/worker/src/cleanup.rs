@@ -13,11 +13,7 @@
 //! it. Anything else named for a run is left over from a crash, and the sweep at start takes it. A workspace an operator
 //! set up by hand, `<workspace>` alone, is never the worker's to remove.
 
-use std::{
-    fs, io,
-    os::unix::fs::PermissionsExt,
-    path::{Path, PathBuf},
-};
+use std::{fs, io, os::unix::fs::PermissionsExt, path::Path};
 
 use crate::{diagnostic::DiagnosticJournal, valid_id};
 
@@ -80,33 +76,37 @@ fn writable(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Each project's folder under the workspaces' root.
-fn projects(root: &Path) -> io::Result<Vec<PathBuf>> {
-    let entries = match fs::read_dir(root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    let mut found = Vec::new();
-    for entry in entries {
-        let entry = entry?;
-        if entry.file_type()?.is_dir()
-            && entry
-                .file_name()
-                .to_str()
-                .is_some_and(|name| valid_id(name, "proj_"))
-        {
-            found.push(entry.path());
+/// The entries of a folder, each it can read; says what it can't, and goes on. None where the folder isn't there.
+fn entries(folder: &Path) -> Vec<fs::DirEntry> {
+    match fs::read_dir(folder) {
+        Ok(entries) => entries
+            .filter_map(|entry| {
+                entry
+                    .inspect_err(|error| eprintln!("Couldn't read {}: {error}", folder.display()))
+                    .ok()
+            })
+            .collect(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => {
+            eprintln!("Couldn't read {}: {error}", folder.display());
+            Vec::new()
         }
     }
-    Ok(found)
 }
 
-/// Removes what each project's folder holds for the runs `remove` picks; says each it couldn't, and goes on.
-fn remove_runs(root: &Path, remove: impl Fn(&str) -> bool) -> io::Result<()> {
-    for project in projects(root)? {
-        for entry in fs::read_dir(&project)? {
-            let entry = entry?;
+/// Removes what each project's folder holds for the runs `remove` picks. What it can't read or remove it says and
+/// leaves: cleaning up never stops the worker, nor the rest of the cleanup.
+fn remove_runs(root: &Path, remove: impl Fn(&str) -> bool) {
+    for project in entries(root) {
+        let is_project = project.file_type().is_ok_and(|kind| kind.is_dir())
+            && project
+                .file_name()
+                .to_str()
+                .is_some_and(|name| valid_id(name, "proj_"));
+        if !is_project {
+            continue;
+        }
+        for entry in entries(&project.path()) {
             let name = entry.file_name();
             let Some(run) = name.to_str().and_then(run_of) else {
                 continue;
@@ -115,17 +115,16 @@ fn remove_runs(root: &Path, remove: impl Fn(&str) -> bool) -> io::Result<()> {
                 continue;
             }
             let path = entry.path();
-            let removed = if entry.file_type()?.is_dir() {
-                remove_tree(&path)
-            } else {
-                fs::remove_file(&path)
+            let removed = match entry.file_type() {
+                Ok(kind) if kind.is_dir() => remove_tree(&path),
+                Ok(_) => fs::remove_file(&path),
+                Err(error) => Err(error),
             };
             if let Err(error) = removed {
                 eprintln!("Couldn't remove {}: {error}", path.display());
             }
         }
     }
-    Ok(())
 }
 
 /// Everything a run made, now its end is recorded: its checkout, its helpers' copies and its scratch.
@@ -136,16 +135,17 @@ pub(crate) fn forget_run(root: &Path, run_id: &str) -> io::Result<()> {
             "Invalid agent run identity",
         ));
     }
-    remove_runs(root, |run| run == run_id)
+    remove_runs(root, |run| run == run_id);
+    Ok(())
 }
 
 /// At start, before any run: what a crash left of runs the home has nothing more to ask of. A run whose control group
 /// the journal still records keeps its files until the home reconciles it.
-pub fn sweep(root: &Path, journal: &DiagnosticJournal) -> io::Result<()> {
+pub fn sweep(root: &Path, journal: &DiagnosticJournal) {
     remove_runs(root, |run| {
         // Unsure, keep it: the home may still ask.
         matches!(journal.agent_group(run), Ok(None))
-    })
+    });
 }
 
 #[cfg(test)]
@@ -258,13 +258,15 @@ mod tests {
             fs::create_dir(project.join(format!("{workspace}-{run}")))?;
             fs::create_dir(project.join(format!(".{run}.import")))?;
         }
-        sweep(&root, &journal)?;
+        // A file where a project's folder would be is no project, and stops nothing.
+        fs::write(root.join(id("proj_", 'f')), b"not a folder")?;
+        sweep(&root, &journal);
         assert!(project.join(format!("{workspace}-{unfinished}")).is_dir());
         assert!(project.join(format!(".{unfinished}.import")).is_dir());
         assert!(!project.join(format!("{workspace}-{crashed}")).exists());
         assert!(!project.join(format!(".{crashed}.import")).exists());
         // No workspaces yet: nothing to sweep.
-        sweep(&temp.path().join("none"), &journal)?;
+        sweep(&temp.path().join("none"), &journal);
         Ok(())
     }
 }
