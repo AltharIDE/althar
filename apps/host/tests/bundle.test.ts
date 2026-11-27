@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
-import { assembleBundle, copyDependencies, copyHostAssets, readReleaseKey } from '../src/updates/bundle'
+import { assembleBundle, assembleWorkerBundle, copyDependencies, copyHostAssets, readReleaseKey } from '../src/updates/bundle'
 import { temporary } from './support'
 
 const pkg = (root: string, name: string, dependencies: Record<string, string> = {}) => {
@@ -110,6 +110,51 @@ describe('locked host dependency bundles', () => {
     await expect(
       assembleBundle({ entry, node, version: '1.2.3', license: join(root, 'missing-license') }, join(temporary(), 'release')),
     ).rejects.toThrow()
+  })
+  it('assembles a worker’s own release with its native program, its commands, its agents and its tools, and none of the home', async () => {
+    const root = temporary()
+    const entry = join(root, 'entry.js')
+    const node = join(root, 'node/bin/node')
+    mkdirSync(join(root, 'node/bin'), { recursive: true })
+    writeFileSync(entry, 'host code')
+    writeFileSync(join(root, 'LICENSE'), 'Host license')
+    writeFileSync(join(root, 'THIRD_PARTY_NOTICES.txt'), 'Bundled notices')
+    mkdirSync(join(root, 'worker'))
+    const workerEntry = join(root, 'worker', 'althar-worker.js')
+    writeFileSync(workerEntry, 'worker commands')
+    writeFileSync(join(root, 'worker', 'LICENSE'), 'Worker license')
+    writeFileSync(join(root, 'worker', 'THIRD_PARTY_NOTICES.txt'), 'Worker notices')
+    writeFileSync(node, 'node binary')
+    writeFileSync(join(root, 'node/LICENSE'), 'Node license')
+    pkg(root, '@agentclientprotocol/claude-agent-acp')
+    pkg(root, '@agentclientprotocol/codex-acp')
+    pkg(root, 'sharp')
+    writeFileSync(join(root, 'althar-worker'), 'worker binary')
+    for (const part of ['bin', 'licenses']) mkdirSync(join(root, 'tools', part), { recursive: true })
+    writeFileSync(join(root, 'tools/bin/socat'), 'socat')
+    writeFileSync(join(root, 'tools/licenses/socat.COPYING'), 'GPL')
+    const source = {
+      entry,
+      node,
+      version: '1.2.3',
+      worker: join(root, 'althar-worker'),
+      workerTools: join(root, 'tools'),
+      workerEntry,
+    }
+    const destination = join(temporary(), 'release')
+    await assembleWorkerBundle(source, destination)
+    expect(readFileSync(join(destination, 'dist/althar-worker.js'), 'utf8')).toBe('worker commands')
+    expect(readFileSync(join(destination, 'THIRD_PARTY_NOTICES.txt'), 'utf8')).toBe('Worker notices')
+    expect(readFileSync(join(destination, 'althar-worker'), 'utf8')).toBe('worker binary')
+    expect(readFileSync(join(destination, 'tools/bin/socat'), 'utf8')).toBe('socat')
+    expect(readFileSync(join(destination, 'node_modules/@agentclientprotocol/codex-acp/index.js'), 'utf8')).toBe(
+      '@agentclientprotocol/codex-acp',
+    )
+    expect(JSON.parse(readFileSync(join(destination, 'package.json'), 'utf8'))).toMatchObject({ name: '@althar/worker-release' })
+    for (const home of ['dist/althar-host.js', 'node_modules/sharp']) expect(existsSync(join(destination, home)), home).toBe(false)
+    // Without its native program, its commands or its tools, it isn't a worker's release.
+    for (const missing of ['worker', 'workerTools', 'workerEntry'] as const)
+      await expect(assembleWorkerBundle({ ...source, [missing]: undefined }, join(temporary(), 'release'))).rejects.toThrow()
   })
   it('retains native optional dependencies and omits unavailable or other-platform variants', async () => {
     const root = temporary()

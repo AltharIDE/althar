@@ -128,7 +128,8 @@ it.live('keeps a worker that dropped mid-run until it says that run stopped, the
       const settled = yield* until(Effect.sync(standing), (worker) => worker?.connected === false)
       assert.deepStrictEqual(settled, { workerId, connected: false, busy: false, providers: [], projectIds: [projectId] })
 
-      // Now it can be taken out, and it stays out: off the list, a fresh read of the ledger included, and refused.
+      // Now it can be taken out, and it stays out: off the list, a fresh read of the ledger included, and told it was
+      // removed when it comes back, so it takes itself off its computer.
       yield* home.revoke!(workerId)
       assert.isUndefined(standing())
       const listed = yield* Effect.promise(async () => {
@@ -147,7 +148,73 @@ it.live('keeps a worker that dropped mid-run until it says that run stopped, the
           (error: unknown) => (error as { code?: number }).code,
         ),
       )
-      assert.notStrictEqual(answer, 'hello')
+      assert.strictEqual(answer, 'removed')
+      assert.isUndefined(yield* Effect.promise(() => refused.read()))
+    }),
+  ),
+)
+
+it.live('tells a worker connected at Remove that it was removed, and one at work nothing until its run ends', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const root = workerTestDirectory()
+      const paths = { profile: join(root, 'profile'), worktrees: join(root, 'worktrees') }
+      mkdirSync(paths.profile, { mode: 0o700 })
+      const certificate = workerCertificates(root)
+      yield* configureWorkers(paths, {
+        version: 1,
+        address: '127.0.0.1',
+        port: 0,
+        ca: certificate('home-ca.pem'),
+        certificate: certificate('home.pem'),
+        key: certificate('home.key'),
+      })
+      const workerId = yield* Effect.promise(async () => {
+        const ledger = await openWorkerStore(paths.profile, homeId, Date.now)
+        try {
+          return ledger.enroll(await workerCertificate(certificate('enrolled.pem')), projectId)
+        } finally {
+          ledger.close()
+        }
+      })
+      const listener = yield* listenWorkers(paths, homeId)
+      if (listener === undefined) return yield* Effect.die('The worker listener was not started')
+      const home = workerExecution(
+        () => listener.agentWorkers,
+        () => listener,
+      )
+      const worker = yield* Effect.acquireRelease(
+        Effect.sync(() => testAgentWorker(listener.port, certificate)),
+        (connected) => Effect.sync(() => connected.close()),
+      )
+      assert.strictEqual((yield* Effect.promise(() => worker.hello(hello(workerId))))?.case, 'hello')
+      // At work, the pool says it can't be told: the home refuses to remove it then.
+      const pending = listener.agentWorkers.start(workerId, { projectId, workspaceId, providerId: 'codex' })
+      const started = yield* Effect.promise(() => worker.read())
+      if (started?.case !== 'start') return yield* Effect.die('The home did not start the run')
+      assert.isFalse(listener.agentWorkers.remove(workerId))
+      worker.send({
+        case: 'exit',
+        value: {
+          $typeName: 'althar.worker.v1.AgentRunExit',
+          workerBusy: false,
+          runId: started.value.runId,
+          outcome: AgentRunOutcome.STOPPED,
+        },
+      })
+      yield* Effect.promise(() => pending.then(() => undefined).catch(() => undefined))
+      assert.isUndefined(yield* Effect.promise(() => worker.read()))
+
+      // Idle, it hears it was removed, and the home ends its stream.
+      const idle = yield* Effect.acquireRelease(
+        Effect.sync(() => testAgentWorker(listener.port, certificate)),
+        (connected) => Effect.sync(() => connected.close()),
+      )
+      assert.strictEqual((yield* Effect.promise(() => idle.hello(hello(workerId))))?.case, 'hello')
+      yield* home.revoke!(workerId)
+      assert.strictEqual((yield* Effect.promise(() => idle.read()))?.case, 'removed')
+      assert.isUndefined(yield* Effect.promise(() => idle.read()))
+      assert.isFalse(listener.agentWorkers.remove(workerId))
     }),
   ),
 )

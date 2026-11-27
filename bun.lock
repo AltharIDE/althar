@@ -20,8 +20,8 @@
         "althar": "./dist/althar.js",
       },
       "dependencies": {
-        "@agentclientprotocol/claude-agent-acp": "0.112.0",
-        "@agentclientprotocol/codex-acp": "2.12.0",
+        "@agentclientprotocol/claude-agent-acp": "0.113.0",
+        "@agentclientprotocol/codex-acp": "2.12.1",
         "@althar/contracts": "workspace:*",
         "@althar/provider-adapters": "workspace:*",
         "@althar/runtime": "workspace:*",
@@ -44,8 +44,8 @@
       "name": "@althar/desktop",
       "version": "0.9.0",
       "dependencies": {
-        "@agentclientprotocol/claude-agent-acp": "0.112.0",
-        "@agentclientprotocol/codex-acp": "2.12.0",
+        "@agentclientprotocol/claude-agent-acp": "0.113.0",
+        "@agentclientprotocol/codex-acp": "2.12.1",
         "@althar/connectors": "workspace:*",
         "@althar/contracts": "workspace:*",
         "@althar/provider-adapters": "workspace:*",
@@ -94,8 +94,8 @@
         "althar-host": "./dist/althar-host.js",
       },
       "dependencies": {
-        "@agentclientprotocol/claude-agent-acp": "0.112.0",
-        "@agentclientprotocol/codex-acp": "2.12.0",
+        "@agentclientprotocol/claude-agent-acp": "0.113.0",
+        "@agentclientprotocol/codex-acp": "2.12.1",
         "@althar/contracts": "workspace:*",
         "@althar/persistence-sqlite": "workspace:*",
         "@althar/provider-adapters": "workspace:*",
@@ -255,8 +255,8 @@
       "name": "@althar/provider-adapters",
       "version": "0.0.0",
       "dependencies": {
-        "@agentclientprotocol/claude-agent-acp": "0.112.0",
-        "@agentclientprotocol/codex-acp": "2.12.0",
+        "@agentclientprotocol/claude-agent-acp": "0.113.0",
+        "@agentclientprotocol/codex-acp": "2.12.1",
         "@agentclientprotocol/sdk": "1.5.1",
         "@althar/domain": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.32.2",
@@ -434,8 +434,8 @@
     "node-pty",
   ],
   "patchedDependencies": {
-    "@agentclientprotocol/codex-acp@2.12.0": "patches/@agentclientprotocol%2Fcodex-acp@2.12.0.patch",
-    "@agentclientprotocol/claude-agent-acp@0.112.0": "patches/@agentclientprotocol%2Fclaude-agent-acp@0.112.0.patch",
+    "@agentclientprotocol/claude-agent-acp@0.113.0": "patches/@agentclientprotocol%2Fclaude-agent-acp@0.113.0.patch",
+    "@agentclientprotocol/codex-acp@2.12.1": "patches/@agentclientprotocol%2Fcodex-acp@2.12.1.patch",
   },
   "overrides": {
     "@posthog/core": "1.67.3",
@@ -447,9 +447,9 @@
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.5.0", "", {}, "sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q=="],
 
-    "@agentclientprotocol/claude-agent-acp": ["@agentclientprotocol/claude-agent-acp@0.112.0", "", { "dependencies": { "@agentclientprotocol/sdk": "2.12.0", "@anthropic-ai/claude-agent-sdk": "0.3.331", "diff": "9.0.0", "zod": "4.6.7" }, "bin": { "claude-agent-acp": "dist/index.js" } }, "sha512-T9FrKGd9eDKHNmZE/EfEf01v49UHKeKyGcu91O8sdVc7a9eMEDOGWT/0moWirGHJdBqJ9qPVfqu07IBegJuniA=="],
+    "@agentclientprotocol/claude-agent-acp": ["@agentclientprotocol/claude-agent-acp@0.113.0", "", { "dependencies": { "@agentclientprotocol/sdk": "2.12.0", "@anthropic-ai/claude-agent-sdk": "0.3.331", "diff": "9.0.0", "zod": "4.6.7" }, "bin": { "claude-agent-acp": "dist/index.js" } }, "sha512-fXX8ulGhIg8qHNsy8iQgPV1ZtISwUSqIAmc0/CN2CgiAeMP1wOn0xbzwwOIKLXqoiNoOkvreT2dqvMhwSFKClw=="],
 
-    "@agentclientprotocol/codex-acp": ["@agentclientprotocol/codex-acp@2.12.0", "", { "dependencies": { "@agentclientprotocol/sdk": "~2.9.1", "@openai/codex": "^0.171.0", "cross-spawn": "^7.0.6", "diff": "^9.0.0", "open": "^11.0.1", "vscode-jsonrpc": "^9.0.1", "zod": "^4.0.0" }, "bin": { "codex-acp": "dist/index.js" } }, "sha512-UYZwEZoDUdzre4VG/ECGlAVVWlB4tSuy40WiGGiNcA/t3qx0i2Iz9i1BRgzrFHhq2QgEsxH8c7FFEdRwgLUBvg=="],
+    "@agentclientprotocol/codex-acp": ["@agentclientprotocol/codex-acp@2.12.1", "", { "dependencies": { "@agentclientprotocol/sdk": "~2.9.1", "@openai/codex": "^0.172.0", "cross-spawn": "^7.0.6", "diff": "^9.0.0", "open": "^11.0.1", "vscode-jsonrpc": "^9.0.1", "zod": "^4.0.0" }, "bin": { "codex-acp": "dist/index.js" } }, "sha512-4RGVK+bI2T7kkcfzj4hkmCtX1bVmoXB1nR2IXmzX9KVCXUY6cj9clHkyuGQBuIs2swr9Tf0AdWcY+5fQaYHpZQ=="],
 
     "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@1.5.1", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-nSUIrC1fOR9+ppKfx9KdwjBBND2sAPzFHo4yVQrGbXZHnayUYpwL8CDVR5LSxbapY/oKMOzNP0wvwfyx3PS2KA=="],
 
@@ -811,19 +811,19 @@
 
     "@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
 
-    "@openai/codex": ["@openai/codex@0.171.0", "", { "optionalDependencies": { "@openai/codex-darwin-arm64": "npm:@openai/codex@0.171.0-darwin-arm64", "@openai/codex-darwin-x64": "npm:@openai/codex@0.171.0-darwin-x64", "@openai/codex-linux-arm64": "npm:@openai/codex@0.171.0-linux-arm64", "@openai/codex-linux-x64": "npm:@openai/codex@0.171.0-linux-x64", "@openai/codex-win32-arm64": "npm:@openai/codex@0.171.0-win32-arm64", "@openai/codex-win32-x64": "npm:@openai/codex@0.171.0-win32-x64" }, "bin": { "codex": "bin/codex.js" } }, "sha512-1IOFzL2Xg86tLdw6kDo3GoKbkQENgQi7TI6rlEvN132R7ngSw7SNOIQoTcnKzSZZ8kf9N9GynCweSoaFbqk2Eg=="],
+    "@openai/codex": ["@openai/codex@0.172.0", "", { "optionalDependencies": { "@openai/codex-darwin-arm64": "npm:@openai/codex@0.172.0-darwin-arm64", "@openai/codex-darwin-x64": "npm:@openai/codex@0.172.0-darwin-x64", "@openai/codex-linux-arm64": "npm:@openai/codex@0.172.0-linux-arm64", "@openai/codex-linux-x64": "npm:@openai/codex@0.172.0-linux-x64", "@openai/codex-win32-arm64": "npm:@openai/codex@0.172.0-win32-arm64", "@openai/codex-win32-x64": "npm:@openai/codex@0.172.0-win32-x64" }, "bin": { "codex": "bin/codex.js" } }, "sha512-yHf/6wbw4Zvha2M2ylDhDrU9FgfKLYgV6xSzSjlz3gxQNsiVLkXo+fPGwBqvP0A5geLtZs9wAbq+1v7+ZVWJ0g=="],
 
-    "@openai/codex-darwin-arm64": ["@openai/codex@0.171.0-darwin-arm64", "", { "os": "darwin", "cpu": "arm64" }, "sha512-hIYTkRUpuYpkVfTq4cpby0PXqhAVcIgE7f6FoyY1lt2RyARj3GXS1Can/dIYUBItVhXzhb98HYHZNzCX74QRlQ=="],
+    "@openai/codex-darwin-arm64": ["@openai/codex@0.172.0-darwin-arm64", "", { "os": "darwin", "cpu": "arm64" }, "sha512-B239wE7pGeOmjylfqLymDIwuL4QgQR7pQZc5phHpZ3t8UVkno9AS3dNPEprm7AzZHw3kf2I6Uf+uOFfjGegELQ=="],
 
-    "@openai/codex-darwin-x64": ["@openai/codex@0.171.0-darwin-x64", "", { "os": "darwin", "cpu": "x64" }, "sha512-pwN5uNEKx/mZjwBEf/6CKq6SJMfJS5kruV3sJQAk7ebIPvC58Ote3CicIxETDZtjLj35rNv3PLPd7mHCg6hGPw=="],
+    "@openai/codex-darwin-x64": ["@openai/codex@0.172.0-darwin-x64", "", { "os": "darwin", "cpu": "x64" }, "sha512-hrL9NQwH9E0WqK8Yofqe6fipE1XDSXx/C2fwSOagXdTRcjYXOrfQ9fSCKaKZXr/xm43ATdsRSjGGAn8IJhGmhA=="],
 
-    "@openai/codex-linux-arm64": ["@openai/codex@0.171.0-linux-arm64", "", { "os": "linux", "cpu": "arm64" }, "sha512-9z17t4bbUJ9UCIb49O4PoA+ki+45q3rd8nZ8PeH6sYnlKkBld/Xpo/OS3h3Ti954+foshX4o7k5TCU8N7zzqQA=="],
+    "@openai/codex-linux-arm64": ["@openai/codex@0.172.0-linux-arm64", "", { "os": "linux", "cpu": "arm64" }, "sha512-qLH5VdeTkPlknWgKkU11IlGMyyxKXp9vcj65libT3Zp4P3Kt7gEbK4YDXlDBqWtA09+fGnIUpWERs6BaNo86DA=="],
 
-    "@openai/codex-linux-x64": ["@openai/codex@0.171.0-linux-x64", "", { "os": "linux", "cpu": "x64" }, "sha512-l66NZkQgdk2C3pbcfULDz42yEUB581MVA6I+Y43Wp4OIqEy73HCdmZ0GTjeAHY2ycuH4N00d9VsLrwT1jxshTw=="],
+    "@openai/codex-linux-x64": ["@openai/codex@0.172.0-linux-x64", "", { "os": "linux", "cpu": "x64" }, "sha512-YJq6Wz3PFXV5LZ0OQc3/o+gpM3pLmQ/8n8uM2zF/m0O/8zED+uSPT8Ln1KGRrqR8Q6eon9YdWlhueAunVTZ+eg=="],
 
-    "@openai/codex-win32-arm64": ["@openai/codex@0.171.0-win32-arm64", "", { "os": "win32", "cpu": "arm64" }, "sha512-kkavDHtAkkNaYtO7eBw4IdBbE/PsWP+Ezp9JXcr/mBu/Cc7EevzFVIVC3sZYvWsF9xuvyjIUv9CKeN0LU0+N9Q=="],
+    "@openai/codex-win32-arm64": ["@openai/codex@0.172.0-win32-arm64", "", { "os": "win32", "cpu": "arm64" }, "sha512-lO+hS8rLV3xS5ZZZCBVfPTAqpI1VENId12qhzZ1jNPUBSzKQBOGKs+GHNplak1RHXXXpgK9UHkPQ3A2IvQ8lJg=="],
 
-    "@openai/codex-win32-x64": ["@openai/codex@0.171.0-win32-x64", "", { "os": "win32", "cpu": "x64" }, "sha512-HKWBK25tLQxdEg6svw0CrBf+v0bQhRyF8EBVdNqeRxErqpfFa/dfSar6r3sJt6tyPqozOtgz2BH8B2G3n/+gnQ=="],
+    "@openai/codex-win32-x64": ["@openai/codex@0.172.0-win32-x64", "", { "os": "win32", "cpu": "x64" }, "sha512-48pULjlTwpBZ/TfbOnpnmloHaTQAYELbaiKHEX7qmrtLFIcnPigaNN3omyetPdAuvrRXrmNFRlKfvQme19ZmRA=="],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.10.0", "", {}, "sha512-lMkyes8iHrG+mk6WH7X70MdCLI2RS0FwNBY1PyQ8UemaijE2m5mv5A0Niy3HtbYTFrgkUEQjFMXmSAk2hQDuPQ=="],
 

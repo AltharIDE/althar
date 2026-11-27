@@ -17,6 +17,7 @@ import {
   AgentWorkerHeartbeatSchema,
   type AgentWorkerCapacity,
   AgentWorkspaceSetupSchema,
+  AgentWorkerRemovedSchema,
   WorkerControlService,
   type AgentHomeFrame,
   type AgentRunExit,
@@ -266,6 +267,8 @@ interface Slot {
   readonly start: (placement: AgentPlacement, options: AgentRunOptions) => Promise<WorkerAgentProcess>
   readonly openTools: (runId: string, invalidate: () => void) => { port: number; active: () => boolean; release: () => void } | undefined
   readonly busy: () => boolean
+  /** Tells it the person removed it, so it takes itself off its computer, and ends its stream: where it is idle. */
+  readonly remove: () => boolean
 }
 
 interface SnapshotPart {
@@ -309,6 +312,8 @@ interface Run {
 
 const encode = (payload: AgentHomeFrame['payload']): Buffer =>
   Buffer.from(toBinary(AgentHomeFrameSchema, create(AgentHomeFrameSchema, { payload })))
+/** What a worker the person removed hears from its home, between runs or in place of a hello. */
+export const removedFrame = (): Buffer => encode({ case: 'removed', value: create(AgentWorkerRemovedSchema) })
 
 /** A capability for any project the home grants: a worker its home set up offers its agents so, and the grants decide. */
 export const ANY_PROJECT = '*'
@@ -761,6 +766,17 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
             busy: () =>
               run !== undefined || recovering !== undefined || (accountReserved && performance.now() - sampledAt <= AGENT_WORKER_LEASE_MS),
             capacity: () => (performance.now() - sampledAt > AGENT_WORKER_LEASE_MS ? undefined : capacity),
+            remove: () => {
+              // A run, or one to reconcile, holds its workspace: the home doesn't remove a worker then.
+              if (closed || run !== undefined || recovering !== undefined) return false
+              const told = send({ case: 'removed', value: create(AgentWorkerRemovedSchema) })
+              release(new Error('The person removed this worker.'))
+              void told.then(
+                () => call.end(),
+                () => undefined,
+              )
+              return true
+            },
           }
           slots.set(workerId, slot)
           renew(AGENT_WORKER_LEASE_MS)
@@ -1042,6 +1058,8 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
         }
       }),
     openTools: (workerId: string, runId: string, invalidate: () => void) => slots.get(workerId)?.openTools(runId, invalidate),
+    /** Tells a worker connected now that the person removed it: whether it was there, idle, to hear it. */
+    remove: (workerId: string): boolean => slots.get(workerId)?.remove() ?? false,
     start: async (workerId: string, placement: AgentPlacement, options: AgentRunOptions = {}): Promise<WorkerAgentProcess> => {
       const { checkout, repositories, toolPort, skills } = options
       if (toolPort !== undefined && (!Number.isInteger(toolPort) || toolPort < 1 || toolPort > 65_535))

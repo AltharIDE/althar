@@ -15,7 +15,7 @@ import { homeGlances } from './glances'
 import { homePictures } from './pictures'
 import { connectHomeProcess, inspectHomeProcess, pairHomeProcess } from './process'
 import { homePartition } from './policy'
-import { findRelease, HOST_RELEASE_KEYS, newestHostVersion, workerRelease } from './release'
+import { findRelease, findWorkerRelease, HOST_RELEASE_KEYS, newestHostVersion, workerRelease } from './release'
 import { canSetUp, homeSetups, nativeSetupSystem, runProgram } from './setup'
 import { homeStore, homeTarget, savedHome } from './store'
 import { homeUpdates } from './update'
@@ -159,9 +159,9 @@ export const startHomeConnections = ({
     for (const window of BrowserWindow.getAllWindows())
       if (!window.isDestroyed() && mine(window.webContents)) window.webContents.send('althar:home-setup', setup)
   })
-  // Workers added over SSH from Settings › Computers, from the same releases.
+  // Workers added over SSH from Settings › Computers, from the worker's own releases, published beside the home's.
   const workers = startWorkerSetups({
-    system,
+    system: { ...system, release: (arch, signal) => findWorkerRelease(arch, source, signal) },
     tools: source.tools,
     mine,
     // A home reached over the network gives no SSH address this computer's SSH goes to: only its own, or one over SSH.

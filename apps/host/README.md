@@ -129,7 +129,7 @@ A worker can be any 64-bit Linux machine (x64 or arm64) with systemd 254 or late
 **Over SSH.** In the home's window, open **Settings › Computers › Add a worker**, type its SSH address as you would after `ssh` (a name from your SSH config, or `user@host`), and choose **Add worker**. Althar uses your own OpenSSH, its keys and your known hosts, and asks you to trust the machine's key the first time.
 
 1. It looks the machine over. Logged in as root, it makes a user of its own, `althar`, with the SSH key you logged in with, and lingering on, as setting up a home does.
-2. It installs the same signed release a home installs, which carries the worker, Node, both agents' ACP adapters and the agents' own programs. The machine downloads it, or Althar sends it from your computer. Its signature is checked against Althar's release key before anything runs.
+2. It installs the worker's own signed release, published beside the home's: the worker, Node, both agents' ACP adapters and the agents' own programs, and none of the home. The machine downloads it, or Althar sends it from your computer. Its signature is checked against Althar's release key before anything runs.
 3. The release makes the worker's own key. Your window asks the home to sign it, and the home enrolls the worker by that key under the name you gave.
 4. Althar writes what the home gave onto the worker and starts `althar-worker.service`, a systemd user service that restarts if it stops, and a timer that updates it.
 
@@ -141,10 +141,22 @@ The worker is a service of its login's own, so that login must linger: without i
 
 ```sh
 program="${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program/current"
-"$program/node/bin/node" "$program/dist/althar-host.js" worker sign-in --agent codex --way device
+"$program/node/bin/node" "$program/dist/althar-worker.js" sign-in --agent codex --way device
 ```
 
-To take a worker out, open it in **Settings › Computers** and choose **Remove**. The home no longer accepts its key and gives it no more work. Add it again, over SSH or with a code, and it becomes a new worker with the same key.
+On a worker installed from a home's release, before workers had their own, it's `"$program/dist/althar-host.js" worker sign-in …` until its next update moves it to the worker's release.
+
+### Taking a worker out
+
+Open it in **Settings › Computers** and choose **Remove**. The home no longer accepts its key and gives it no more work, and the worker takes itself off its computer: it stops its services and removes them, its folder (its key, journal, checkouts and tools) and its program folder. Offline at the time, it does so once it next reaches its home; **Remove** also shows the line that does it there now, as the worker's user:
+
+```sh
+"${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program/current/althar-worker" uninstall
+```
+
+Its agents' sign-ins (`~/.codex`, `~/.claude`) stay: they're the agents' own files. So does the login's lingering, and the `althar` user where setup made one. The AppArmor rule setup made for the sandbox goes where the login may use `sudo` without a password; otherwise the uninstall shows the line for the machine's administrator. Add the worker again, over SSH or with a code, and it becomes a new worker with the same key.
+
+A worker cleans up after its tasks too. Each run gets its own checkout, its helpers' copies and some scratch, and they all go once the home has recorded how the run ended: nothing reads them after that. A worker that stopped mid-run keeps that run's checkout until its home has settled the run, and when it starts again it removes what a crash left of runs its home is done with. A workspace set up by hand, named only by its workspace ID, is never the worker's to remove.
 
 ### How a worker and its home trust each other
 
@@ -160,10 +172,10 @@ To take a worker out, open it in **Settings › Computers** and choose **Remove*
 | What | Where |
 | --- | --- |
 | Its key, its certificate, the home's authority and addresses, its journal and task checkouts | `${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker` |
-| The release it runs, as `current`, and the one before | `${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program` |
+| The worker release it runs, as `current`, and the one before | `${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program` |
 | Its services | `${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/althar-worker.service`, `althar-worker-update.timer` |
 
-The timer checks hourly for a newer release from the same place its own came from, signed by the same key, and switches to it while the worker runs no task. `journalctl --user -u althar-worker.service` shows what the worker did.
+The timer checks hourly for a newer worker release from the same place its own came from, signed by the same key, and switches to it while the worker runs no task. A worker installed from a home's release moves to the worker's own release of the same version at its first check. `journalctl --user -u althar-worker.service` shows what the worker did.
 
 ## Set a worker up by hand
 

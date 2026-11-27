@@ -100,6 +100,24 @@ export const OpensAndRemoves: Story = {
   },
 }
 
+/**
+ * A worker its home set up takes itself off its computer once removed; offline, it does so once it next connects, and
+ * Remove gives the line that does it there now.
+ */
+export const RemovesAnOfflineWorker: Story = {
+  args: { opened: WORKER_OFFLINE.id, workers: { enabled: true, list: [{ ...WORKER_OFFLINE, managed: true }] } },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Remove Linux worker 0fc47e' }))
+    const page = within(canvasElement.ownerDocument.body)
+    const dialog = within(page.getByRole('dialog', { name: 'Remove Linux worker 0fc47e?' }))
+    await expect(dialog.getByText(/takes itself off its computer/)).toBeInTheDocument()
+    await expect(dialog.getByText(/althar-worker" uninstall/)).toBeInTheDocument()
+    await userEvent.click(dialog.getByRole('button', { name: 'Remove' }))
+    await expect(onRemove).toHaveBeenCalledWith(WORKER_OFFLINE.id)
+  },
+}
+
 /** A worker at work keeps its task: Remove waits for it, and its task opens from its sheet. */
 export const AtWorkKeepsItsTask: Story = {
   args: { opened: WORKER_AT_WORK.id },

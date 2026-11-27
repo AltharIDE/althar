@@ -1,7 +1,7 @@
 import { createHash, randomUUID, X509Certificate } from 'node:crypto'
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { Server, ServerCredentials, status, type MethodDefinition, type ServerDuplexStream } from '@grpc/grpc-js'
-import { runAgentMethod, type AgentWorkerPool } from './agentRuns.ts'
+import { removedFrame, runAgentMethod, type AgentWorkerPool } from './agentRuns.ts'
 import { agentToolsMethod, connectAgentTools } from './agentTools.ts'
 import { agentPreviewMethod } from './agentPreviews.ts'
 import {
@@ -40,6 +40,8 @@ interface HomeWorkerTransport {
   readonly privateKeyPem: Buffer
   /** Look up a currently enrolled worker by SHA-256 of its verified certificate in DER format. */
   readonly workerForCertificate: (fingerprint: string) => string | undefined
+  /** Whether the person removed the worker of this fingerprint, and it hasn't been added again since. */
+  readonly workerRemoved?: (fingerprint: string) => boolean
   readonly agentWorkers?: AgentWorkerPool
   readonly diagnostics?: {
     readonly cancellationRequested?: (workerId: string, attemptId: string, fence: string) => boolean
@@ -80,6 +82,17 @@ const enrolledBy = (home: Pick<HomeWorkerTransport, 'workerForCertificate'>, raw
     key = undefined
   }
   return () => home.workerForCertificate(certificate) ?? (key === undefined ? undefined : home.workerForCertificate(key))
+}
+
+/** Whether the person removed the worker a verified peer certificate is, by the certificate or by its key. */
+const removedBy = (home: Pick<HomeWorkerTransport, 'workerRemoved'>, raw: Buffer): boolean => {
+  if (home.workerRemoved === undefined) return false
+  if (home.workerRemoved(workerCertificateFingerprint(raw))) return true
+  try {
+    return home.workerRemoved(workerKeyFingerprint(new X509Certificate(raw).publicKey.export({ type: 'spki', format: 'der' })))
+  } catch {
+    return false
+  }
 }
 
 const fail = (call: ServerDuplexStream<Buffer, Buffer>, code: status, message: string): void => {
@@ -302,7 +315,14 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
           const peer = call.getAuthContext().sslPeerCertificate
           if (!peer) return fail(call, status.UNAUTHENTICATED, 'A verified worker certificate is required')
           const enrolledNow = enrolledBy(home, peer.raw)
-          if (!enrolledNow()) return fail(call, status.UNAUTHENTICATED, 'The worker certificate is not enrolled')
+          if (!enrolledNow()) {
+            // Removed while it was away: it hears so in place of a hello, and takes itself off its computer.
+            if (removedBy(home, peer.raw)) {
+              call.write(removedFrame(), () => call.end())
+              return
+            }
+            return fail(call, status.UNAUTHENTICATED, 'The worker certificate is not enrolled')
+          }
           agentWorkers.connect(call, home.homeId, enrolledNow)
         },
         agentTools(call: ServerDuplexStream<Buffer, Buffer>) {

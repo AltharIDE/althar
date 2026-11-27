@@ -9,7 +9,7 @@
   },
   "type": "module",
   "scripts": {
-    "build": "vp build",
+    "build": "vp build && vp build --config vite.worker.config.ts",
     "release:smoke": "bun run build && node scripts/release-smoke.ts",
     "start": "node dist/althar-host.js",
     "check": "vp check",
@@ -19,8 +19,8 @@
     "verify": "bun run check && bun run test:coverage"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.112.0",
-    "@agentclientprotocol/codex-acp": "2.12.0",
+    "@agentclientprotocol/claude-agent-acp": "0.113.0",
+    "@agentclientprotocol/codex-acp": "2.12.1",
     "@althar/contracts": "workspace:*",
     "@althar/persistence-sqlite": "workspace:*",
     "@althar/provider-adapters": "workspace:*",

@@ -137,7 +137,10 @@ export interface WorkerListener {
   readonly agentWorkers: AgentWorkerPool
   /** The home's enrolled workers, connected or not, for its own list of them. */
   readonly workers: () => ReadonlyArray<EnrolledWorker>
-  /** Takes a worker out of this home: its certificate is no longer accepted, and it gets no more work. */
+  /**
+   * Takes a worker out of this home: its certificate is no longer accepted, and it gets no more work. Connected now, it
+   * hears so and takes itself off its computer; away, it hears so once it connects again.
+   */
   readonly revoke: (workerId: string) => void
   /** The run a worker's reservation still holds, through a dropped connection, until it says the run ended. */
   readonly outstanding: (workerId: string) => { readonly workspaceId: string } | undefined
@@ -182,6 +185,7 @@ const startListener = async (
         homeId,
         ...tls,
         workerForCertificate: store.workerForCertificate,
+        workerRemoved: store.workerRemoved,
         diagnostics: store,
         agentWorkers,
       })
@@ -220,7 +224,10 @@ const startListener = async (
         port: bound.port,
         agentWorkers,
         workers: () => store.workers(),
-        revoke: (workerId: string) => store.revoke(workerId),
+        revoke: (workerId: string) => {
+          store.revoke(workerId)
+          agentWorkers.remove(workerId)
+        },
         outstanding: (workerId: string) => store.agents.outstanding(workerId),
         ...(codes === undefined
           ? {}
