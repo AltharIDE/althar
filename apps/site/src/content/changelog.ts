@@ -22,7 +22,7 @@ export interface Change {
 
 export interface Release {
   version: string
-  /** ISO date it was published. */
+  /** ISO date it was published: once its publish time is recorded (published.ts), that time's day, UTC; before, the day it's planned for. */
   date: string
   /** What the release is about, in a few words. */
   title: string
@@ -32,11 +32,11 @@ export interface Release {
 const REPO = 'https://github.com/AltharIDE/althar'
 export const releaseUrl = (version: string) => `${REPO}/releases/tag/v${version}`
 
-/** The releases, newest first. */
-export const RELEASES: readonly Release[] = [
+/** The releases' notes as written, newest first; RELEASES dates each that is out by its publish time. */
+const WRITTEN: readonly Release[] = [
   {
     version: '0.10.0',
-    date: '2026-11-20',
+    date: '2026-11-27',
     title: 'Althar on your own machines',
     changes: [
       {
@@ -606,6 +606,20 @@ export const RELEASES: readonly Release[] = [
     ],
   },
 ]
+
+/**
+ * A release as every page tells it: once its publish time is recorded, dated
+ * by that time's day (UTC), whatever day its notes were written for, so the
+ * page's stamp, its Markdown, llms.txt and the structured data all say the
+ * day it went out.
+ */
+export const asPublished = (release: Release, published: Readonly<Record<string, string>> = PUBLISHED): Release => {
+  const at = published[release.version]
+  return at === undefined ? release : { ...release, date: at.slice(0, 10) }
+}
+
+/** The releases, newest first. */
+export const RELEASES: readonly Release[] = WRITTEN.map((release) => asPublished(release))
 
 /** Whether a release is out: its publish time is recorded. The newest entry may be written before it goes out. */
 export const isOut = (release: Release): boolean => release.version in PUBLISHED

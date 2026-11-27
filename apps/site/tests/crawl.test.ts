@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vite-plus/test'
+import { describe, expect, it, vi } from 'vite-plus/test'
 
-import { CURRENT, isOut, RELEASES, releaseUrl } from '../src/content/changelog'
+import { asPublished, CURRENT, isOut, RELEASES, releaseUrl } from '../src/content/changelog'
 import { LINKS } from '../src/content/facts'
 import { PAGE_META, type PagePath } from '../src/content/pages'
 import { SHIFTS } from '../src/content/shifts'
@@ -68,6 +68,37 @@ describe('what crawlers are given', () => {
       expect(llms).not.toContain(releaseUrl(release.version))
       expect(json).not.toContain(releaseUrl(release.version))
       expect(llms).not.toContain(`${release.version}, ${release.date}`)
+    }
+  })
+
+  it('dates a release by its publish time once it goes out, on every page that tells it, whatever day its notes were written for', async () => {
+    const next = RELEASES.find((release) => !isOut(release))
+    expect(next).toBeDefined()
+    if (next === undefined) return
+    const at = '2026-12-02T09:15:00Z'
+    expect(asPublished(next, {}).date).toBe(next.date)
+    expect(asPublished(next, { [next.version]: at }).date).toBe('2026-12-02')
+    // The release records its time: every page reads the changelog afresh.
+    vi.resetModules()
+    vi.doMock('../src/content/published', async (original) => {
+      const real = await original<typeof import('../src/content/published')>()
+      return { PUBLISHED: { ...real.PUBLISHED, [next.version]: at } }
+    })
+    try {
+      const changelog = await import('../src/content/changelog')
+      const crawl = await import('../src/lib/crawl')
+      const structured = await import('../src/lib/structured')
+      expect(changelog.CURRENT.version).toBe(next.version)
+      expect(changelog.CURRENT.date).toBe('2026-12-02')
+      expect(crawl.changelogMd(ORIGIN)).toContain(`Released 2026-12-02. [Release notes](${releaseUrl(next.version)})`)
+      expect(crawl.llmsTxt(ORIGIN)).toContain(`${next.version}, 2026-12-02:`)
+      const json = JSON.stringify(structured.structuredData('/changelog', ORIGIN))
+      expect(json).toContain('"datePublished":"2026-12-02"')
+      expect(json).toContain('"dateModified":"2026-12-02"')
+      expect(json).not.toContain(next.date)
+    } finally {
+      vi.doUnmock('../src/content/published')
+      vi.resetModules()
     }
   })
 
