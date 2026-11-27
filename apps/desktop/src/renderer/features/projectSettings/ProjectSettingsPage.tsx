@@ -16,6 +16,7 @@ import { type RulesModel, useRules } from '../rules/useRules'
 import { CodeSection } from './CodeSection'
 import { GeneralSection } from './GeneralSection'
 import { NotesSection } from './NotesSection'
+import { AgentSettingsPart } from '../repositoryTrust/AgentSettingsPart'
 import { ProjectQuickCards } from './ProjectQuickCards'
 import { RunningSection } from './RunningSection'
 import { TasksSection } from './TasksSection'
@@ -198,9 +199,15 @@ function SectionBody({
       return <CodeSection projectId={projectId} trackers={trackers} list={list} onConnect={onConnect} onManage={onConnections} />
     case 'rules':
       return (
-        <HomeHolds reads={['GetProjectRules']} changes={['SetProjectRules']} unshown={unshown.rules}>
-          <RulesSection model={rules} />
-        </HomeHolds>
+        <>
+          <HomeHolds reads={['GetProjectRules']} changes={['SetProjectRules']} unshown={unshown.rules}>
+            <RulesSection model={rules} />
+          </HomeHolds>
+          {/* Its own calls: a home that can't read them shows none of it, one that can't change them shows it as it stands. */}
+          <HomeHolds changes={['DecideAgentSettings']} unshown={unshown.rules}>
+            <AgentSettingsPart projectId={projectId} />
+          </HomeHolds>
+        </>
       )
     case 'running':
       return (

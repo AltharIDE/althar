@@ -306,8 +306,21 @@ export interface AgentDefinition<Id extends string = string> {
    * folder, whatever Althar's rules let it ask for.
    */
   readonly contains?: () => boolean
-  /** False until its launch can suppress an untrusted repository's config, hooks and credentials. */
-  readonly untrustedRepositories?: false
+  /**
+   * What it does with a repository's own agent settings the person hasn't trusted (DEV-280). Without it, a lead's
+   * session starts without them where `SessionOptions.withoutRepositorySettings` says so. `'loads'`, it loads them
+   * all the same, as Codex through codex-acp, which marks every session's folder trusted and has no switch for its
+   * project config or for the repository's hooks alone: the add flow and the task's line say so. `false`, an external
+   * agent, whose launch can suppress none of an untrusted repository's config, hooks and credentials: it loads them, and
+   * leads no review of someone else's pull request.
+   */
+  readonly untrustedRepositories?: false | 'loads'
+  /**
+   * It starts without a repository's untrusted settings through its session's own settings alone (`sessionMeta`), so
+   * on a worker too, which starts it with none of Althar's environment. Without it, where it holds them back only
+   * through its environment (`sessionEnv`), a worker can't start it without them.
+   */
+  readonly withoutRepositoryOnWorker?: true
   /**
    * Its session settings take what a lead's sandbox lets through from the
    * start (`SessionOptions.sandbox`): commands it runs outside it, and hosts
@@ -433,6 +446,12 @@ export interface SessionOptions {
   readonly web?: boolean
   readonly offline?: boolean
   readonly untrusted?: boolean
+  /**
+   * A lead that starts without its repository's own agent settings, which the person hasn't trusted, or which its
+   * branch changed since (DEV-280): `folders`, the repository's root and each folder down to where its session starts,
+   * whose instructions it still reads. The person's own settings and hooks load as ever.
+   */
+  readonly withoutRepositorySettings?: { readonly folders: ReadonlyArray<string> }
   /**
    * Where a trusted reader, the coordinator, may reach (ADR-058): where the
    * agent has a sandbox Althar can hold to it, its commands run there without
@@ -1076,6 +1095,39 @@ const claudeContains = (
   },
 })
 
+/**
+ * A lead's Claude Code session without its repository's own settings, which the person hasn't trusted (DEV-280), as
+ * Claude Code 2.1.328 reads them (tried 24 November 2026): only the person's own settings file loads
+ * (`settingSources: ['user']`, which claude-agent-acp passes over its default of user, project and local), so their
+ * hooks run and the repository's `.claude/settings.json` and `.claude/settings.local.json` don't, hooks, helpers and
+ * all. Without the project source Claude Code reads no CLAUDE.md either, so the folder is added to the session again,
+ * whose CLAUDE.md, imports and `.claude/rules` it reads with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD`, given in
+ * the session's own `env`, which claude-agent-acp lays over its process's: all of it in the session's settings, so a
+ * worker starts it so too. `disableAllHooks` would stop the person's own hooks too, as it does those given in a session's own
+ * settings or a plugin, and hooks given in a parent's policy settings are dropped: neither keeps theirs.
+ */
+const claudeWithoutRepository = <Meta extends { readonly claudeCode: { readonly options: object } }>(
+  meta: Meta,
+  without: SessionOptions['withoutRepositorySettings'],
+): Meta =>
+  without === undefined
+    ? meta
+    : {
+        ...meta,
+        claudeCode: {
+          ...meta.claudeCode,
+          options: {
+            ...meta.claudeCode.options,
+            settingSources: ['user'],
+            additionalDirectories: [...without.folders],
+            env: {
+              ...('env' in meta.claudeCode.options ? (meta.claudeCode.options.env as object) : {}),
+              CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+            },
+          },
+        },
+      }
+
 /** A Claude Code session's settings with the person's skills it isn't given held back (`heldSkills.ts`). */
 const claudeWithout = <
   Meta extends { readonly claudeCode: { readonly options: { readonly settings: Settings } } },
@@ -1174,11 +1226,14 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
     sessionMeta: (role = 'lead', options = {}) =>
       claudeWithout(
         role !== 'reader'
-          ? claudeAsks(
-              options.sandbox,
-              options.skills,
-              options.sandboxStarts ?? claudeSandboxStarts(),
-              options.web === true && options.offline !== true,
+          ? claudeWithoutRepository(
+              claudeAsks(
+                options.sandbox,
+                options.skills,
+                options.sandboxStarts ?? claudeSandboxStarts(),
+                options.web === true && options.offline !== true,
+              ),
+              options.withoutRepositorySettings,
             )
           : options.contained !== undefined && options.untrusted !== true && options.offline !== true
             ? claudeContains(options.contained, options.skills, options.sandbox?.deniedHosts)
@@ -1192,6 +1247,8 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
         options.heldSkills,
       ),
     contains: claudeSandboxStarts,
+    // Without the repository's settings all through its session's settings (claudeWithoutRepository), on a worker too.
+    withoutRepositoryOnWorker: true,
     // Its sandbox probe, once a launch, which its hold and its settings both read (ADR-071).
     ready: () => (sandboxProbed() ? undefined : probeClaudeSandbox()),
     program: (env) =>
@@ -1210,7 +1267,7 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
     permissionJudge: { sessionMeta: claudeJudges },
     knownGaps: [
       'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Althar always sets the mode.',
-      "Hooks in the repository's or the user's settings run as code on the computer whenever Claude uses a tool; they cannot approve past the ask rules. A review's lead loads no settings and runs no hooks.",
+      "Hooks in the user's settings, and in a repository's the person trusted, run as code on the computer whenever Claude uses a tool; they cannot approve past the ask rules. A lead in a repository whose settings aren't trusted loads only the user's; a review's lead loads no settings and runs no hooks.",
       "Its sandbox denies writes to a repository's tracked `.claude/` files, so git can fail to check those out inside it.",
       // Not checked against a real session yet: what its sandbox does when the start folder holds worktrees rather than being one.
       "In a task of several repositories it starts in the folder that holds the worktrees, which isn't one, so its sandbox may not let git write the repositories' `.git`; a commit then runs outside the sandbox and asks, and Althar's rules answer it.",
@@ -1285,6 +1342,8 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
     version: () => ({ command: 'codex', args: ['--version'] }),
     withoutOwnTools: codexWithoutOwnTools,
     reviewing: { env: codexReviewing },
+    // codex-acp marks every folder trusted, and `features.hooks` stops the person's hooks with the repository's (DEV-280).
+    untrustedRepositories: 'loads',
     sessionEnv: (own, options) => ({
       // Every command Codex doesn't read as safe reaches Althar, so the irreversible list holds inside its sandbox too
       // (ADR-097); everything else is answered at once. The adapter's patch puts it on the turn's approval policy.
@@ -1328,7 +1387,7 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
     knownGaps: [
       'Its shell carries the person’s code-host sign-in, so a command Codex reads as safe runs without reaching Althar; a command it does not (a merge, a release, a post) asks Althar first. Commands Althar’s own rules can’t read still run, as ADR-097 allows.',
       "Shell networking is open. The project's web switch controls native search and page opening separately.",
-      "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply; a review's lead has hooks off.",
+      "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply, trusted by the person or not (DEV-280: the add flow says so); a review's lead has hooks off.",
       'The adapter holds usage limits but sends them nowhere over ACP (/status prints text); Althar asks the Codex app-server for them (`usage.ts`).',
       "Beside Althar's skills it loads the person's own from the shared `skills` folder and `~/.agents/skills`, as it always does.",
     ],
@@ -1476,7 +1535,11 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
           ? config
           : { ...config, permission, agent: { build: { permission }, plan: { permission } } }
       const held = openCodeHolding(opened, options.heldSkills)
-      return held === config ? {} : { OPENCODE_CONFIG_CONTENT: JSON.stringify(held) }
+      return {
+        ...(held === config ? {} : { OPENCODE_CONFIG_CONTENT: JSON.stringify(held) }),
+        // A repository's settings the person hasn't trusted (DEV-280): none of its `opencode.json` or `.opencode` loads.
+        ...(options.withoutRepositorySettings === undefined ? {} : { OPENCODE_DISABLE_PROJECT_CONFIG: '1' }),
+      }
     },
     /*
      * MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256.

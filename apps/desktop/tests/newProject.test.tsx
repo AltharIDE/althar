@@ -527,6 +527,121 @@ describe('where a new project’s code lives', () => {
   })
 })
 
+describe('a new project whose repository brings agent settings', () => {
+  const SETTINGS = [
+    {
+      repositoryId: 'rb_1',
+      name: 'tidepool',
+      files: [
+        {
+          agent: 'claude-code' as const,
+          agentName: 'Claude Code',
+          file: '.claude/settings.json',
+          hash: 'h1',
+          runs: [
+            { file: '.claude/settings.json', key: 'hooks.PreToolUse[0].hooks[0]', when: 'Before a tool (Bash)', command: './guard.sh' },
+          ],
+          trusted: null,
+          changed: false,
+          loadsAnyway: false,
+        },
+      ],
+    },
+  ]
+
+  it('asks, once made, whether to trust what they run, and opens the project with the answer', async () => {
+    const { client, draft, onCreated } = opened(
+      { getAgentSettings: vi.fn(async () => SETTINGS), openProject: vi.fn(async () => ({ ...project, id: draft.id })) },
+      { pickFolders: vi.fn(async () => ['grant_files']) },
+    )
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    await screen.findByText('~/code/tidepool')
+    await create('Tidepool')
+    expect(await screen.findByRole('heading', { name: 'Before Tidepool’s agents start' })).toBeTruthy()
+    expect(screen.getByText('./guard.sh')).toBeTruthy()
+    expect(screen.getByText('Before a tool (Bash)')).toBeTruthy()
+    expect(onCreated).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Trust these settings' }))
+    expect(onCreated).toHaveBeenCalledWith(draft.id)
+    await waitFor(() =>
+      expect(client.decideAgentSettings).toHaveBeenCalledWith({
+        projectId: draft.id,
+        repositoryId: 'rb_1',
+        trusted: true,
+        files: SETTINGS[0]?.files,
+      }),
+    )
+  })
+
+  it('opens the project only once the answer is saved, and asks again, saying why, where it wasn’t', async () => {
+    let fails = true
+    const { client, draft, onCreated } = opened(
+      {
+        getAgentSettings: vi.fn(async () => SETTINGS),
+        openProject: vi.fn(async () => ({ ...project, id: draft.id })),
+        decideAgentSettings: vi.fn(async () => {
+          if (fails) throw new Error('The runtime is busy.')
+        }),
+      },
+      { pickFolders: vi.fn(async () => ['grant_files']) },
+    )
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    await screen.findByText('~/code/tidepool')
+    await create('Tidepool')
+    await userEvent.click(await screen.findByRole('button', { name: 'Run without them' }))
+    expect(await screen.findByText(/Althar's runtime didn't answer/)).toBeTruthy()
+    expect(onCreated).not.toHaveBeenCalled()
+    fails = false
+    await userEvent.click(screen.getByRole('button', { name: 'Run without them' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(draft.id))
+    expect(client.decideAgentSettings).toHaveBeenCalledTimes(2)
+  })
+
+  it('says where what they run couldn’t be read, rather than ask nothing, and asks once read', async () => {
+    let fails = true
+    const { draft, onCreated } = opened(
+      {
+        getAgentSettings: vi.fn(async () => {
+          if (fails) throw new Error('The runtime didn’t answer.')
+          return SETTINGS
+        }),
+        openProject: vi.fn(async () => ({ ...project, id: draft.id })),
+      },
+      { pickFolders: vi.fn(async () => ['grant_files']) },
+    )
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    await screen.findByText('~/code/tidepool')
+    await create('Tidepool')
+    expect(await screen.findByText(/Althar's runtime didn't answer/)).toBeTruthy()
+    expect(onCreated).not.toHaveBeenCalled()
+    fails = false
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('./guard.sh')).toBeTruthy()
+    expect(onCreated).not.toHaveBeenCalled()
+  })
+
+  it('asks nothing of a repository without any', async () => {
+    const { client, draft, onCreated } = opened(
+      { openProject: vi.fn(async () => ({ ...project, id: draft.id })) },
+      { pickFolders: vi.fn(async () => ['grant_files']) },
+    )
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    await screen.findByText('~/code/tidepool')
+    await create('Tidepool')
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(draft.id))
+    expect(screen.queryByRole('button', { name: 'Trust these settings' })).toBeNull()
+    expect(client.decideAgentSettings).not.toHaveBeenCalled()
+  })
+})
+
 describe('a new project cloned from its host', () => {
   it('lists your repositories, those named like it first and the archived last, and clones the one chosen where you keep code', async () => {
     const order: string[] = []

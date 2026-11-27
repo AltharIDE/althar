@@ -618,6 +618,140 @@ describe('a project’s settings', () => {
     expect(within(screen.getByRole('region', { name: 'Pull requests and issues' })).queryByText(/changed meanwhile/)).toBeNull()
   })
 
+  it('shows in Rules what its repositories’ agent settings run and that they were trusted, and takes it back', async () => {
+    const trusted = {
+      repositoryId: 'rb_1',
+      name: 'refunds',
+      files: [
+        {
+          agent: 'claude-code' as const,
+          agentName: 'Claude Code',
+          file: '.claude/settings.json',
+          hash: 'h1',
+          runs: [{ file: '.claude/settings.json', key: 'hooks.Stop[0].hooks[0]', when: 'When it stops', command: './notify.sh' }],
+          trusted: true,
+          changed: false,
+          loadsAnyway: false,
+        },
+      ],
+    }
+    let kept = [trusted]
+    const { client } = windowAt('/projects/p1?room=settings&section=rules', {
+      getAgentSettings: vi.fn(async () => kept),
+      decideAgentSettings: vi.fn(async ({ trusted: now }: { readonly trusted: boolean }) => {
+        kept = kept.map((one) => ({ ...one, files: one.files.map((file) => ({ ...file, trusted: now })) }))
+      }),
+    })
+    const part = within(await screen.findByRole('region', { name: 'Repositories’ agent settings' }))
+    const repository = within(part.getByRole('region', { name: 'refunds' }))
+    expect(repository.getByText('./notify.sh')).toBeTruthy()
+    expect(repository.getByText('Trusted')).toBeTruthy()
+    await userEvent.click(repository.getByRole('button', { name: 'Take back' }))
+    expect(await repository.findByText('Leads start without them')).toBeTruthy()
+    await waitFor(() =>
+      expect(client.decideAgentSettings).toHaveBeenCalledWith({
+        projectId: 'p1',
+        repositoryId: 'rb_1',
+        trusted: false,
+        files: trusted.files,
+      }),
+    )
+  })
+
+  it('takes back one repository’s settings in Rules, leaving the others’ as they were, and says why where it didn’t save', async () => {
+    const of = (repositoryId: string, name: string, command: string, trusted: boolean) => ({
+      repositoryId,
+      name,
+      files: [
+        {
+          agent: 'claude-code' as const,
+          agentName: 'Claude Code',
+          file: '.claude/settings.json',
+          hash: `h-${repositoryId}`,
+          runs: [{ file: '.claude/settings.json', key: 'hooks.Stop[0].hooks[0]', when: 'When it stops', command }],
+          trusted,
+          changed: false,
+          loadsAnyway: false,
+        },
+      ],
+    })
+    const refunds = of('rb_1', 'refunds', './notify.sh', true)
+    const ledger = of('rb_2', 'ledger', './lint.sh', false)
+    const { client } = windowAt('/projects/p1?room=settings&section=rules', {
+      getAgentSettings: vi.fn(async () => [refunds, ledger]),
+      decideAgentSettings: vi.fn(async () => {
+        throw new Error('The project is gone.')
+      }),
+    })
+    const part = within(await screen.findByRole('region', { name: 'Repositories’ agent settings' }))
+    const first = within(part.getByRole('region', { name: 'refunds' }))
+    const second = within(part.getByRole('region', { name: 'ledger' }))
+    expect(second.getByText('Leads start without them')).toBeTruthy()
+    await userEvent.click(first.getByRole('button', { name: 'Take back' }))
+    expect(await first.findByRole('alert')).toBeTruthy()
+    expect(second.queryByRole('alert')).toBeNull()
+    expect(second.getByRole('button', { name: 'Trust these settings' })).toBeTruthy()
+    expect(client.decideAgentSettings).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows in Rules what was trusted of a version the checkout here doesn’t have, and takes it back', async () => {
+    const branch = {
+      agent: 'claude-code' as const,
+      agentName: 'Claude Code',
+      file: '.claude/settings.json',
+      hash: 'h2',
+      runs: [{ file: '.claude/settings.json', key: 'hooks.Stop[0].hooks[0]', when: 'When it stops', command: './notify.sh --loud' }],
+      trusted: true,
+      changed: false,
+      loadsAnyway: false,
+    }
+    const { client } = windowAt('/projects/p1?room=settings&section=rules', {
+      getAgentSettings: vi.fn(async () => [{ repositoryId: 'rb_1', name: 'refunds', files: [], elsewhere: [branch] }]),
+    })
+    const part = within(await screen.findByRole('region', { name: 'Repositories’ agent settings' }))
+    const kept = within(part.getByRole('region', { name: 'refunds, as a task’s branch had them' }))
+    expect(kept.getByText('./notify.sh --loud')).toBeTruthy()
+    await userEvent.click(kept.getByRole('button', { name: 'Take back' }))
+    await waitFor(() =>
+      expect(client.decideAgentSettings).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'rb_1', trusted: false, files: [branch] }),
+    )
+  })
+
+  it('shows trusted and declined versions a task’s branch had apart, so the trusted one is taken back on its own', async () => {
+    const version = (file: string, hash: string, command: string, trusted: boolean) => ({
+      agent: 'claude-code' as const,
+      agentName: 'Claude Code',
+      file,
+      hash,
+      runs: [{ file, key: 'hooks.Stop[0].hooks[0]', when: 'When it stops', command }],
+      trusted,
+      changed: false,
+      loadsAnyway: false,
+    })
+    const kept = version('.claude/settings.json', 'h2', './notify.sh --loud', true)
+    const declined = version('.claude/settings.local.json', 'h3', './mine.sh', false)
+    const { client } = windowAt('/projects/p1?room=settings&section=rules', {
+      getAgentSettings: vi.fn(async () => [{ repositoryId: 'rb_1', name: 'refunds', files: [], elsewhere: [kept, declined] }]),
+    })
+    const part = within(await screen.findByRole('region', { name: 'Repositories’ agent settings' }))
+    const trusted = within(part.getByRole('region', { name: 'refunds, as a task’s branch had them' }))
+    expect(trusted.getByText('./notify.sh --loud')).toBeTruthy()
+    expect(trusted.queryByText('./mine.sh')).toBeNull()
+    const not = within(part.getByRole('region', { name: 'refunds, as a task’s branch had them, not trusted' }))
+    expect(not.getByText('./mine.sh')).toBeTruthy()
+    expect(not.getByRole('button', { name: 'Trust these settings' })).toBeTruthy()
+    await userEvent.click(trusted.getByRole('button', { name: 'Take back' }))
+    await waitFor(() =>
+      expect(client.decideAgentSettings).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'rb_1', trusted: false, files: [kept] }),
+    )
+  })
+
+  it('has no part for agent settings where no repository brings any', async () => {
+    windowAt('/projects/p1?room=settings&section=rules')
+    expect(await screen.findByRole('heading', { level: 3, name: 'Always' })).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Repositories’ agent settings' })).toBeNull()
+  })
+
   it('shows the notes its coordinator keeps, newest first, who kept each, and drops one that no longer holds', async () => {
     const notes = [
       {

@@ -420,6 +420,72 @@ names a section and a setting as the screens' addresses do
 - No setting opens `SECRET_PLACES` or the keychain, and the host's own
   settings stay refused.
 
+## Trusting a repository's agent settings
+
+A repository can bring settings its agents run as code on the person's
+computer: Claude Code's hooks, helpers, status line, plugins and the
+`.mcp.json` servers its settings start, in `.claude/settings.json` and
+`.claude/settings.local.json`; Codex's hooks, `notify` and MCP servers in
+`.codex/`; OpenCode's plugins, formatters, language servers and local MCP
+servers in `opencode.json`, and the plugins and tools it loads as code from
+`.opencode/`. A cloned repository's ran on a lead's first tool call, with
+nobody having seen them. Now nothing of them runs until the person trusts them
+(DEV-280, `repositorySettings.ts`, `repositoryTrust.ts`).
+
+- **Adding a project is the trust step.** Once it is made (a clone is only
+  there then), and before its tab opens on it, each repository whose settings
+  run something lists each one: the file and key, which agent runs it, when,
+  and the command, with Trust these settings and Run without them. The tab
+  opens once every answer is saved; one that didn't save asks again, saying
+  why. A repository with none asks nothing; where they couldn't be read, the
+  step says so, with Try again, rather than ask nothing. Until answered,
+  nothing of them is trusted.
+- **Trust is keyed on content:** a hash of the whole of each definition that
+  runs in an agent's file (a hook with its matcher, headers and options, a
+  plugin with its options, a command with its arguments apart), and of the
+  scripts in the repository its commands name, kept per project and
+  repository (`repository_trust`). A lead's session reads its own worktree's
+  copy as it starts, from the repository's root down to the folder it starts
+  in, as its agent reads them up: a file whose hash isn't trusted, never seen
+  or changed on the task's branch since, isn't loaded. A file there that
+  can't be read as its agent would (too large, not JSON or TOML, a folder that
+  can't be listed) is never trusted, and is shown with why. The task says so
+  in one quiet line with Review, once for each set of hashes; it doesn't go
+  to Needs you, since nothing waits on it.
+- **Project settings, under Rules, shows what was trusted** and takes it
+  back, or trusts what was declined or changed since: what the checkout here
+  has, and what was decided of versions it doesn't, such as one trusted from a
+  task's line.
+- **Untrusted, each agent loads only the person's own settings, as far as it
+  can:**
+  - Claude Code starts with `settingSources: ['user']`, which claude-agent-acp
+    passes over its default of user, project and local: the person's own
+    settings and hooks load, the repository's don't, its own `.claude`
+    skills, agents and commands with them. Its CLAUDE.md still loads, from the
+    folders added again (`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD`, in
+    the session's own `env`). All of it is in the session's settings, so a
+    lead on a worker starts so too. `disableAllHooks` was the leaning, and is
+    turned down: it stops the person's own hooks too.
+  - OpenCode starts with `OPENCODE_DISABLE_PROJECT_CONFIG`, which already
+    held an outside author's review's off. It is an environment variable,
+    which a worker doesn't take from the home, so an untrusted OpenCode lead
+    doesn't start on a worker: it says so, to trust them or run it here.
+  - Codex can't be told through codex-acp not to trust a folder: it marks
+    every session's folder trusted, and its `features.hooks` switch stops the
+    person's hooks with the repository's. Its adapter says so
+    (`untrustedRepositories: 'loads'`), and the add flow and the task's line
+    say Codex runs them either way.
+- A lead on a worker is checked against the worktree here, which is what the
+  worker is sent as its checkout.
+- Checked on 25 November 2026 with a fixture repository whose hook writes a
+  file outside its worktree, Claude Code (through claude-agent-acp) and
+  OpenCode (through `opencode acp`) each started as a lead's session is: it
+  doesn't run before trust, runs after, and stops again once a branch changes
+  it (`tests/agents/repositorySettings.test.ts`). Codex isn't run there: it
+  asks for a sign-in before it runs anything of the repository's, so what it
+  does is taken from codex-acp's code, and only what Althar passes it is
+  checked.
+
 ## What stays, and why
 
 | Kept | Why |
@@ -430,6 +496,7 @@ names a section and a setting as the screens' addresses do
 | Secret files and the keychain are refused | Leaked credentials can't be taken back |
 | No agent answers its own permission request, approves its own work, or loosens what asks without the person's words | Otherwise none of the above holds |
 | Asked-for tools go only on the person's own message; a command or an MCP call on the list asks on a card, as far as Althar sees it | News, pull request text and a lead's words can't merge, publish or post |
+| A repository's own agent settings run only as the person trusted them, by their content, and Codex's are said to run anyway | A cloned repository's hooks are a stranger's code too |
 | An outside author's code doesn't run without the person's word, none of its repository's settings, hooks or MCP config load, and its review's commands reach no network | A stranger's code, and a stranger's words, on the person's machine |
 | Running or resuming an automation goes on the person's word, as a card otherwise | It spends their usage on a schedule, while they're away, beyond any task's caps |
 | An unattended automation's run never pushes to the default branch | Nobody is there to answer the ask |
@@ -446,3 +513,4 @@ Anything else that blocks, refuses or asks is a bug.
 - 10 Nov 2026: an outside author's code runs only as far as the person says with Run it, safely (install scripts off, offline) or trusted fully, and a setting can answer how far, never whether ([reviews](reviews.md#run-it)).
 - 10 Nov 2026: Run it built, and Stop running it ([reviews § Run it](reviews.md#run-it)).
 - 18 Nov 2026: a settings change's line, and the answer to the agent, say what changed in plain words, never a list or object's JSON.
+- 24 Nov 2026: a repository's own agent settings run only once the person trusts them, as they are; adding a project asks ([trusting a repository's agent settings](#trusting-a-repositorys-agent-settings)).

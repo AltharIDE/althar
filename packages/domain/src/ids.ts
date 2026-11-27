@@ -21,6 +21,7 @@ export const Ids = {
   repositoryLocation: kind('loc', 'RepositoryLocationId'),
   projectFolder: kind('pfo', 'ProjectFolderId'),
   projectNote: kind('note', 'ProjectNoteId'),
+  repositoryTrust: kind('rtr', 'RepositoryTrustId'),
   runnable: kind('rnbl', 'RunnableId'),
   task: kind('task', 'TaskId'),
   taskRequirement: kind('req', 'TaskRequirementId'),

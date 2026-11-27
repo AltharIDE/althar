@@ -79,6 +79,8 @@ export type AcceptedInput = typeof AcceptedInput.Type
 
 /** One of a task's repositories, in its worktree here. */
 export interface TaskRepository {
+  /** Its repository in the project, whose agent settings the person trusts or not (DEV-280); absent in a test's thread. */
+  readonly bindingId?: string
   readonly name: string
   /** What it is to the project, as the person set it. */
   readonly role: string

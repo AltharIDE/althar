@@ -107,6 +107,7 @@ import { statements as canvasBoards } from './0102_canvas_boards'
 import { statements as canvasSaves } from './0103_canvas_saves'
 import { statements as artifactChats } from './0104_artifact_chats'
 import { statements as workerSetups } from './0105_worker_setups'
+import { statements as repositoryTrust } from './0106_repository_trust'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -231,6 +232,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0103_canvas_saves', statements: canvasSaves },
   { key: '0104_artifact_chats', statements: artifactChats },
   { key: '0105_worker_setups', statements: workerSetups },
+  { key: '0106_repository_trust', statements: repositoryTrust },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

@@ -28,7 +28,7 @@ import { Secrets } from '../src/Secrets'
 import type { ToolAccess } from '../src/ToolServer'
 import type { WorkerExecution } from '../src/workerExecution'
 
-import { callTool, fakeAgents, fakeConnectors, repository, ROOMY } from './support'
+import { callTool, fakeAgents, fakeConnectors, repository, ROOMY, sessionMetas } from './support'
 
 /*
  * More of the API, as the app's window has it: an agent Althar can download
@@ -385,6 +385,80 @@ describe('a normal task assigned to a worker', () => {
         yield* until(client.GetThread({ threadId: task.threadId, fresh: true }), (thread) =>
           thread.items.some((item) => item.kind === 'step_result' && item.content.step === 'implement'),
         )
+      }),
+    ),
+  )
+
+  it.live('starts a lead on a worker without its repository’s agent settings after a decline, or not at all where its agent can’t', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workerId = 'wrk_' + '8'.repeat(32)
+        const homePath = repository()
+        mkdirSync(join(homePath, '.claude'))
+        writeFileSync(
+          join(homePath, '.claude', 'settings.json'),
+          JSON.stringify({ hooks: { Stop: [{ hooks: [{ command: 'touch x' }] }] } }),
+        )
+        mkdirSync(join(homePath, '.codex'))
+        writeFileSync(join(homePath, '.codex', 'hooks.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ command: 'touch y' }] }] } }))
+        execFileSync('git', ['add', '.'], { cwd: homePath })
+        execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-qm', 'Hooks'], { cwd: homePath })
+        const workerPath = realpathSync(mkdtempSync(join(tmpdir(), 'althar-worker-')))
+        let openings = 0
+        const { client, grant } = yield* connected({
+          workers: {
+            list: () => [{ workerId, providers: ['claude-code', 'codex'], busy: false, readiness: READY }],
+            open: (request) =>
+              Effect.gen(function* () {
+                openings += 1
+                return {
+                  path: workerPath,
+                  toolPort: request.toolPort,
+                  transport: yield* openFakeWorker(workerPath),
+                  checkpoint: Effect.void,
+                }
+              }),
+          },
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(homePath) })
+        const [listed] = yield* client.GetAgentSettings({ projectId: project.id })
+        assert.deepEqual(
+          listed?.files.map((file) => file.file),
+          ['.claude/settings.json', '.codex/hooks.json'],
+        )
+        yield* client.DecideAgentSettings({
+          commandId: commandId(),
+          projectId: project.id,
+          repositoryId: listed?.repositoryId ?? '',
+          trusted: false,
+          files: (listed?.files ?? []).map(({ agent, file, hash, runs }) => ({ agent, file, hash, runs })),
+        })
+        const start = (agentId: string, title: string) =>
+          client.StartTask({
+            commandId: commandId(),
+            projectId: project.id,
+            workerId,
+            title,
+            description: '[lead:finish]',
+            end: 'ready',
+            steps: [{ key: 'implement', agentId, model: null, skipped: false }],
+          })
+        // Claude Code holds them back through its session's settings, which the worker is given: the worker's folder's instructions only.
+        sessionMetas.length = 0
+        const held = yield* start('claude-code', 'On the worker, without them')
+        yield* until(client.GetThread({ threadId: held.threadId, fresh: true }), (thread) =>
+          thread.items.some((item) => item.kind === 'step_result' && item.content.step === 'implement'),
+        )
+        assert.strictEqual(openings, 1)
+        assert.deepStrictEqual(sessionMetas.find((meta) => meta.role === 'lead')?.options?.withoutRepositorySettings, {
+          folders: [workerPath],
+        })
+        // One that holds them back only through its environment, which a worker doesn't take, doesn't start there.
+        const refused = yield* start('codex', 'On the worker, can’t without them')
+        yield* until(client.GetThread({ threadId: refused.threadId, fresh: true }), (thread) =>
+          JSON.stringify(thread.items).includes('can’t start on a worker without'),
+        )
+        assert.strictEqual(openings, 1)
       }),
     ),
   )

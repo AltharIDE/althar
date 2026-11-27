@@ -1,5 +1,7 @@
 import { useState } from 'react'
 
+import type { RepositoryAgentSettings } from '@althar/contracts'
+
 import { keys, LinkButton, modKey, OtherTools, RepositoryPick } from '@althar/ui'
 import { homeWelcomeText, NewProject, olderLine, UpdateHome } from '@althar/ui/screens'
 
@@ -13,6 +15,9 @@ import { words as elsewhereWords } from '../elsewhere/tiles'
 import { useElsewhere } from '../elsewhere/useElsewhere'
 import { useHomeName, useHomeUpdating } from '../homes/useHomes'
 import { factsOf, useFound } from '../../shared/found'
+import { messageOf } from '../../data/client'
+import { keys as readKeys } from '../../data/reads'
+import { TrustStep } from '../repositoryTrust/TrustStep'
 import type { DraftError } from './draft'
 import s from './NewProject.module.css'
 import { SetupSide } from './SetupSide'
@@ -98,7 +103,7 @@ export function NewProjectView({
   /** Escape: nothing is made, and the tab closes. */
   onClose: () => void
 }) {
-  const { host, client } = useServices()
+  const { host, client, cache } = useServices()
   const home = useHomeName()
   // A home from before windows made projects there is asked to update: nothing on this page would work on it.
   const older = home.remote && !canCall(client, 'FindHomeFolders')
@@ -109,6 +114,27 @@ export function NewProjectView({
   const [now] = useState(() => new Date())
   const [dropping, setDropping] = useState(false)
   const [opening, setOpening] = useState<Opening | null>(null)
+  // Made, with repositories whose own agent settings run something not decided on yet: asked before the tab opens on it.
+  const [trusting, setTrusting] = useState<{
+    readonly projectId: string
+    readonly repositories: ReadonlyArray<RepositoryAgentSettings>
+    /** Why what they run couldn't be read, where it couldn't. */
+    readonly unreadable?: string
+  } | null>(null)
+  // What a made project's repositories' agent settings run, asked where any isn't decided on; a failed read said, not taken for none.
+  const askTrust = async (projectId: string) => {
+    let settings: ReadonlyArray<RepositoryAgentSettings>
+    try {
+      settings = await client.getAgentSettings(projectId)
+    } catch (failure) {
+      setTrusting({ projectId, repositories: [], unreadable: messageOf(failure) })
+      return
+    }
+    const undecided = settings.filter((repository) => repository.files.some((file) => file.trusted === null))
+    if (undecided.length === 0) return onCreated(projectId)
+    cache.setQueryData(readKeys.agentSettings(projectId), settings)
+    setTrusting({ projectId, repositories: undecided })
+  }
   const { draft, setup } = model
   // What other tools left in the folders chosen, read before the project is made and brought in once it is.
   // Not on another computer's home, where other tools' work isn't read.
@@ -132,6 +158,21 @@ export function NewProjectView({
             }}
           />
         </main>
+      </div>
+    )
+  if (trusting !== null)
+    return (
+      <div className={s.window}>
+        <TrustStep
+          key={trusting.unreadable === undefined ? 'read' : 'unreadable'}
+          projectId={trusting.projectId}
+          project={draft?.name ?? ''}
+          repositories={trusting.repositories}
+          {...(trusting.unreadable === undefined
+            ? {}
+            : { unreadable: { error: trusting.unreadable, onRetry: () => void askTrust(trusting.projectId) } })}
+          onDone={() => onCreated(trusting.projectId)}
+        />
       </div>
     )
   if (draft === null || setup === null) return null
@@ -235,11 +276,13 @@ export function NewProjectView({
             : { footNote: elsewhereWords.andThen(go) })}
         // oxlint-disable-next-line althar/press-at-once -- A form the runtime and a code host check (a clone, a repository made there): it stays, each part ticking as it is done, until made, so a refusal lands in it.
         onCreate={() =>
-          void model.create().then((made) => {
+          void model.create().then(async (made) => {
             if (made === null) return
             // What was picked comes in behind the tab, which opens on the project at once: its board shows each as it comes.
             if (setup.way === 'folder') void elsewhere.bring(made.id)
-            onCreated(made.id)
+            // What its repositories' own agent settings run is asked first, where any runs something (DEV-280): a clone is
+            // only there once made. Until answered, nothing of them is trusted, and a task's line offers them later.
+            await askTrust(made.id)
           })
         }
         onCancel={onClose}

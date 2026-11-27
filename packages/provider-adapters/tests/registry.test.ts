@@ -351,6 +351,37 @@ describe('the agent registry', () => {
     assert.include(permissionsOf('lead', { offline: true }).ask, 'WebFetch')
   })
 
+  it('starts a lead without its repository’s settings, keeping the person’s own and the repository’s instructions (DEV-280)', () => {
+    type Options = {
+      settingSources?: Array<string>
+      additionalDirectories?: Array<string>
+      env?: Record<string, string>
+      settings: { disableAllHooks?: boolean }
+    }
+    const without = { withoutRepositorySettings: { folders: ['/work/repo'] } }
+    const claude = agents['claude-code']
+    const optionsOf = (options = {}) => (claude.sessionMeta?.('lead', options) as { claudeCode: { options: Options } }).claudeCode.options
+    // Only the person's settings file loads, so their hooks run and the repository's don't; the folder is added again for its CLAUDE.md.
+    assert.deepStrictEqual(optionsOf(without).settingSources, ['user'])
+    assert.deepStrictEqual(optionsOf(without).additionalDirectories, ['/work/repo'])
+    assert.isUndefined(optionsOf(without).settings.disableAllHooks)
+    // All in the session's own settings, so a worker, which gets none of Althar's environment, starts it so too.
+    assert.deepStrictEqual(optionsOf(without).env, { CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1' })
+    assert.isTrue(claude.withoutRepositoryOnWorker)
+    assert.isUndefined(agents.opencode.withoutRepositoryOnWorker)
+    // Trusted, as before.
+    assert.isUndefined(optionsOf().settingSources)
+    assert.isUndefined(optionsOf().additionalDirectories)
+    assert.isUndefined(optionsOf().env)
+    // OpenCode skips the repository's `opencode.json` and `.opencode`.
+    assert.strictEqual(agents.opencode.sessionEnv?.({}, without).OPENCODE_DISABLE_PROJECT_CONFIG, '1')
+    assert.isUndefined(agents.opencode.sessionEnv?.({}, {}).OPENCODE_DISABLE_PROJECT_CONFIG)
+    // Codex can't be told: it says so, and still leads a review.
+    assert.strictEqual(agents.codex.untrustedRepositories, 'loads')
+    assert.isUndefined(claude.untrustedRepositories)
+    assert.isUndefined(agents.opencode.untrustedRepositories)
+  })
+
   it('makes Claude Code a review’s lead with no settings file and no hooks, keeping its reader rules and sandbox', () => {
     type Options = {
       settingSources?: Array<string>

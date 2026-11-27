@@ -75,6 +75,54 @@ describe('Althar’s lines and a step’s report', () => {
   })
 })
 
+describe('a lead that started without its repository’s agent settings', () => {
+  const offer = {
+    kind: 'agent_settings' as const,
+    projectId: 'p1',
+    repositoryId: 'rb_1',
+    repository: 'meridian',
+    said: 'h2',
+    files: [
+      {
+        agent: 'claude-code' as const,
+        agentName: 'Claude Code',
+        file: '.claude/settings.json',
+        hash: 'h2',
+        runs: [{ file: '.claude/settings.json', key: 'hooks.PreToolUse[0].hooks[0]', when: 'Before a tool (Bash)', command: './guard.sh' }],
+        trusted: null,
+        changed: true,
+        loadsAnyway: false,
+      },
+    ],
+  }
+  const title = 'Claude Code started without meridian’s agent settings, which aren’t trusted.'
+
+  it('says so in one quiet line, and Review shows what they run, to trust them from there', async () => {
+    const client = show([items.notice({ source: 'runtime', role: 'aside', title, offer }, 'claude-code')])
+    expect(screen.getByText(title)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    const dialog = screen.getByRole('dialog', { name: 'meridian’s agent settings' })
+    expect(dialog.textContent).toContain('./guard.sh')
+    await userEvent.click(screen.getByRole('button', { name: 'Trust these settings' }))
+    expect(screen.getByText('Trusted: its next session starts with them.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Review' })).toBeNull()
+    expect(client.decideAgentSettings).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'rb_1', trusted: true, files: offer.files })
+  })
+
+  it('says at once that its leads start without them, and where that didn’t save, offers Review again with why', async () => {
+    const client = show([items.notice({ source: 'runtime', role: 'aside', title, offer }, 'claude-code')])
+    let fail: (error: Error) => void = () => {}
+    vi.mocked(client.decideAgentSettings).mockImplementationOnce(() => new Promise((_, reject) => (fail = reject)))
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Run without them' }))
+    expect(screen.getByText('Its leads start without them.')).toBeTruthy()
+    expect(client.decideAgentSettings).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'rb_1', trusted: false, files: offer.files })
+    fail(new Error('The project is gone.'))
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Review' })).toBeTruthy()
+  })
+})
+
 describe('the merge line', () => {
   it('draws a line still moving at the thread’s foot, each by its number, opening to a row for each linked with where it stands', async () => {
     show([items.mergeLine()])

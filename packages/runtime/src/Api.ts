@@ -94,6 +94,7 @@ import { homeFolders, machineFacts } from './homeFolders'
 import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
+import { agentSettingsOf, decideAgentSettings } from './repositoryTrust'
 import { checkoutNeeds, withNeeds } from './toolNeeds'
 import { Fetches } from './Fetches'
 import { Launches } from './Launches'
@@ -1294,6 +1295,21 @@ export const handlers = apiLayer(
           ),
         ),
       GetRepositories: ({ projectId }) => api(repositoriesShown(projectId)),
+      GetAgentSettings: ({ projectId }) =>
+        api(Effect.provideContext(agentSettingsOf(projectId), store).pipe(Effect.provideService(Instance, instance))),
+      DecideAgentSettings: ({ commandId, projectId, repositoryId, trusted, files }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.agent_settings.decide', { projectId, repositoryId, trusted }, commandId)
+              yield* Effect.provideContext(
+                decideAgentSettings({ envelope: said, projectId: projectId as ProjectId, repositoryId, trusted, files }),
+                store,
+              )
+            }),
+          ),
+        ),
       AddRepositories: ({ commandId, projectId, grant }) =>
         once(
           commandId,

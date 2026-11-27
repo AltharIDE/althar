@@ -403,6 +403,8 @@ export const AggregateType = Schema.Literals([
   'skill',
   'setting',
   'canvas',
+  /** What the person decided of a repository's agent settings file (DEV-280). */
+  'repository_trust',
   /** A task's card, as its board shows it, came out different as a change of the task was recorded (Queries' `cards`). */
   'card',
 ])

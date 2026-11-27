@@ -55,6 +55,8 @@ export const TASK_OF: Readonly<Record<AggregateType, string | null>> = {
   // change came out as is the news itself, never a change to work it out again from.
   project: null,
   project_note: null,
+  // What the person decided of a repository's agent settings: the project's, no task's (DEV-280).
+  repository_trust: null,
   policy: null,
   automation: null,
   canvas: null,

@@ -1096,6 +1096,52 @@ export const ProjectRepository = Schema.Struct({
 })
 export type ProjectRepository = typeof ProjectRepository.Type
 
+/** The agents whose repository settings Althar reads (DEV-280). */
+export const SettingsAgent = Schema.Literals(['claude-code', 'codex', 'opencode'])
+export type SettingsAgent = typeof SettingsAgent.Type
+
+/** One thing a repository's agent settings run: the file and key it is declared at, when its agent runs it, and the command. */
+export const RepositoryRun = Schema.Struct({
+  file: Schema.String,
+  key: Schema.String,
+  when: Schema.String,
+  command: Schema.String,
+})
+export type RepositoryRun = typeof RepositoryRun.Type
+
+/**
+ * One of a repository's agent settings files that runs something (DEV-280), by the hash of what in it runs: whether the
+ * person trusted that hash, didn't, or hasn't said (null, never seen or changed since). `loadsAnyway`, its agent loads
+ * it whatever they decide (Codex, through codex-acp), which the add flow says.
+ */
+export const AgentSettingsFile = Schema.Struct({
+  agent: SettingsAgent,
+  agentName: Schema.String,
+  file: Schema.String,
+  hash: Schema.String,
+  runs: Schema.Array(RepositoryRun),
+  trusted: Schema.NullOr(Schema.Boolean),
+  /** Not decided as it is now, but trusted as it was before: its repository changed it since. */
+  changed: Schema.Boolean,
+  loadsAnyway: Schema.Boolean,
+  /** There, but not read as its agent would read it, and why: never trusted, since it may run anything. */
+  unread: Schema.optional(Schema.String),
+})
+export type AgentSettingsFile = typeof AgentSettingsFile.Type
+
+/** A project repository's agent settings that run something, as its checkout here has them, with what the person decided of each. */
+export const RepositoryAgentSettings = Schema.Struct({
+  repositoryId: Schema.String,
+  name: Schema.String,
+  files: Schema.Array(AgentSettingsFile),
+  /**
+   * What the person decided of its settings as they were somewhere else, such as a task's branch from its line, and
+   * not as its checkout here has them: as they were shown then, to take back or trust again.
+   */
+  elsewhere: Schema.optional(Schema.Array(AgentSettingsFile)),
+})
+export type RepositoryAgentSettings = typeof RepositoryAgentSettings.Type
+
 /** A git repository found where a folder was opened. */
 export const FoundRepository = Schema.Struct({
   /** Its root on this Mac. */
@@ -2394,6 +2440,19 @@ export const NoticeItem = Schema.Struct({
           agentId: Schema.String,
           model: Schema.NullOr(Schema.String),
           effort: Schema.optional(Schema.NullOr(Schema.String)),
+        }),
+        /**
+         * A task's lead started without its repository's agent settings that the person hasn't trusted, or that its
+         * branch changed since they did (DEV-280): each file, as its folder has it, which Review shows and trusts.
+         */
+        Schema.Struct({
+          kind: Schema.Literal('agent_settings'),
+          projectId: Schema.String,
+          repositoryId: Schema.String,
+          repository: Schema.String,
+          files: Schema.Array(AgentSettingsFile),
+          /** The hashes it was said for, so a session started again on the same files says nothing new. */
+          said: Schema.optional(Schema.String),
         }),
         Schema.Struct({
           kind: Schema.Literal('bring_in'),
@@ -5732,6 +5791,27 @@ const ProjectApi = RpcGroup.make(
   command('RemoveProject', { projectId: Schema.String }, Schema.Void),
   /** A project's repositories, as this Mac has them. */
   call('GetRepositories', { projectId: Schema.String }, Schema.Array(ProjectRepository)),
+  /**
+   * A project's repositories' own agent settings that run something (DEV-280), as each checkout here has them, with what
+   * the person decided of each: only repositories that have any.
+   */
+  call('GetAgentSettings', { projectId: Schema.String }, Schema.Array(RepositoryAgentSettings)),
+  /**
+   * The person's word on a repository's agent settings files, by the hash of what each runs, as they were shown them:
+   * trusted, a lead's session loads them while its folder's copy is the same; not, it starts without them.
+   */
+  command(
+    'DecideAgentSettings',
+    {
+      projectId: Schema.String,
+      repositoryId: Schema.String,
+      trusted: Schema.Boolean,
+      files: Schema.Array(
+        Schema.Struct({ agent: SettingsAgent, file: Schema.String, hash: Schema.String, runs: Schema.Array(RepositoryRun) }),
+      ),
+    },
+    Schema.Void,
+  ),
   /** Adds the repositories at a folder the person chose, by its grant: the one it is or is in, or those directly inside it. */
   command('AddRepositories', { projectId: Schema.String, grant: Schema.String }, Schema.Void),
   /** Leaves a repository out of the project: new tasks can't change it; tasks made with it keep it. */
