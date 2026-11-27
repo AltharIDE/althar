@@ -16,6 +16,7 @@ import { suggestedCoordinator } from './coordinatorChoice'
 import { branchFor, ruleOf } from './conventions'
 import { type Message, transcriptOf } from './elsewhere/conversations'
 import { type FoundConversation, type FoundWorktree, lookAt } from './elsewhere/look'
+import { openElsewhere } from './elsewhere/open'
 import { placesOf, slashed, toolNames, within } from './elsewhere/places'
 import { NotFound } from './errors'
 import { git } from './git'
@@ -142,6 +143,11 @@ export class Elsewhere extends Context.Service<
       readonly conversations: ReadonlyArray<string>
       readonly steps: ReadonlyArray<PlanStep>
     }): Effect.Effect<BroughtIn, unknown>
+    /**
+     * The tool that has a conversation brought into the thread's task open in another process now (elsewhere/open.ts):
+     * what a send to it waits for. Null where none does, the thread has none brought in, or that can't be told.
+     */
+    openElsewhere(threadId: string): Effect.Effect<'claude_code' | 'codex' | null>
   }
 >()('@althar/runtime/Elsewhere') {
   static readonly layer: Layer.Layer<Elsewhere, never, Store | Projects | Plans | Changes> = Layer.effect(
@@ -891,10 +897,31 @@ export class Elsewhere extends Context.Service<
           )
         })
 
+      /** The conversations brought into the thread's task, by their agent and id. */
+      const openFor = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const brought = yield* sql<{ key: string }>`
+            SELECT i.key FROM brought_in i JOIN threads t ON t.task_id = i.task_id
+            WHERE t.id = ${threadId} AND i.kind = 'conversation' AND i.tool IN ('claude_code', 'codex')`
+          // Keyed `<agent>:<id>` (look.ts).
+          const conversations = brought.flatMap(({ key }) => {
+            const at = key.indexOf(':')
+            const agent = key.slice(0, at)
+            return agent === 'claude_code' || agent === 'codex' ? [{ agent, id: key.slice(at + 1) } as const] : []
+          })
+          return yield* openElsewhere(conversations, places)
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.as(Effect.logWarning('Could not tell whether another tool has a conversation open', Cause.pretty(cause)), null),
+          ),
+        )
+
       return Elsewhere.of({
         look: (projectId) => run(look(projectId)),
         lookIn: (path) => run(lookIn(path)),
         bringIn: (input) => run(bringIn(input)),
+        openElsewhere: (threadId) => run(openFor(threadId)),
       })
     }),
   )

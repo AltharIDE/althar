@@ -139,6 +139,7 @@ export const layers = {
         'baseOnly.ts',
         'rulesChange.ts',
         'errandTask.ts',
+        'errandSettle.ts',
         'errandWatch.ts',
       ],
     },

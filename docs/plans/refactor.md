@@ -66,8 +66,9 @@ lowers the baseline; and amends the decision it changes, with a dated entry.
 Guard the wire and remove the busywork that made every later step expensive.
 
 - **0.1 Every gate before merge (S).** Each package a ready pull request reaches
-  that gates on coverage measures it there and again in the queue. The guards
-  that read one file at a time are lint rules (`althar/test-time`,
+  that gates on coverage measures it there; since #1243 the queue runs only what
+  its entries could break together, and post-merge measures every package. The
+  guards that read one file at a time are lint rules (`althar/test-time`,
   `althar/spec-time`, `althar/system-keys`, `althar/no-future-dates`), and test
   durations come from the newest post-merge run instead of a hand-kept file.
 - **0.2 Quarantine with an owner and an end (S).** A quarantine lasts seven

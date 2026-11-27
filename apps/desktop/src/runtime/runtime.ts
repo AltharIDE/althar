@@ -22,6 +22,7 @@ import {
   services,
   settledAmong,
   settling,
+  signInsOf,
   startup,
   UsageData,
   lagLogged,
@@ -108,24 +109,11 @@ mkdirSync(profile, { recursive: true })
 const agents = agentsLog(process.env.ALTHAR_LOGS)
 
 /**
- * The public ids of Althar's own apps registered with code hosts and
- * trackers, for their browser sign-in, as the build or the environment gives
- * them. A service without one takes a pasted token.
+ * The public ids of Althar's own apps on code hosts and trackers, for their browser sign-in, and its GitHub App's slug, for
+ * its install page: as the build baked them, unless the environment says otherwise. A service without one offers gh's or
+ * glab's sign-in and a pasted token.
  */
-const clientIds = Object.fromEntries(
-  (
-    [
-      ['github', process.env.ALTHAR_GITHUB_CLIENT_ID],
-      ['gitlab', process.env.ALTHAR_GITLAB_CLIENT_ID],
-      ['linear', process.env.ALTHAR_LINEAR_CLIENT_ID],
-    ] as const
-  ).flatMap(([product, id]) => (id === undefined || id === '' ? [] : [[product, id]])),
-)
-const copilotClientId = process.env.ALTHAR_COPILOT_CLIENT_ID || process.env.ALTHAR_GITHUB_CLIENT_ID || __ALTHAR_COPILOT_CLIENT_ID__
-
-/** Althar's GitHub App, by its slug, for where it is installed on an owner; with its id, GitHub's browser sign-in asks to be let in. */
-const githubApp =
-  process.env.ALTHAR_GITHUB_APP === undefined || process.env.ALTHAR_GITHUB_APP === '' ? undefined : process.env.ALTHAR_GITHUB_APP
+const signIns = signInsOf(__ALTHAR_SIGN_IN__, process.env)
 
 /* Secrets the main process is sealing or opening (sealing.ts). */
 const { ask: askMain, answer: answerSealed } = sealingWith((message) => parent.postMessage(message))
@@ -348,9 +336,7 @@ const program = Effect.gen(function* () {
           ? {
               ...(device === undefined ? options : { ...options, onDevice: device.onDevice, probeRoot: join(profile, 'probe') }),
               ...workerOptions,
-              clientIds,
-              ...(copilotClientId ? { copilotClientId } : {}),
-              ...(githubApp === undefined ? {} : { githubApp }),
+              ...signIns,
               secrets,
               fetch: appFetch,
               // What is known of models, for the coordinator to weigh (ADR-015): fetched as the runtime starts, kept in the profile.

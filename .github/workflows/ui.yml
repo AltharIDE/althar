@@ -1,7 +1,8 @@
 name: ui
 
-# On a pull request, and for its entry in the merge queue: the checks and the unit tests its change reaches
-# (packages/testing/src/select.ts), and the Storybook build. The coverage gate runs after merge, in post-merge.yml.
+# On a pull request: the checks and the unit tests its change reaches (packages/testing/src/select.ts), and the
+# Storybook build. In the merge queue, only the checks and tests that both an entry and what landed beneath it reach
+# (queue.yml), and the Storybook build. The coverage gate runs after merge, in post-merge.yml.
 on:
   # From queue.yml, for a pull request in the merge queue.
   workflow_call:
@@ -63,8 +64,17 @@ jobs:
           else
             echo '*' > "$RUNNER_TEMP/changed"
           fi
+      # In the merge queue, each entry's own change and what landed beneath it (queue.yml), when it could say.
+      - if: github.event_name == 'merge_group'
+        continue-on-error: true
+        uses: actions/download-artifact@v6
+        with:
+          name: queue-entries
+          path: ${{ runner.temp }}/queue
       - id: plan
         working-directory: .
+        env:
+          QUEUE_ENTRIES: ${{ github.event_name == 'merge_group' && format('{0}/queue/entries.json', runner.temp) || '' }}
         run: bun packages/testing/src/select.ts plan ui "$RUNNER_TEMP/changed"
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - if: steps.plan.outputs.any == 'true'

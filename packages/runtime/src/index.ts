@@ -2,10 +2,12 @@ export {
   Agents,
   type AgentEntry,
   type AgentStderr,
+  type BakedSignIns,
   type BusyOptions,
   RuntimeConfig,
   type RuntimeOptions,
   type SetupOptions,
+  signInsOf,
   type StallOptions,
   WebCrypto,
 } from './Config'

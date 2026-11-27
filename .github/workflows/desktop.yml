@@ -1,9 +1,11 @@
 name: desktop
 
-# On a pull request, and for its entry in the merge queue: the desktop app's checks and the unit tests its change
-# reaches, and the app's whole end-to-end run (e2e.yml) when it reaches the app (packages/testing/src/select.ts). On a
-# pull request, Windows' smoke test too, when what reaches the app is code that behaves differently there. Windows'
-# affected unit tests run separately in windows.yml; full suites, coverage and packages run after merge in post-merge.yml.
+# On a pull request: the desktop app's checks and the unit tests its change reaches, the app's whole end-to-end run
+# (e2e.yml) when it reaches the app (packages/testing/src/select.ts), and Windows' smoke test when what reaches the app is
+# code that behaves differently there. In the merge queue, only the checks and unit tests that both an entry and what
+# landed beneath it reach (queue.yml): the end-to-end runs and the coverage gate are the pull request's, and run again
+# after merge. Windows' affected unit tests run separately in windows.yml; full suites, coverage and packages run after
+# merge in post-merge.yml.
 on:
   # From queue.yml, for a pull request in the merge queue.
   workflow_call:
@@ -80,10 +82,18 @@ jobs:
           else
             echo '*' > "$RUNNER_TEMP/changed"
           fi
+      # In the merge queue, each entry's own change and what landed beneath it (queue.yml), when it could say.
+      - if: github.event_name == 'merge_group'
+        continue-on-error: true
+        uses: actions/download-artifact@v6
+        with:
+          name: queue-entries
+          path: ${{ runner.temp }}/queue
       # A draft runs its checks and unit tests, and its end-to-end runs once it is ready for review.
       - id: plan
         env:
           DRAFT: ${{ github.event.pull_request.draft }}
+          QUEUE_ENTRIES: ${{ github.event_name == 'merge_group' && format('{0}/queue/entries.json', runner.temp) || '' }}
         run: bun packages/testing/src/select.ts plan desktop "$RUNNER_TEMP/changed"
       - id: durations
         if: steps.plan.outputs.e2e == 'true'
@@ -291,10 +301,11 @@ jobs:
       - if: always() && runner.os == 'macOS'
         run: security delete-keychain "$RUNNER_TEMP/althar-native.keychain-db"
 
+  # On the pull request; after merge, post-merge.yml measures the app's whole coverage.
   home-coverage:
     name: home connection coverage
     needs: plan
-    if: needs.plan.outputs.native-homes == 'true'
+    if: github.event_name == 'pull_request' && needs.plan.outputs.native-homes == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
@@ -348,10 +359,10 @@ jobs:
         uses: ./.github/actions/flaky
 
   # The app's whole end-to-end run, in four parts, when the change reaches the app: on the pull request, so a change
-  # that breaks a spec it didn't touch fails where it was made, and again in the merge queue, on main as it will be.
+  # that breaks a spec it didn't touch fails where it was made, and again after merge, on main (post-merge.yml).
   e2e:
     needs: plan
-    if: needs.plan.outputs.e2e == 'true'
+    if: github.event_name == 'pull_request' && needs.plan.outputs.e2e == 'true'
     uses: ./.github/workflows/e2e.yml
     with:
       durations: ${{ needs.plan.outputs.durations }}

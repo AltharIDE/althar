@@ -309,7 +309,7 @@ fixed where it is.
 A running list: each goes when it is fixed, and a new one is added as it is found.
 
 - **A lead's permission asked while a round's review runs shows on the reviewer's card in the graph, and on none once the round ends** (`callsOf` in `graph.ts`). Found with #445; where it belongs is a product call.
-- **The Linux packages only after merge.** The merge queue doesn't build them, so a pull request can pass the queue and still turn main red there; a release still waits for them. (Coverage was the other half: since 26 November each package a ready pull request reaches gates its coverage there and in the queue, [Refactor](refactor.md) 0.1.)
+- **The Linux packages only after merge.** The merge queue doesn't build them, so a pull request can pass the queue and still turn main red there; a release still waits for them. (Coverage was the other half: since 26 November each package a ready pull request reaches gates its coverage there, [Refactor](refactor.md) 0.1, and `post-merge` again; the queue doesn't since #1243.)
 - **Phase 4's rest** (Where it stands, above): git, processes and ports as services with fakes, and the 45 tests on short real-time timer options. Since 26 November it is [Refactor](refactor.md)'s 2.1, background work with a handle, which tests can wait on to settle.
 
 ## Phases

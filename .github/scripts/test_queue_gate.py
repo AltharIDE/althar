@@ -2,7 +2,7 @@ import importlib.util
 import unittest
 from unittest.mock import Mock, patch
 
-spec = importlib.util.spec_from_file_location('gate', '.github/scripts/queue-stress.py')
+spec = importlib.util.spec_from_file_location('gate', '.github/scripts/queue-gate.py')
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
@@ -16,7 +16,7 @@ def job(name='linux', status='completed', conclusion='success'):
 
 
 class Tests(unittest.TestCase):
-    def gate(self, runs=None, jobs=None, applies=('stress',)):
+    def gate(self, runs=None, jobs=None, applies=('stress',), timeline=None):
         with patch.dict('os.environ', GH_REPO='owner/repo'):
             gate = module.Gate()
         runs = runs or []
@@ -26,6 +26,7 @@ class Tests(unittest.TestCase):
             if key == 'jobs': return iter(jobs[int(path.split('/')[2])])
             if path.endswith('/files'):
                 return iter([{'filename': 'packages/runtime/tests/sessions.test.ts'}])
+            if path.endswith('/timeline'): return iter(timeline or [])
             raise AssertionError(path)
         gate.pages = pages
         gate.api = Mock(return_value={'head': {'sha': 'abc'}})
@@ -60,6 +61,51 @@ class Tests(unittest.TestCase):
                          {2: [], 1: [job(conclusion='skipped')]})
         gate.deadline = module.time.monotonic() + 1
         with self.assertRaisesRegex(RuntimeError, 'deadline'): gate.check('773')
+
+    def test_a_pull_requests_own_failed_checks_keep_it_out(self):
+        for name in ('desktop', 'harness', 'ui', 'windows', 'host', 'worker', 'site', 'brand', 'report'):
+            with self.subTest(name=name):
+                gate = self.gate([run(1, conclusion='failure')], {1: [job(conclusion='failure')]}, (name,))
+                gate.smoke_applies.return_value = False
+                with self.assertRaisesRegex(RuntimeError, f'{name} failed'): gate.check('775')
+
+    def test_a_pull_requests_own_running_checks_are_waited_for(self):
+        gate = self.gate([run(1, 'in_progress', None)], {1: [job(status='in_progress', conclusion=None)]}, ('harness',))
+        gate.wait = Mock(side_effect=RuntimeError('still waiting'))
+        with self.assertRaisesRegex(RuntimeError, 'still waiting'): gate.check('775')
+        gate.wait.assert_called_once_with('775', 'harness')
+
+    def test_desktop_must_pass_even_without_a_smoke_test(self):
+        gate = self.gate([run(1, conclusion='failure')], {1: [job('verify', conclusion='failure'), job('windows-e2e', conclusion='skipped')]},
+                         ('desktop',))
+        gate.smoke_applies.return_value = False
+        with self.assertRaisesRegex(RuntimeError, 'desktop failed'): gate.check('775')
+
+    def test_a_draft_run_on_the_same_head_is_not_a_ready_ones(self):
+        draft = dict(run(1), created_at='2026-11-22T02:00:00Z')
+        timeline = [{'event': 'ready_for_review', 'created_at': '2026-11-22T02:21:39Z'}]
+        gate = self.gate([draft], {1: [job()]}, ('harness',), timeline)
+        gate.reruns_when_ready = Mock(return_value=True)
+        gate.wait = Mock(side_effect=RuntimeError('still waiting'))
+        with self.assertRaisesRegex(RuntimeError, 'still waiting'): gate.check('776')
+        # The ready run, created with the event, is.
+        gate = self.gate([run(2), draft], {2: [job()], 1: [job()]}, ('harness',), timeline)
+        gate.reruns_when_ready = Mock(return_value=True)
+        gate.check('776')
+        # A workflow that doesn't run again when ready keeps its draft run.
+        gate = self.gate([draft], {1: [job()]}, ('windows',), timeline)
+        gate.reruns_when_ready = Mock(return_value=False)
+        gate.check('776')
+
+    def test_reads_which_workflows_run_again_when_ready(self):
+        gate = self.gate()
+        self.assertTrue(module.Gate.reruns_when_ready(gate, 'harness'))
+        self.assertFalse(module.Gate.reruns_when_ready(gate, 'windows'))
+
+    def test_every_applicable_workflow_passed(self):
+        gate = self.gate([run(1)], {1: [job()]}, module.WORKFLOWS)
+        gate.smoke_applies.return_value = False
+        gate.check('775')
 
     def test_only_paths_explicitly_excluded_can_have_no_run(self):
         self.gate(applies=()).check('773')
@@ -123,6 +169,8 @@ class Tests(unittest.TestCase):
 
     def test_actual_workflow_filters(self):
         gate = self.gate()
+        self.assertFalse(module.Gate.applies(gate, 'windows', ['apps/site/src/index.astro']))
+        self.assertTrue(module.Gate.applies(gate, 'site', ['apps/site/src/index.astro']))
         self.assertFalse(module.Gate.applies(gate, 'stress', ['README.md']))
         # Source stresses the tests that import it (packages/testing/src/stress.ts).
         self.assertTrue(module.Gate.applies(gate, 'stress', ['packages/runtime/src/Sessions.ts']))

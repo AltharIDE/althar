@@ -191,6 +191,12 @@ export interface RuntimeOptions {
   readonly keptFor?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
+  /**
+   * Whether a browser sign-in can come back to this computer's loopback address, as Linear's does: not on a home, where
+   * the person's browser is on another computer. Where it can't, only sign-ins by a code typed in any browser are offered,
+   * GitHub's and GitLab's.
+   */
+  readonly loopbackSignIn?: boolean
   /** Althar's public OAuth app ID for native Copilot; falls back to its own GitHub app ID. */
   readonly copilotClientId?: string
   readonly copilotEnterpriseClientIds?: Readonly<Record<string, string>>
@@ -567,6 +573,48 @@ export const cliToken = (
       },
     )
   })
+
+/** The public ids of Althar's own apps, as a build bakes them in; an empty one is none. */
+export interface BakedSignIns {
+  readonly github: string
+  /** Althar's GitHub App, by its slug, for its install page. */
+  readonly githubApp: string
+  readonly gitlab: string
+  readonly linear: string
+  readonly copilot: string
+}
+
+/**
+ * The runtime's sign-in options from what the build baked, each under a value the environment gives at run time:
+ * ALTHAR_GITHUB_CLIENT_ID, ALTHAR_GITHUB_APP, ALTHAR_GITLAB_CLIENT_ID, ALTHAR_LINEAR_CLIENT_ID and
+ * ALTHAR_COPILOT_CLIENT_ID. Copilot keeps its own app: the GitHub App's tokens aren't the OAuth app's it takes.
+ */
+export const signInsOf = (
+  baked: BakedSignIns,
+  env: Readonly<Record<string, string | undefined>>,
+): Pick<RuntimeOptions, 'clientIds' | 'githubApp' | 'copilotClientId'> => {
+  const given = (name: string, built: string) => env[name] || built
+  const clientIds: Partial<Record<Product, string>> = Object.fromEntries(
+    (
+      [
+        ['github', given('ALTHAR_GITHUB_CLIENT_ID', baked.github)],
+        ['gitlab', given('ALTHAR_GITLAB_CLIENT_ID', baked.gitlab)],
+        ['linear', given('ALTHAR_LINEAR_CLIENT_ID', baked.linear)],
+      ] as const
+    ).filter(([, id]) => id !== ''),
+  )
+  const githubApp = given('ALTHAR_GITHUB_APP', baked.githubApp)
+  const copilotClientId = given('ALTHAR_COPILOT_CLIENT_ID', baked.copilot)
+  return { clientIds, ...(githubApp === '' ? {} : { githubApp }), ...(copilotClientId === '' ? {} : { copilotClientId }) }
+}
+
+/** The ids of sign-ins by a code typed in any browser alone: those whose browser comes back to the loopback address left out. */
+export const deviceSignInsOnly = (clientIds: Partial<Record<Product, string>>): Partial<Record<Product, string>> => {
+  const products = available()
+  return Object.fromEntries(
+    Object.entries(clientIds).filter(([product]) => products.find((info) => info.product === product)?.browser?.kind === 'device'),
+  )
+}
 
 /**
  * The code hosts and trackers the runtime connects to (docs/architecture/06):

@@ -18477,6 +18477,16 @@
         {
           "additionalProperties": true,
           "properties": {
+            "install": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "message": {
               "type": "string"
             },

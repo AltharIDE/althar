@@ -467,6 +467,35 @@ export const calledOffNote = (steps: ReadonlyArray<SaidStep>, reason: string | n
   return { ...line, links: linksIn(line.title, steps) }
 }
 
+/** What has happened to one of a held errand's steps, as the host shows it now: "v0.9.0 is tagged already", "#957 is open". */
+export interface Happened {
+  readonly said: string
+  readonly links: ReadonlyArray<NoteLink>
+}
+
+/**
+ * A held errand that closed by itself, since what it waited on has happened: done, where every step left was done already;
+ * else closed, where the next step's wait came while Althar couldn't watch for it, so that step and those after it are the
+ * person's to ask for again.
+ */
+export const settledNote = (
+  done: ReadonlyArray<Happened>,
+  left?: { readonly steps: ReadonlyArray<SaidStep>; readonly happened: Happened },
+): StepNote => {
+  // A merge said done already isn't said again as what the next step waited for.
+  const again = left !== undefined && done.some((one) => one.said.startsWith(left.happened.said))
+  const said = [...done, ...(left === undefined || again ? [] : [left.happened])]
+  const what = said.map((one) => one.said).join('; ')
+  const title = fit(
+    left === undefined
+      ? `Errand done: ${what}`
+      : `Errand closed: ${what}, which Althar couldn’t watch for. Ask again to ${inOrder(left.steps, false)}.`,
+  )
+  const links: Array<NoteLink> = []
+  for (const link of said.flatMap((one) => one.links)) if (!links.some((own) => own.label === link.label)) links.push(link)
+  return { title, links: links.filter((link) => title.includes(link.label)) }
+}
+
 /** An errand the person set going again: what it goes on with. */
 export const resumedNote = (steps: ReadonlyArray<SaidStep>): StepNote => {
   const line = compose('Errand resumed', inOrder(steps, true), '')

@@ -1122,6 +1122,20 @@ whether it gives a token without one:
 A pasted token is the fallback everywhere, including for an organisation
 that won't install the GitHub App.
 
+The apps' public ids are build configuration: the desktop builds and the
+home's take them from the repository's variables, and a runtime's own
+environment overrides each. A home offers only the device flows, GitHub's
+and GitLab's: the code shows in the window attached to it and the person
+approves in any browser. Linear's PKCE comes back to a loopback address,
+which on a home is no browser's, so Linear takes a pasted token there.
+
+Where the GitHub App reaches a repository is asked of GitHub's
+installations for the person, never read from the repository's own
+answer: any token reads a public repository. A browser sign-in for an
+account whose connection works by a token or gh replaces that sign-in only
+where it reaches the projects' repositories the old one reaches; otherwise
+the old one stays, and the sign-in ends with the App's install page.
+
 Connecting is a walk, one step at a time (ADR-026). It offers only the ways
 that work on this device: the service's own browser sign-in where Althar's
 app is set up for it; gh's or glab's sign-in where the tool is signed in to

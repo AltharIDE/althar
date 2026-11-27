@@ -18,7 +18,18 @@ import type { ApiKit } from './kit'
  * A thread's items and what they hold: pages of items, one or several items, a command's output, a document.
  * Saying something to a thread, taking it back, its goal; clearing its view and showing what came earlier.
  */
-export const threadsHandlers = ({ sender, api, envelope, keptFor, imagesSaid, filesFor, filesSaid, commentsFor, commentsSaid }: ApiKit) =>
+export const threadsHandlers = ({
+  sender,
+  api,
+  envelope,
+  keptFor,
+  imagesSaid,
+  filesFor,
+  filesSaid,
+  commentsFor,
+  commentsSaid,
+  closedElsewhere,
+}: ApiKit) =>
   Effect.gen(function* () {
     const artifacts = yield* Artifacts
     const sessions = yield* Sessions
@@ -132,6 +143,8 @@ export const threadsHandlers = ({ sender, api, envelope, keptFor, imagesSaid, fi
                   return
                 }
               }
+              // A conversation brought in from another tool that it still has open waits, before anything of it is kept.
+              yield* closedElsewhere(threadId)
               // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
               const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               const copied = yield* filesFor(threadId, files)

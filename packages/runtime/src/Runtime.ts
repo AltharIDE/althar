@@ -13,7 +13,7 @@ import { AccountSignIns } from './AccountSignIns'
 import { Copilot } from './Copilot'
 import { Busy } from './Busy'
 import { Changes } from './Changes'
-import { type AgentStderr, Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
+import { type AgentStderr, Agents, Connectors, deviceSignInsOnly, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
 import { Connections } from './Connections'
 import { Connectivity } from './Connectivity'
 import { Installs, type InstallsOptions } from './Installs'
@@ -125,6 +125,8 @@ const registry = (stderr?: AgentStderr): Layer.Layer<Agents, never, Installs | C
  */
 export const layer = (options: RuntimeLayerOptions) => {
   const copilotClientId = options.copilotClientId ?? options.clientIds?.github
+  const clientIds =
+    options.loopbackSignIn === false && options.clientIds !== undefined ? deviceSignInsOnly(options.clientIds) : options.clientIds
   const store = Layer.mergeAll(Ledger.layer, Commands.layer).pipe(
     Layer.provideMerge(
       startupLayer(
@@ -172,7 +174,7 @@ export const layer = (options: RuntimeLayerOptions) => {
       Installs.layer({ root: options.agentsRoot, fetch: options.fetch, onDevice: options.onDevice, search: options.agentSearch }),
     ),
     Layer.provideMerge(options.secrets ?? Secrets.none('Althar keeps sign-ins in the app; it can open them, and this can’t.')),
-    Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds, options.fetch, options.githubApp)),
+    Layer.provideMerge(options.connectors ?? Connectors.live(clientIds, options.fetch, options.githubApp)),
   )
   // Each project's rules; each agent's accounts, whether each is signed in, and which are out of usage until their reset (ADR-012).
   // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.

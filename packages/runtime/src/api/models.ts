@@ -22,7 +22,18 @@ import type { ApiKit } from './kit'
  * Which agent and model work, and how hard: a thread's agent, model and effort, defaults, blocked models, Auto's model moves, model rooms.
  * Agents themselves: installing one, the ACP catalog and connections.
  */
-export const modelsHandlers = ({ sender, api, envelope, keptFor, imagesSaid, filesFor, filesSaid, commentsFor, commentsSaid }: ApiKit) =>
+export const modelsHandlers = ({
+  sender,
+  api,
+  envelope,
+  keptFor,
+  imagesSaid,
+  filesFor,
+  filesSaid,
+  commentsFor,
+  commentsSaid,
+  closedElsewhere,
+}: ApiKit) =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
     const signIns = yield* SignIns
@@ -40,6 +51,8 @@ export const modelsHandlers = ({ sender, api, envelope, keptFor, imagesSaid, fil
       SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, files, dictated, comments }) =>
         api(
           Effect.gen(function* () {
+            // Handed over with words, a conversation brought in from another tool that it still has open waits, as a send does.
+            if (body !== undefined) yield* closedElsewhere(threadId)
             // Its images and files are read and kept first, outside any transaction; one that can't be sent refuses the switch.
             const kept = body === undefined || images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
             const copied = body === undefined ? [] : yield* filesFor(threadId, files)

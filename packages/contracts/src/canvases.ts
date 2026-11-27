@@ -202,7 +202,7 @@ export const readBoards = (words: string, has: (path: string) => boolean): ReadB
       if (file === '' || !BOARD_FILE.test(file))
         return {
           ok: false,
-          why: `${title} on ${name} needs a file: a page (.html) or a picture (.svg, .png, .jpg, .gif, .webp) of the canvas.`,
+          why: `${title} on ${name} needs a file: a page (.html) or a picture (.svg, .png, .jpg, .gif, .webp, .avif) of the canvas.`,
         }
       if (!has(file)) return { ok: false, why: `${title} on ${name} is drawn from ${file}, which isn’t in the canvas.` }
       const size = (value: unknown) =>

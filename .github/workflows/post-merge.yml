@@ -2,8 +2,8 @@ name: post-merge
 
 # Everything desktop, harness and ui run, after merge, in full: their checks again, every unit test with the coverage
 # gates, the Storybook build, the desktop app's end-to-end run and its packages, and on Windows every unit test and
-# the smoke test. A pull request and the merge queue run what a change reaches on Linux and, for OS-sensitive work,
-# Windows (windows.yml); this is where
+# the smoke test. A pull request runs what a change reaches on Linux and, for OS-sensitive work, Windows (windows.yml),
+# and the merge queue what its entries could break together on Linux (queue.yml); this is where
 # the full Windows unit suites run, within the hour of a merge. site and brand are quick, and still run in full on their own.
 # Main may go red for a while; a release can't: release.yml cuts only a commit this workflow passed on, Windows too.
 #
@@ -256,8 +256,8 @@ jobs:
         uses: ./.github/actions/flaky
 
   # The desktop app's end-to-end run, in parts of its own (e2e.yml): a check or a coverage gate that fails doesn't keep it
-  # from running, so what it finds shows on the merge that broke it. The merge queue ran it already; this is the run a
-  # release is cut from.
+  # from running, so what it finds shows on the merge that broke it. The pull request ran it, and the merge queue doesn't:
+  # this is where a break two pull requests make together shows, and the run a release is cut from.
   desktop-e2e:
     needs: plan
     uses: ./.github/workflows/e2e.yml

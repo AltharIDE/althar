@@ -31,6 +31,8 @@ import { type InputImage, keepSent } from '../sentImages'
 import { SignIns } from '../SignIns'
 import { endingOf } from '../signInEnding'
 import { expected, words } from '../words'
+import { Elsewhere } from '../Elsewhere'
+import { openWords } from '../elsewhere/open'
 
 /** The issues a task is made from, each once, in the order given: issue first, then issues. */
 export const issuesOf = (issue: string | undefined, issues: ReadonlyArray<string> | undefined): ReadonlyArray<string> => {
@@ -75,6 +77,7 @@ export const apiKit = Effect.gen(function* () {
   const folders = yield* Folders
   const signIns = yield* SignIns
   const limits = yield* Limits
+  const elsewhere = yield* Elsewhere
   const instance = yield* Instance
   const identity = (yield* CurrentClient) ?? {
     homeId: instance.homeId,
@@ -182,6 +185,14 @@ export const apiKit = Effect.gen(function* () {
   const timedCall = lagLogged()
     ? <A, E, R>(effect: Effect.Effect<A, E, R>) => slowCall(callName, effect)
     : <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
+  /**
+   * Refused, in the composer's words, while another process has a conversation brought into the thread open
+   * (elsewhere/open.ts): the window puts the message back in the composer, and the person sends it again once it's closed.
+   */
+  const closedElsewhere = (threadId: string) =>
+    Effect.flatMap(elsewhere.openElsewhere(threadId), (open) =>
+      open === null ? Effect.void : Effect.fail(new ApiError({ reason: 'OpenElsewhere', why: open, message: openWords(open) })),
+    )
   const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, Exclude<R, QueryServices>> =>
     Effect.provideContext(
       Effect.catchCause(timedCall(effect), (cause) => {
@@ -280,6 +291,7 @@ export const apiKit = Effect.gen(function* () {
     filesSaid,
     commentsFor,
     commentsSaid,
+    closedElsewhere,
     skillAct,
     issueFor,
     accountStatus,

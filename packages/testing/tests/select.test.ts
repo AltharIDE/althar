@@ -1,9 +1,11 @@
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { isBuiltin } from 'node:module'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vite-plus/test'
 
-import { covered, gated, graph, names, nearest, plan, type Plan, type Repository, repository } from '../src/select'
+import { covered, gated, graph, names, nearest, plan, type Plan, queueEntries, queuePlan, type Repository, repository } from '../src/select'
 
 const json = (value: unknown) => JSON.stringify(value)
 
@@ -98,6 +100,80 @@ const runs = (jobs: Plan['jobs']) =>
   )
 
 const RUNTIME_PARTS = ['packages/runtime 1/4', 'packages/runtime 2/4', 'packages/runtime 3/4', 'packages/runtime 4/4']
+
+describe('the merge queue’s selection', () => {
+  it('runs only the tests that both an entry and what landed beneath it reach', () => {
+    // A runtime change beneath a UI change: the app's home test reaches both, the runtime's own tests only one.
+    const entries = [
+      { pr: 2, changes: ['packages/ui/src/chrome/TaskHeader/TaskHeader.tsx'], since: ['apps/desktop/src/renderer/features/home.tsx'] },
+    ]
+    expect(runs(queuePlan(entries, REPO, 'desktop').jobs)).toEqual({ 'apps/desktop': ['apps/desktop checked: tests/home.test.tsx'] })
+    // The UI kit builds on nothing the app changed: its tests and checks ran on its own pull request.
+    expect(queuePlan(entries, REPO, 'ui').jobs).toEqual([])
+    expect(queuePlan(entries, REPO, 'harness').jobs).toEqual([])
+  })
+
+  it('runs only the checks for an entry whose tests nothing that landed beneath it reaches', () => {
+    const queued = queuePlan(
+      [{ pr: 3, changes: ['packages/runtime/src/words.ts'], since: ['packages/domain/src/ids.ts', 'README.md'] }],
+      REPO,
+      'harness',
+    )
+    // The runtime builds on the domain, so its checks run; its words tests don't import the domain.
+    expect(runs(queued.jobs)).toEqual({ 'packages/runtime': ['packages/runtime checked: '] })
+    expect(queuePlan([{ pr: 4, changes: ['packages/runtime/src/git.ts'], since: [] }], REPO, 'harness')).toMatchObject({
+      jobs: [],
+      why: ['#4: nothing landed beneath it since it branched.'],
+    })
+  })
+
+  it('runs no end-to-end run, which the pull request and post-merge run', () => {
+    const queued = queuePlan(
+      [{ pr: 5, changes: ['apps/desktop/src/main/keyring.ts'], since: ['apps/desktop/src/main/main.ts'] }],
+      REPO,
+      'desktop',
+    )
+    expect(queued).toMatchObject({ e2e: false, windowsE2e: false })
+  })
+
+  it('runs what an entry reaches when what landed beneath it may change any test, and the other way round', () => {
+    const changes = ['packages/runtime/src/words.ts']
+    const words = { 'packages/runtime': ['packages/runtime checked: tests/words0.test.ts tests/words1.test.ts tests/words2.test.ts'] }
+    expect(runs(queuePlan([{ pr: 6, changes, since: ['bun.lock'] }], REPO, 'harness').jobs)).toEqual(words)
+    expect(runs(queuePlan([{ pr: 7, changes: ['bun.lock'], since: changes }], REPO, 'harness').jobs)).toEqual(words)
+  })
+
+  it('reads the entries queue-entries.py wrote, and none from a file that isn’t them', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'althar-entries-'))
+    const write = (name: string, text: string) => {
+      writeFileSync(join(dir, name), text)
+      return join(dir, name)
+    }
+    const entries = [{ pr: 1, changes: ['a.ts'], since: [] }]
+    expect(queueEntries(write('good.json', JSON.stringify(entries)))).toEqual(entries)
+    // Each falls back to everything the group changes.
+    expect(queueEntries(join(dir, 'missing.json'))).toBeUndefined()
+    expect(queueEntries(write('empty.json', '[]'))).toBeUndefined()
+    expect(queueEntries(write('broken.json', '[{'))).toBeUndefined()
+    expect(queueEntries(write('shape.json', JSON.stringify([{ pr: '1', changes: [], since: [] }])))).toBeUndefined()
+    expect(queueEntries(write('null.json', 'null'))).toBeUndefined()
+  })
+
+  it('takes every entry of the group together', () => {
+    const queued = queuePlan(
+      [
+        { pr: 8, changes: ['packages/runtime/src/words.ts'], since: ['packages/runtime/tests/words0.test.ts'] },
+        { pr: 9, changes: ['packages/runtime/src/words.ts'], since: ['packages/runtime/src/words.ts'] },
+      ],
+      REPO,
+      'harness',
+    )
+    expect(runs(queued.jobs)).toEqual({
+      'packages/runtime': ['packages/runtime checked: tests/words0.test.ts tests/words1.test.ts tests/words2.test.ts'],
+    })
+    expect(queued.why).toHaveLength(2)
+  })
+})
 
 describe('the selection', () => {
   it('checks and tests Node transports and their runtime/desktop consumers on Linux and Windows', () => {
@@ -297,7 +373,7 @@ describe('the selection', () => {
     ])
   })
 
-  it('runs no end-to-end run on a draft, and in the merge queue all that the change reaches', () => {
+  it('runs no end-to-end run on a draft, and all that the change reaches once it is ready', () => {
     const changed = ['packages/runtime/src/git.ts']
     const draft = plan(changed, REPO, 'desktop', { draft: true })
     expect(draft).toMatchObject({ e2e: false, windowsE2e: false, why: ['A draft: the end-to-end runs wait until it is ready for review.'] })
@@ -382,6 +458,18 @@ describe('this repository', () => {
     // What the app's support reads by its path, the app's own files, may be what a spec imports.
     expect(guard(['apps/desktop/src/renderer/features/settings/sections.ts'])?.tests).toEqual(['tests/e2eImports.test.ts'])
     expect(guard(['README.md'])).toBeUndefined()
+  })
+
+  it('runs that guard in the merge queue when both an entry and what landed beneath it reach a spec', () => {
+    const guard = (changes: ReadonlyArray<string>, since: ReadonlyArray<string>) =>
+      queuePlan([{ pr: 1, changes, since }], repo, 'desktop')
+        .jobs.flatMap((job) => job.parts)
+        .find((part) => part.dir === 'packages/testing')
+    expect(guard(['apps/desktop/e2e/smoke.spec.ts'], ['packages/ui/src/foundations/device.ts'])?.tests).toEqual([
+      'tests/e2eImports.test.ts',
+    ])
+    // A spec that one of them reaches ran with the guard on its own pull request.
+    expect(guard(['apps/desktop/e2e/smoke.spec.ts'], ['README.md'])).toBeUndefined()
   })
   /**
    * Illustrative code isn't part of the import graph: samples a story shows, a file a spec
