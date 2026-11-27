@@ -1166,23 +1166,20 @@ function Undo() {
   )
 }
 
-/* ---- 0.10.0: your own host, your own workers ---- */
+/* ---- 0.10.0: your own workers ---- */
 
 /*
- * The beats: Althar on your computer, its window open on a home on your own
- * server, a task at work there, its lead running on a worker of yours; the
- * window closes, and the server carries on: the worker runs the project's
- * setup and its tests for the task, and sends its commits back to the home,
- * and the task finishes. The window opens again on the finished task. Then
- * it holds, and clears.
+ * The beats: Althar on your Mac, a task open in it, its lead running on a
+ * Linux worker of yours; the worker runs the project's setup and its tests
+ * for the task, and sends its commits back to the Mac, where the lead's
+ * answer comes in. Then it holds, and clears.
  */
 const HOSTED: Timeline = { beats: [0, 1800, 3000, 3800, 4600, 5600, 7000, 12600], loop: 13400, rest: 6 }
 
-/** The server's tasks, and the beat each finishes on, if it does. The first one's lead runs on the worker. */
+/** The tasks the worker has, and the beat each finishes on, if it does. The first one is the task open on the Mac. */
 const ON_HOME = [
-  { name: 'Partial refunds', agent: Agent.Claude, done: 5, worker: true },
-  { name: 'Webhook retries', agent: Agent.Codex, done: null, worker: false },
-  { name: 'Payout export', agent: Agent.Claude, done: null, worker: false },
+  { name: 'Partial refunds', agent: Agent.Claude, done: 5 },
+  { name: 'Webhook retries', agent: Agent.Codex, done: null },
 ] as const
 
 /** What the worker does for the task: the commands it runs typed, what comes back not, and the beat each line comes on. */
@@ -1192,7 +1189,7 @@ const ON_WORKER = [
   { at: 2, line: 'Setup done in 4.2 s', typed: false },
   { at: 3, line: 'bun test src/refunds', typed: true },
   { at: 4, line: '✓ 23 passed', typed: false },
-  { at: 5, line: '2 commits back to build-01', typed: false },
+  { at: 5, line: '2 commits back to This Mac', typed: false },
 ] as const
 
 function Home() {
@@ -1200,18 +1197,17 @@ function Home() {
   const beat = useBeat(ref, HOSTED)
   const out = beat === HOSTED.beats.length - 1
   const at = (from: number) => beat >= from && !out
-  const closed = beat >= 1 && beat <= 5
   const sent = at(5)
   const working = !out && !sent
   return (
     <Frame
-      label="Your own host and workers: Althar's window on a home on your Linux server closes, and the server carries on, its tasks at work; a task's lead runs on a worker of yours, which runs the project's setup and tests and sends its commits back to the home; the window opens again on the finished task"
+      label="Your own workers: a task open in Althar on your Mac runs its lead on runner-1, a Linux machine of yours, which runs the project's setup and tests and sends its commits back to the Mac"
       w={64}
       n={32}
     >
       <div ref={ref} className={p.hoStage}>
-        <div className={cx(p.win, p.hoWin)} data-closed={closed}>
-          <Bar end={<span className={p.hoChip}>build-01</span>}>
+        <div className={cx(p.win, p.hoWin)}>
+          <Bar end={<span className={p.hoChip}>This Mac</span>}>
             <Tab name="Tally" ink="#2f6f7a" on />
           </Bar>
           <div className={p.hoTalk}>
@@ -1241,9 +1237,9 @@ function Home() {
             </div>
           </div>
         </div>
-        <div className={p.hoLink} data-closed={closed}>
+        <div className={p.hoLink}>
           <span className={p.hoWire} />
-          <span className={p.hoVia}>{closed ? 'Window closed' : 'SSH'}</span>
+          <span className={p.hoVia}>Runs on</span>
         </div>
         <div className={p.hoBox}>
           <div className={p.hoHead}>
@@ -1251,12 +1247,12 @@ function Home() {
               <OsMark id="linux" size={15} />
             </span>
             <span className={p.who}>
-              <b>build-01</b>
-              <span>Your server · arm64</span>
+              <b>runner-1</b>
+              <span>Your Linux machine · x64</span>
             </span>
             <span className={p.hoReady}>Ready</span>
           </div>
-          <span className={p.hoLabel}>Tasks</span>
+          <span className={p.hoLabel}>Leads here</span>
           <ul className={p.hoTasks}>
             {ON_HOME.map((task) => {
               const done = task.done !== null && at(task.done)
@@ -1275,7 +1271,7 @@ function Home() {
                     ) : (
                       <>
                         <i />
-                        {task.worker ? 'On runner-1' : 'At work'}
+                        At work
                       </>
                     )}
                   </span>
@@ -1283,10 +1279,10 @@ function Home() {
               )
             })}
           </ul>
-          <span className={p.hoLabel}>Worker</span>
+          <span className={p.hoLabel}>Run</span>
           <div className={p.hoWorker}>
             <div className={p.hoRun}>
-              <code>runner-1</code>
+              <code>partial-refunds</code>
               <span key={sent ? 'sent' : working ? 'working' : 'idle'} className={p.hoState} data-done={sent}>
                 {sent ? (
                   <>
@@ -1296,7 +1292,7 @@ function Home() {
                 ) : working ? (
                   <>
                     <i />
-                    Running a lead
+                    Running
                   </>
                 ) : (
                   'Free'

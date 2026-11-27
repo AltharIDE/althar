@@ -42,8 +42,8 @@ export interface Highlight {
 export const HIGHLIGHTS: Record<string, readonly Highlight[]> = {
   '0.10.0': [
     {
-      title: 'Your own host, your own workers',
-      why: 'Run Althar on a server of yours, and your own machines as its workers. Close the laptop, and the work goes on.',
+      title: 'Your own workers',
+      why: 'Add a Linux machine of yours, and your tasks’ agents run there, with their setup, tests and dev servers. Your Mac stays free, and the commits come back to it.',
       picture: 'home',
       covers: [0],
     },
