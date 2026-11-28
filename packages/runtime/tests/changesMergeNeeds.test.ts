@@ -1,7 +1,7 @@
 import type { MergeRules } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Deferred, Effect } from 'effect'
 
 import { Changes } from '../src/Changes'
 import { Queries } from '../src/Queries'
@@ -19,7 +19,11 @@ describe('what the host says merging a pull request needs', () => {
   it.live('keeps a normal queued merge separate from an explicit bypass, checks the viewed head, and settles after bypass', () => {
     const { working, bare } = hosted()
     let allowed = false
+    // Its pull request isn't read again until its card is ready: the head the person merges is what opening it said.
+    let held = true
+    const gate = Effect.runSync(Deferred.make<void>())
     const github = makeFakeService({
+      waitsFor: (method) => (held && method === 'change' ? Deferred.await(gate) : Effect.void),
       pushUrl: () => bare,
       headOf: tipOf(bare),
       canBypassQueue: () => allowed,
@@ -33,6 +37,8 @@ describe('what the host says merging a pull request needs', () => {
       const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = ready?.taskId ?? ''
       const head = ready?.change?.head ?? ''
+      held = false
+      yield* Deferred.succeed(gate, undefined)
       const changes = yield* Changes
       yield* changes.merge(taskId, head)
       assert.deepInclude((yield* cards(projectId))[0]?.change, { queued: true, state: 'open' })
