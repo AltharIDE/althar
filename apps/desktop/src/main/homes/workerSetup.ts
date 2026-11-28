@@ -365,7 +365,7 @@ export const workerSetups = (
       throw new Stopped(error instanceof ReleaseProblem ? error.code : 'ReleaseRejected', STEP.get)
     }
     const release = found
-    // Downloaded on the machine, a release in parts comes as its base: each agent's own program follows with its sign-in.
+    // Downloaded on the machine, a release comes as its base where it has one: each agent's program follows with its sign-in.
     // Sent from here, it goes whole.
     const base = release.base
     set({ version: release.version, progress: { bytes: 0, total: base?.bytes ?? release.bytes } })

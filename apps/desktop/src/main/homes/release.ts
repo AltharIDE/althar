@@ -36,8 +36,9 @@ export interface HostRelease {
   readonly bytes: number
   readonly unpackedBytes: number
   /**
-   * A worker's release in parts: its base, without its agents' own programs, which the worker downloads each with its
-   * agent's sign-in (apps/host/src/updates/parts.ts). The whole archive above is what goes where the machine can't download.
+   * A worker's release without its agents' own programs: its base, which the machine downloads, each program then
+   * coming with its agent's sign-in (apps/host/src/workerAgents.ts). The whole archive above is what goes where the
+   * machine can't download.
    */
   readonly base?: {
     readonly url: string
@@ -132,7 +133,7 @@ export const authenticateRelease = (
     }
     const url = https(archive.url)
     return {
-      ...(product === 'worker' ? baseOf(manifest.parts, https) : {}),
+      ...(product === 'worker' ? baseOf(manifest.base, https) : {}),
       envelope: bytes,
       key,
       version: manifest.version,
@@ -148,12 +149,10 @@ export const authenticateRelease = (
   }
 }
 
-/** A worker release's base, where it comes in parts; nothing where it doesn't, or where they aren't what they should be. */
+/** A worker release's base, without its agents' own programs, where it says one; nothing where it doesn't. */
 const baseOf = (value: unknown, https: (value: unknown) => URL): Pick<HostRelease, 'base'> => {
   if (typeof value !== 'object' || value === null) return {}
-  const { base, of } = value as Record<string, unknown>
-  if (typeof base !== 'object' || base === null || !Array.isArray(of) || of.length === 0) return {}
-  const fields = base as Record<string, unknown>
+  const fields = value as Record<string, unknown>
   if (typeof fields.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(fields.sha256)) throw rejected()
   return {
     base: {

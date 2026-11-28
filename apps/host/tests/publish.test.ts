@@ -1,12 +1,11 @@
 import { generateKeyPairSync } from 'node:crypto'
-import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
 import { parseOptions } from '../src/options'
 import { packageRelease } from '../src/updates/publish'
-import { treeDigest } from '../src/updates/parts'
 import { authenticateRelease, digest } from '../src/updates/release'
 import { extractRelease, inspectArchive } from '../src/updates/archive'
 import { releaseInfo } from '../src/updates/info'
@@ -119,7 +118,7 @@ describe('signed host release production', () => {
     ).rejects.toThrow('does not say the version')
   })
 
-  it('signs a worker’s release in parts too: its base, and each agent’s program on its own, beside the whole', async () => {
+  it('signs a worker’s release without its agents’ own programs too, its base, beside the whole', async () => {
     const root = temporary()
     const pair = generateKeyPairSync('ed25519')
     const signingKey = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
@@ -170,29 +169,26 @@ describe('signed host release production', () => {
     if (result.worker === undefined) throw new Error('No worker release was signed')
     const envelope = readFileSync(result.worker.manifest)
     const { manifest } = authenticateRelease(envelope, [publicKey], releaseInfo().arch)
-    const parts = manifest.parts
-    if (parts === undefined) throw new Error('No parts were signed')
+    const without = manifest.base
+    if (without === undefined) throw new Error('No base was signed')
     const named = `althar-worker-${releaseInfo().version}-linux-${releaseInfo().arch}`
-    expect(parts.base.url).toBe(`https://releases.example/host-v0.1.0/${named}-base.tar.gz`)
-    expect(parts.of).toEqual([
-      expect.objectContaining({ name: 'codex-test', path: 'node_modules/@openai/codex-test', files: 2, unpackedBytes: 6002 }),
-    ])
-    expect(result.worker.parts?.map((file) => file.split('/').at(-1))).toEqual([`${named}-codex-test.tar.zst`, `${named}-base.tar.gz`])
-    // Each archive is what the manifest says, and together they hold what the whole one does.
-    const [part, base] = result.worker.parts ?? []
-    expect(digest(readFileSync(part ?? ''))).toBe(parts.of[0]?.sha256)
-    expect(digest(readFileSync(base ?? ''))).toBe(parts.base.sha256)
-    await inspectArchive(base ?? '', parts.base)
-    await inspectArchive(part ?? '', parts.of[0] ?? parts.base)
+    expect(without.url).toBe(`https://releases.example/host-v0.1.0/${named}-base.tar.gz`)
+    // The base alone beside the whole: no agent's program has an archive of its own, each comes on first use.
+    expect(result.worker.parts?.map((file) => file.split('/').at(-1))).toEqual([`${named}-base.tar.gz`])
+    const [base] = result.worker.parts ?? []
+    expect(digest(readFileSync(base ?? ''))).toBe(without.sha256)
+    await inspectArchive(base ?? '', without)
     await inspectArchive(result.worker.archive, manifest)
-    expect(parts.base.files + (parts.of[0]?.files ?? 0)).toBe(manifest.files)
-    expect(parts.base.unpackedBytes + (parts.of[0]?.unpackedBytes ?? 0)).toBe(manifest.unpackedBytes)
-    const unpacked = join(root, 'part')
-    await extractRelease(part ?? '', unpacked, parts.of[0] ?? parts.base)
-    expect(await treeDigest(unpacked)).toBe(parts.of[0]?.tree)
+    // The whole holds the program too, two files of 6002 bytes, for updaters from before.
+    expect(manifest.files - without.files).toBe(2)
+    expect(manifest.unpackedBytes - without.unpackedBytes).toBe(6002)
+    const unpacked = join(root, 'base')
+    await extractRelease(base ?? '', unpacked, without)
+    expect(existsSync(join(unpacked, program))).toBe(false)
+    expect(existsSync(join(unpacked, 'dist/althar-worker.js'))).toBe(true)
     // A script that reads the payload's fields by their last mention reads the whole archive's.
     const payload = Buffer.from(JSON.parse(envelope.toString()).payload, 'base64url').toString()
-    expect(payload.indexOf('"parts"')).toBeLessThan(payload.indexOf('"archive"'))
+    expect(payload.indexOf('"base"')).toBeLessThan(payload.indexOf('"archive"'))
     expect(/.*"sha256":"([a-f0-9]+)"/u.exec(payload)?.[1]).toBe(manifest.archive.sha256)
   })
 

@@ -110,40 +110,14 @@ describe('authenticated host releases', () => {
   })
 })
 
-describe('a worker release in parts', () => {
-  const part = (name: string, path: string, url = `https://releases.example/${name}.tar.zst`) => ({
-    name,
-    path,
-    agent: 'codex' as const,
-    tree: 'c'.repeat(64),
-    url,
-    sha256: 'd'.repeat(64),
-    bytes: 10,
-    files: 1,
-    unpackedBytes: 20,
-  })
+describe('a worker release’s base', () => {
   const base = { url: 'https://releases.example/base.tar.gz', sha256: 'e'.repeat(64), bytes: 10, files: 1, unpackedBytes: 20 }
-  const inParts = (of: ReadonlyArray<ReturnType<typeof part>>, first = base) => signed({ ...manifest, parts: { base: first, of } })
 
-  it('takes its parts where each has a place of its own in node_modules, over HTTPS', () => {
-    const verified = verify(inParts([part('codex', 'node_modules/@openai/codex-x'), part('claude', 'node_modules/@anthropic-ai/claude-x')]))
-    expect(verified.manifest.parts?.of.map((one) => one.name)).toEqual(['codex', 'claude'])
-  })
-
-  it('refuses parts inside one another, twice in a place or by a name, outside node_modules, or over plain HTTP', () => {
-    for (const of of [
-      [part('codex', 'node_modules/@openai/codex-x'), part('rg', 'node_modules/@openai/codex-x/node_modules/rg')],
-      [part('codex', 'node_modules/@openai/codex-x'), part('again', 'node_modules/@openai/codex-x')],
-      [part('codex', 'node_modules/@openai/codex-x'), part('codex', 'node_modules/@openai/codex-y')],
-      [part('codex', 'dist/codex')],
-      [part('codex', 'node_modules/@openai/../../etc')],
-      [part('codex', 'node_modules/@openai/codex-x', 'http://releases.example/codex.tar.zst')],
-    ])
-      expect(() => verify(inParts(of))).toThrow()
-    expect(() =>
-      verify(inParts([part('codex', 'node_modules/@openai/codex-x')], { ...base, url: 'http://releases.example/base.tar.gz' })),
-    ).toThrow()
-    expect(() => verify(inParts([]))).toThrow()
+  it('is taken over HTTPS, and refused otherwise or where it isn’t one', () => {
+    expect(verify(signed({ ...manifest, base })).manifest.base).toEqual(base)
+    expect(() => verify(signed({ ...manifest, base: { ...base, url: 'http://releases.example/base.tar.gz' } }))).toThrow()
+    expect(() => verify(signed({ ...manifest, base: { ...base, sha256: 'nope' } }))).toThrow()
+    expect(() => verify(signed({ ...manifest, base: { ...base, bytes: 0 } }))).toThrow()
   })
 })
 

@@ -334,27 +334,23 @@ it('ends with the worker’s check: stays at it where its sandbox can’t start,
   expect(asked).toContain('worker-sandbox')
 })
 
-it('takes a worker release in parts by its base, and leaves a malformed or home’s one whole', async () => {
+it('takes a worker release’s base, without its agents’ own programs, and refuses one that isn’t over HTTPS', async () => {
   const signal = new AbortController().signal
   const pair = generateKeyPairSync('ed25519')
-  const parts = {
-    base: { url: 'https://x.test/base.tar.gz', sha256: 'e'.repeat(64), bytes: 50, files: 3, unpackedBytes: 500 },
-    of: [{ name: 'codex-linux-x64', path: 'node_modules/@openai/codex-linux-x64', url: 'https://x.test/codex.tar.zst', bytes: 70 }],
-  }
+  const base = { url: 'https://x.test/base.tar.gz', sha256: 'e'.repeat(64), bytes: 50, files: 3, unpackedBytes: 500 }
   const own = (extra: Record<string, unknown>, product = 'worker') => ({
     keys: [signed('0.3.1', {}, pair).pem],
     manifest: 'http://127.0.0.1:8080/r/m.json',
     fetch: vi.fn(async () => new Response(signed('0.3.1', { product, ...extra }, pair).envelope)),
     now: () => now,
   })
-  expect(await findWorkerRelease('x64', own({ parts }), signal)).toMatchObject({
+  expect(await findWorkerRelease('x64', own({ base }), signal)).toMatchObject({
     url: 'https://example.test/a.tar.gz',
     base: { url: 'https://x.test/base.tar.gz', sha256: 'e'.repeat(64), bytes: 50, unpackedBytes: 500 },
   })
   expect((await findWorkerRelease('x64', own({}), signal)).base).toBeUndefined()
-  await expect(
-    findWorkerRelease('x64', own({ parts: { ...parts, base: { ...parts.base, url: 'http://x.test/b' } } }), signal),
-  ).rejects.toThrow(/failed its check/)
+  await expect(findWorkerRelease('x64', own({ base: { ...base, url: 'http://x.test/b' } }), signal)).rejects.toThrow(/failed its check/)
+  await expect(findWorkerRelease('x64', own({ base: { ...base, sha256: 'nope' } }), signal)).rejects.toThrow(/failed its check/)
 })
 
 /** Adding a worker from a release in parts, its first install answered as `first` says: what each install was asked, and its deadline. */

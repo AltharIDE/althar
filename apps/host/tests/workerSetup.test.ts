@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -22,12 +23,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { HOST_VERSION } from '../src/home'
 import type { CheckSystem } from '../src/workerCheck'
-import { treeDigest } from '../src/updates/parts'
 import { releaseIdentity } from '../src/updates/release'
 import {
   bringAgent,
   enroll,
-  shipped,
   install,
   join_,
   listAgents,
@@ -88,6 +87,9 @@ beforeEach(() => {
     check: checking,
     shipped: () => ({}),
     sudo: async () => false,
+    // Nothing downloaded or run of a release's own in these tests, unless one says.
+    bring: async () => Promise.reject(new Error('No network in tests')),
+    prepare: async () => undefined,
   })
 })
 afterEach(() => {
@@ -946,305 +948,102 @@ describe('its check, and letting its sandbox start', () => {
   })
 })
 
-describe('a release in parts', () => {
-  const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
-  const claude = 'node_modules/@anthropic-ai/claude-agent-sdk-test'
-  const codex = 'node_modules/@openai/codex-test'
-  /** A folder of files, made: each path's text, executable where it says. */
-  const tree = (folder: string, files: Record<string, string>) => {
-    for (const [path, text] of Object.entries(files)) {
-      mkdirSync(join(folder, path, '..'), { recursive: true, mode: 0o700 })
-      writeFileSync(join(folder, path), text, { mode: path.endsWith('.json') ? 0o600 : 0o700 })
-    }
-    return folder
-  }
-  const archived = async (folder: string, file: string, zstd: boolean) => {
-    await c({ file, cwd: folder, portable: true, noMtime: true, ...(zstd ? { zstd: true } : { gzip: true }) }, readdirSync(folder))
-    const bytes = readFileSync(file)
-    return { bytes, sha256: createHash('sha256').update(bytes).digest('hex') }
-  }
-  const countOf = (files: Record<string, string>) => ({
-    files: Object.keys(files).length,
-    unpackedBytes: Object.values(files).reduce((sum, text) => sum + Buffer.byteLength(text), 0),
+describe('its agents, every one Althar runs', () => {
+  /** Codex not on the worker yet, which Althar downloads; Junie not either, which it can't; Claude Code there already. */
+  const agentsHere = (codex: { installed: boolean }) => ({
+    agents: () => [
+      {
+        id: 'codex' as const,
+        definition: agents.codex,
+        program: '/home/w/.local/share/althar-worker/programs/codex/current/vendor/x/bin/codex',
+        installed: codex.installed,
+        downloadable: true,
+      },
+      {
+        id: 'junie' as const,
+        definition: agents.junie,
+        program: 'junie',
+        installed: false,
+        downloadable: false,
+        guide: 'https://junie.example/install',
+      },
+      { id: 'claude-code' as const, definition: agents['claude-code'], program: '/opt/claude', installed: true, downloadable: true },
+    ],
   })
 
-  /** The newer release, as its base and its two parts, signed, and served from one place; what was asked for, kept. */
-  const published = async (pair = generateKeyPairSync('ed25519'), tamper = false) => {
-    const publicKey = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString()
-    const root = temporary()
-    const baseFiles = { 'dist/althar-worker.js': 'worker commands', 'althar-worker': 'worker' }
-    const claudeFiles = { 'package.json': '{"version":"0.3.331"}', claude: 'Claude Code 0.3.331' }
-    const codexFiles = { 'package.json': '{"version":"0.173.0"}', 'vendor/bin/codex': 'Codex 0.173.0' }
-    const base = await archived(tree(join(root, 'base'), baseFiles), join(root, 'base.tar.gz'), false)
-    const parts = [
-      { name: 'claude-agent-sdk-test', path: claude, files: claudeFiles, agent: 'claude-code' },
-      { name: 'codex-test', path: codex, files: codexFiles, agent: 'codex' },
-    ]
-    const served = new Map<string, Buffer>()
-    served.set('https://updates.example/base.tar.gz', base.bytes)
-    const of = []
-    for (const part of parts) {
-      const folder = tree(join(root, part.name), part.files)
-      const packed = await archived(folder, join(root, `${part.name}.tar.zst`), true)
-      const url = `https://updates.example/${part.name}.tar.zst`
-      served.set(url, packed.bytes)
-      of.push({
-        name: part.name,
-        path: part.path,
-        agent: part.agent,
-        tree: tamper && part.name === 'codex-test' ? 'f'.repeat(64) : await treeDigest(folder),
-        url,
-        sha256: packed.sha256,
-        bytes: packed.bytes.length,
-        ...countOf(part.files),
-      })
-    }
-    const [major, minor, patch] = HOST_VERSION.split('.').map(Number)
-    const version = `${major}.${minor}.${(patch ?? 0) + 1}`
-    const payload = Buffer.from(
-      JSON.stringify({
-        format: 1,
-        version,
-        sequence: 2,
-        publishedAt: new Date(Date.now() - 1000).toISOString(),
-        expiresAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
-        platform: 'linux',
-        arch,
-        updaterProtocol: 1,
-        apiVersion: 1,
-        storage: 'a'.repeat(64),
-        parts: {
-          base: { url: 'https://updates.example/base.tar.gz', sha256: base.sha256, bytes: base.bytes.length, ...countOf(baseFiles) },
-          of,
-        },
-        archive: { url: 'https://updates.example/whole.tar.gz', sha256: 'c'.repeat(64), bytes: 1000 },
-        files: 6,
-        unpackedBytes: 1000,
-        product: 'worker',
-      }),
-    )
-    const envelope = JSON.stringify({
-      format: 1,
-      keyId: releaseIdentity(publicKey),
-      payload: payload.toString('base64url'),
-      signature: sign(null, payload, pair.privateKey).toString('base64url'),
-    })
-    const asked: string[] = []
-    const fetcher = (async (input: string) => {
-      asked.push(input)
-      if (input.endsWith('manifest.json')) return new Response(envelope)
-      const body = served.get(input)
-      return body === undefined ? new Response('', { status: 404 }) : new Response(body)
-    }) as unknown as typeof fetch
-    return { publicKey, pair, envelope, base, version, asked, fetcher, served }
-  }
-
-  /** A release in its program folder, its manifest and key beside it, as the bootstrap leaves it. */
-  const unpacked = (from: Awaited<ReturnType<typeof published>>, name = `bundle-${from.base.sha256}`) => {
-    const folder = release(name)
-    tree(folder, { 'dist/althar-worker.js': 'worker commands' })
-    writeFileSync(join(folder, '.manifest'), from.envelope, { mode: 0o600 })
-    writeFileSync(join(folder, '.release-key'), from.publicKey, { mode: 0o600 })
-    return folder
-  }
-  /** Its agents, as a release in parts has them: each one's program where its part puts it, there or not yet. */
-  const fromParts = () => {
-    const program = (at: string, id: 'claude-code' | 'codex') =>
-      join(at, id === 'codex' ? codex : claude, id === 'codex' ? 'vendor/bin/codex' : 'claude')
-    return withWorkerSystem({
-      agents: (at = join(data, 'althar-worker-program', 'current')) =>
-        (['codex', 'claude-code'] as const).map((id) => ({
-          id,
-          definition: agents[id],
-          program: program(at, id),
-          installed: existsSync(program(at, id)),
-        })),
-    })
-  }
-
-  it('installs its base alone, and brings an agent’s own program with its sign-in, saying the download', async () => {
-    const newer = await published()
-    const folder = unpacked(newer)
-    await install(folder, out)
-    // Neither agent's program came: nothing was asked for, and neither is signed in or offered to a home.
-    expect(newer.asked).toEqual([])
-    expect(existsSync(join(folder, claude))).toBe(false)
-    expect(existsSync(join(folder, codex))).toBe(false)
-    expect(existsSync(join(folder, 'node_modules'))).toBe(false)
-    const back = fromParts()
+  it('launches each, there or not yet, so the home sees every one, and says which it has', async () => {
+    const back = withWorkerSystem(agentsHere({ installed: false }))
     try {
+      await install(release(), out)
+      await enroll(await grantFor(keyOf()), out)
+      const conf = readFileSync(join(data, 'althar-worker', 'agents.conf'), 'utf8')
+      for (const id of ['codex', 'junie', 'claude-code']) expect(conf).toContain(`\t${id}\t`)
       await listAgents(out)
       expect(said.at(-1)).toMatchObject({
         step: 'agents',
         agents: [
-          { id: 'codex', installed: false, signedIn: false },
-          { id: 'claude-code', installed: false, signedIn: false },
+          { id: 'codex', installed: false, downloadable: true, signedIn: false },
+          { id: 'junie', installed: false, downloadable: false, signedIn: false },
+          { id: 'claude-code', installed: true, downloadable: true },
         ],
       })
-      // Codex's sign-in brings Codex, and only Codex.
-      await bringAgent('codex', out, newer.fetcher)
-      expect(newer.asked).toEqual(['https://updates.example/codex-test.tar.zst'])
-      expect(readFileSync(join(folder, codex, 'vendor/bin/codex'), 'utf8')).toBe('Codex 0.173.0')
-      expect(existsSync(join(folder, claude))).toBe(false)
-      const codexPart = newer.served.get('https://updates.example/codex-test.tar.zst')?.length
-      expect(said.filter((one) => one.kind === 'getting').at(-1)).toMatchObject({
-        step: 'sign-in',
-        name: 'Codex',
-        bytes: codexPart,
-        totalBytes: codexPart,
-      })
-      // The worker runs it now: it has its own program to start.
-      expect(readFileSync(join(data, 'althar-worker', 'agents.conf'), 'utf8')).toContain('\tcodex\t')
-      expect(readFileSync(join(data, 'althar-worker', 'agents.conf'), 'utf8')).not.toContain('claude-code')
-      // Brought once: again, nothing is asked for.
-      newer.asked.length = 0
-      await bringAgent('codex', out, newer.fetcher)
-      expect(newer.asked).toEqual([])
     } finally {
       back()
     }
-    expect(readdirSync(join(data, 'althar-worker-program')).filter((name) => name.startsWith('.'))).toEqual([])
   })
 
-  it('updates by its base and the programs of the agents signed in, lending what it has without a copy', async () => {
-    const pair = generateKeyPairSync('ed25519')
-    const newer = await published(pair)
-    // What it runs: Claude Code's the same as the newer release's, Codex's older; both signed in.
-    const folder = release()
-    await install(folder, out)
-    tree(join(folder, claude), { 'package.json': '{"version":"0.3.331"}', claude: 'Claude Code 0.3.331' })
-    tree(join(folder, codex), { 'package.json': '{"version":"0.172.0"}', 'vendor/bin/codex': 'Codex 0.172.0' })
-    const installedPayload = Buffer.from(
-      JSON.stringify({
-        ...JSON.parse(Buffer.from(JSON.parse(newer.envelope).payload, 'base64url').toString('utf8')),
-        version: HOST_VERSION,
-        sequence: 1,
-        parts: undefined,
-      }),
-    )
-    writeFileSync(
-      join(folder, '.manifest'),
-      JSON.stringify({
-        format: 1,
-        keyId: releaseIdentity(newer.publicKey),
-        payload: installedPayload.toString('base64url'),
-        signature: sign(null, installedPayload, pair.privateKey).toString('base64url'),
-      }),
-      { mode: 0o600 },
-    )
-    writeFileSync(join(folder, '.release-key'), newer.publicKey, { mode: 0o600 })
-    writeFileSync(join(data, 'althar-worker', 'update-feed'), 'https://updates.example/manifest.json', { mode: 0o600 })
-    const back = withWorkerSystem({ signedIn: async () => true })
-    try {
-      await update(out, newer.fetcher)
-    } finally {
-      back()
-    }
-    expect(said.at(-1)).toMatchObject({
-      step: 'update',
-      state: 'done',
-      version: newer.version,
-      lent: ['claude-agent-sdk-test'],
-      downloaded: ['codex-test'],
+  it('brings an agent’s program with its sign-in, saying the download, and launches it there', async () => {
+    const codex = { installed: false }
+    const brought: Array<{ id: string; releases: ReadonlyArray<string> }> = []
+    const back = withWorkerSystem({
+      ...agentsHere(codex),
+      bring: async (id, releases, progress) => {
+        brought.push({ id, releases })
+        progress?.(50, 100)
+        codex.installed = true
+        return 'downloaded'
+      },
     })
-    expect(newer.asked).not.toContain('https://updates.example/claude-agent-sdk-test.tar.zst')
-    expect(newer.asked).not.toContain('https://updates.example/whole.tar.gz')
-    const program = join(data, 'althar-worker-program')
-    const target = join(program, `bundle-${newer.base.sha256}`)
-    expect(readlinkSync(join(program, 'current'))).toBe(target)
-    expect(readFileSync(join(target, codex, 'vendor/bin/codex'), 'utf8')).toBe('Codex 0.173.0')
-    expect(readFileSync(join(target, 'dist/althar-worker.js'), 'utf8')).toBe('worker commands')
-    // Lent: the same file, linked, not a second copy; and it still runs.
-    expect(statSync(join(target, claude, 'claude')).ino).toBe(statSync(join(folder, claude, 'claude')).ino)
-    expect(statSync(join(target, claude, 'claude')).mode & 0o777).toBe(0o700)
-    expect(statSync(join(target, codex, 'vendor/bin/codex')).mode & 0o777).toBe(0o700)
-  })
-
-  it('leaves out an agent no longer signed in as it updates', async () => {
-    const newer = await published()
-    const older = await published(newer.pair)
-    const folder = unpacked(older, 'bundle-older')
-    tree(join(folder, claude), { 'package.json': '{"version":"0.3.331"}', claude: 'Claude Code 0.3.331' })
-    tree(join(folder, codex), { 'package.json': '{"version":"0.172.0"}', 'vendor/bin/codex': 'Codex 0.172.0' })
-    const installedPayload = Buffer.from(
-      JSON.stringify({
-        ...JSON.parse(Buffer.from(JSON.parse(older.envelope).payload, 'base64url').toString('utf8')),
-        version: HOST_VERSION,
-        sequence: 1,
-      }),
-    )
-    writeFileSync(
-      join(folder, '.manifest'),
-      JSON.stringify({
-        ...JSON.parse(older.envelope),
-        payload: installedPayload.toString('base64url'),
-        signature: sign(null, installedPayload, newer.pair.privateKey).toString('base64url'),
-      }),
-      { mode: 0o600 },
-    )
-    await install(folder, out)
-    writeFileSync(join(data, 'althar-worker', 'update-feed'), 'https://updates.example/manifest.json', { mode: 0o600 })
-    // Only Codex is signed in here (the suite's own sign-in check).
-    await update(out, newer.fetcher)
-    expect(said.at(-1)).toMatchObject({ step: 'update', state: 'done', lent: [], downloaded: ['codex-test'] })
-    const target = join(data, 'althar-worker-program', `bundle-${newer.base.sha256}`)
-    expect(existsSync(join(target, claude))).toBe(false)
-    expect(newer.asked).not.toContain('https://updates.example/claude-agent-sdk-test.tar.zst')
-  })
-
-  it('refuses a part that doesn’t hold what it should, and says what stopped a sign-in’s download', async () => {
-    const back = fromParts()
-    try {
-      const tampered = await published(undefined, true)
-      const folder = unpacked(tampered)
-      await install(folder, out)
-      await expect(bringAgent('codex', out, tampered.fetcher)).rejects.toMatchObject({ code: 'ReleaseRejected', step: 'sign-in' })
-      // Nothing of it stays, and the release the worker runs does.
-      expect(existsSync(join(folder, codex))).toBe(false)
-      expect(existsSync(join(folder, 'althar-worker'))).toBe(true)
-      const unreachable = await published()
-      unreachable.served.delete('https://updates.example/codex-test.tar.zst')
-      await install(unpacked(unreachable), out)
-      await expect(bringAgent('codex', out, unreachable.fetcher)).rejects.toMatchObject({ code: 'CannotDownload', step: 'sign-in' })
-      // Where its disk hasn't the room, said in the sign-in, before anything is downloaded.
-      const room = withWorkerSystem({ free: async () => 1_048_576 })
-      try {
-        expect(await workerMain(['sign-in', '--agent', 'codex', '--way', 'device'], out)).toBe(1)
-        expect(said.at(-1)).toMatchObject({ step: 'sign-in', state: 'failed', code: 'NotEnoughDisk' })
-      } finally {
-        room()
-      }
-      expect(readdirSync(join(data, 'althar-worker-program')).filter((name) => name.startsWith('.'))).toEqual([])
-    } finally {
-      back()
-    }
-  })
-
-  it('lists each agent from a release in parts where its part puts its program, there or still to come', async () => {
-    const newer = await published()
-    const folder = unpacked(newer)
-    const listed = shipped(folder)
-    expect(listed.map((one) => [one.id, one.installed])).toEqual([
-      ['claude-code', false],
-      ['codex', false],
-    ])
-    expect(listed.find((one) => one.id === 'codex')?.program.startsWith(join(folder, codex))).toBe(true)
-    // Its program there, it's installed, and the launch Althar gives it starts that program.
-    const program = listed.find((one) => one.id === 'claude-code')?.program ?? ''
-    tree(folder, { [program.slice(folder.length + 1)]: 'Claude Code' })
-    expect(shipped(folder).find((one) => one.id === 'claude-code')).toMatchObject({ installed: true, program })
-    // A release from before parts, not the one this runs: no agent it can say where to find.
-    expect(shipped(release('bundle-plain'))).toEqual([])
-    // The one this runs, from its own packages.
-    for (const agent of shipped()) expect(agent.installed).toBe(existsSync(agent.program))
-  })
-
-  it('brings no program for an agent it doesn’t list, and says where its release has none to download', async () => {
-    const back = fromParts()
     try {
       const folder = release()
       await install(folder, out)
-      await expect(bringAgent('codex', out)).rejects.toMatchObject({ code: 'NoAgent', step: 'sign-in' })
+      said = []
+      await bringAgent('codex', out)
+      // From the releases here, the one it runs first.
+      expect(brought).toEqual([{ id: 'codex', releases: [realpathSync(folder)] }])
+      expect(said.filter((one) => one.step === 'sign-in').map((one) => one.kind)).toEqual(['getting', 'getting', 'got'])
+      expect(said.find((one) => one.kind === 'getting' && one.bytes === 50)).toMatchObject({ name: 'Codex', totalBytes: 100 })
+      expect(readFileSync(join(data, 'althar-worker', 'agents.conf'), 'utf8')).toContain('\tcodex\t')
+      // There now: nothing brought again.
+      await bringAgent('codex', out)
+      expect(brought).toHaveLength(1)
+    } finally {
+      back()
+    }
+  })
+
+  it('says one Althar can’t download is the person’s to install there, and what stopped a download in its words', async () => {
+    const back = withWorkerSystem({
+      ...agentsHere({ installed: false }),
+      bring: async () =>
+        Promise.reject(Object.assign(new Error('raw'), { summary: 'Codex needs 700 MB free on this computer to download.' })),
+    })
+    try {
+      await install(release(), out)
+      await expect(bringAgent('junie', out)).rejects.toMatchObject({
+        code: 'NotInstalled',
+        step: 'sign-in',
+        message: expect.stringContaining('https://junie.example/install'),
+      })
+      await expect(bringAgent('codex', out)).rejects.toMatchObject({
+        code: 'CannotDownload',
+        step: 'sign-in',
+        message: 'Codex needs 700 MB free on this computer to download.',
+      })
+      // Through the command line, said in the sign-in.
+      expect(await workerMain(['sign-in', '--agent', 'codex', '--way', 'device'], out)).toBe(1)
+      expect(said.at(-1)).toMatchObject({ step: 'sign-in', state: 'failed', code: 'CannotDownload' })
+      // No agent of that name: nothing to bring.
       said = []
       await bringAgent('gemini', out)
       expect(said).toEqual([])
@@ -1253,40 +1052,129 @@ describe('a release in parts', () => {
     }
   })
 
-  it('says what stopped a sign-in’s download where it isn’t the download’s, in the system’s words', async () => {
-    const back = fromParts()
+  it('readies the programs of the agents signed in here, and says one it couldn’t', async () => {
+    const codex = { installed: false }
+    let fails = false
+    const back = withWorkerSystem({
+      ...agentsHere(codex),
+      bring: async (id) => {
+        if (fails) throw Object.assign(new Error('raw'), { summary: 'npm couldn’t be reached.' })
+        codex.installed = id === 'codex'
+        return 'adopted'
+      },
+    })
     try {
-      const newer = await published()
-      const folder = unpacked(newer)
-      await install(folder, out)
-      // A file where Codex's scope folder goes: nothing can be put there.
-      mkdirSync(join(folder, 'node_modules'), { recursive: true })
-      writeFileSync(join(folder, 'node_modules', '@openai'), 'in the way')
-      const stopped: unknown = await bringAgent('codex', out, newer.fetcher).catch((error: unknown) => error)
-      expect(['ENOTDIR', 'EEXIST']).toContain((stopped as { code?: string }).code)
-      // Nothing of it stays.
-      expect(readdirSync(join(data, 'althar-worker-program')).filter((name) => name.startsWith('.'))).toEqual([])
+      await install(release(), out)
+      writeFileSync(join(data, 'althar-worker', 'signed-in'), 'codex\njunie\nclaude-code\n', { mode: 0o600 })
+      expect(await workerMain(['prepare'], out)).toBe(0)
+      // Codex brought; Junie isn't Althar's to bring; Claude Code is there.
+      expect(said.filter((one) => one.step === 'prepare')).toEqual([
+        { protocol: 1, step: 'prepare', state: 'started', agent: 'codex' },
+        { protocol: 1, step: 'prepare', state: 'done', agent: 'codex', how: 'adopted' },
+      ])
+      codex.installed = false
+      fails = true
+      said = []
+      expect(await workerMain(['prepare'], out)).toBe(1)
+      expect(said.at(-1)).toMatchObject({ step: 'prepare', state: 'failed', agent: 'codex', message: 'npm couldn’t be reached.' })
     } finally {
       back()
     }
   })
 
-  it('removes a release it couldn’t make whole as it installs it, and never the one the worker runs', async () => {
-    const newer = await published()
-    const broken = () => {
-      const folder = unpacked(newer)
-      // What sits where a part goes holds a link: it can't be checked, so the install stops there.
-      mkdirSync(join(folder, codex), { recursive: true })
-      symlinkSync('/etc/passwd', join(folder, codex, 'escape'))
-      return folder
+  it('moves to a release by its base once its own commands readied the agents signed in here, and stays where they couldn’t', async () => {
+    const pair = generateKeyPairSync('ed25519')
+    const publicKey = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString()
+    const signedBy = (fields: Record<string, unknown>) => {
+      const payload = Buffer.from(
+        JSON.stringify({
+          format: 1,
+          publishedAt: new Date(Date.now() - 1000).toISOString(),
+          expiresAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+          platform: 'linux',
+          arch: process.arch === 'arm64' ? 'arm64' : 'x64',
+          updaterProtocol: 1,
+          apiVersion: 1,
+          storage: 'a'.repeat(64),
+          ...fields,
+        }),
+      )
+      return JSON.stringify({
+        format: 1,
+        keyId: releaseIdentity(publicKey),
+        payload: payload.toString('base64url'),
+        signature: sign(null, payload, pair.privateKey).toString('base64url'),
+      })
     }
-    const folder = broken()
-    await expect(install(folder, out)).rejects.toMatchObject({ code: 'ReleaseRejected', step: 'get' })
-    expect(existsSync(folder)).toBe(false)
-    const running = broken()
-    symlinkSync(running, join(data, 'althar-worker-program', 'current'))
-    expect(await workerMain(['install', '--program', running], out)).toBe(1)
-    expect(said.at(-1)).toMatchObject({ step: 'get', state: 'failed', code: 'ReleaseRejected' })
-    expect(existsSync(join(running, 'althar-worker'))).toBe(true)
+    const folder = release()
+    await install(folder, out)
+    writeFileSync(
+      join(folder, '.manifest'),
+      signedBy({
+        version: HOST_VERSION,
+        sequence: 1,
+        archive: { url: 'https://u.example/old.tar.gz', sha256: 'b'.repeat(64), bytes: 9 },
+        files: 1,
+        unpackedBytes: 1,
+      }),
+      { mode: 0o600 },
+    )
+    writeFileSync(join(folder, '.release-key'), publicKey, { mode: 0o600 })
+    // The newer release's base: its commands and native program, no agent's.
+    const source = join(temporary(), 'source')
+    mkdirSync(join(source, 'dist'), { recursive: true })
+    writeFileSync(join(source, 'dist', 'althar-worker.js'), 'worker commands')
+    writeFileSync(join(source, 'althar-worker'), 'worker', { mode: 0o700 })
+    const archive = join(source, '..', 'base.tar.gz')
+    await c({ file: archive, cwd: source, gzip: true, portable: true, noMtime: true }, ['dist', 'althar-worker'])
+    const bytes = readFileSync(archive)
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    const [major, minor, patch] = HOST_VERSION.split('.').map(Number)
+    const version = `${major}.${minor}.${(patch ?? 0) + 1}`
+    const manifest = signedBy({
+      version,
+      sequence: 2,
+      product: 'worker',
+      base: {
+        url: 'https://u.example/base.tar.gz',
+        sha256,
+        bytes: bytes.length,
+        files: 2,
+        unpackedBytes: 'worker commands'.length + 'worker'.length,
+      },
+      archive: { url: 'https://u.example/whole.tar.gz', sha256: 'c'.repeat(64), bytes: 1000 },
+      files: 9,
+      unpackedBytes: 1000,
+    })
+    writeFileSync(join(data, 'althar-worker', 'update-feed'), 'https://u.example/manifest.json', { mode: 0o600 })
+    const asked: string[] = []
+    const fetcher = (async (input: string) => {
+      asked.push(input)
+      return input.endsWith('base.tar.gz') ? new Response(bytes) : new Response(manifest)
+    }) as unknown as typeof fetch
+    const readied: string[] = []
+    let ready = false
+    const back = withWorkerSystem({
+      prepare: async (unpacked) => {
+        readied.push(readFileSync(join(unpacked, 'dist', 'althar-worker.js'), 'utf8'))
+        if (!ready) throw new Error('npm couldn’t be reached')
+      },
+    })
+    try {
+      await update(out, fetcher)
+      expect(said.at(-1)).toMatchObject({ step: 'update', state: 'failed', code: 'NotReady', version })
+      // Not moved: it runs on as it was, with nothing of the new one left.
+      expect(readlinkSync(join(data, 'althar-worker-program', 'current'))).toBe(folder)
+      expect(readdirSync(join(data, 'althar-worker-program')).filter((name) => name.startsWith('.'))).toEqual([])
+      ready = true
+      await update(out, fetcher)
+      expect(said.at(-1)).toMatchObject({ step: 'update', state: 'done', version })
+      expect(readlinkSync(join(data, 'althar-worker-program', 'current'))).toBe(join(data, 'althar-worker-program', `bundle-${sha256}`))
+      // The new release's own commands readied it, and the whole archive was never asked for.
+      expect(readied).toEqual(['worker commands', 'worker commands'])
+      expect(asked).not.toContain('https://u.example/whole.tar.gz')
+    } finally {
+      back()
+    }
   })
 })

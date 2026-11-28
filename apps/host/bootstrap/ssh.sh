@@ -181,9 +181,9 @@ if [ "$operation" = join ]; then
   payload=$(printf '%s' "$encoded" | base64 -d 2>/dev/null) || fail get ReleaseRejected
   [ -n "$payload" ] || fail get ReleaseRejected
   field() { printf '%s' "$fields" | sed -n "s|.*\"$1\":\($2\).*|\1|p"; }
-  # A release in parts: its base, without its agents' own programs, which the release's install then adds. Else the
-  # whole archive's fields, which are the payload's last mention of each.
-  fields=$(printf '%s' "$payload" | sed -n 's|.*"parts":{"base":{\([^}]*\)}.*|\1|p')
+  # A release's base, without its agents' own programs, which come each with its sign-in. Else the whole archive's
+  # fields, which are the payload's last mention of each.
+  fields=$(printf '%s' "$payload" | sed -n 's|.*"base":{\([^}]*\)}.*|\1|p')
   if [ -z "$fields" ]; then fields=$payload; fi
   set -- download "$(field sha256 '"[a-f0-9]*"' | tr -d '"')" "$(field bytes '[0-9]*')" "$(field unpackedBytes '[0-9]*')" \
     "$(field url '"https://[^"]*"' | tr -d '"')" "$(printf '%s' "$fetched" | base64 | tr -d '\n')" "$(printf '%s\n' "$release_key" | base64 | tr -d '\n')"

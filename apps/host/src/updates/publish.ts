@@ -2,7 +2,6 @@ import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto
 import { constants } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { join } from 'node:path'
-import { constants as zlib, type ZstdOptions } from 'node:zlib'
 
 import { c } from 'tar'
 
@@ -10,8 +9,7 @@ import type { HostOptions } from '../options'
 import { privateDirectory, writePrivate } from '../privateFiles'
 import { assembleBundle, assembleWorkerBundle, type BundleSource, type WorkerPart } from './bundle'
 import { releaseInfo } from './info'
-import { treeDigest } from './parts'
-import { httpsURL, releaseIdentity, verifyRelease, type ReleaseManifest, type ReleasePart, type ReleaseParts } from './release'
+import { httpsURL, releaseIdentity, verifyRelease, type ReleaseManifest } from './release'
 import { newUpdateId, updateError } from './store'
 import { syncReleaseTree } from './archive'
 import { checkCandidate } from './stage'
@@ -33,21 +31,10 @@ const inventory = async (folder: string): Promise<{ files: number; bytes: number
   }
   return { files, bytes }
 }
-/**
- * Node's own zstd at level 19: Claude Code's program in 143 MB rather than gzip's 183. tar types its zstd option as zlib's
- * and hands it to Node as it is, so its level, among Node's zstd `params`, goes through a cast.
- */
-const STRONG_ZSTD = { params: { [zlib.ZSTD_c_compressionLevel]: 19 } } satisfies ZstdOptions as unknown as Exclude<
-  NonNullable<Parameters<typeof c>[0]['zstd']>,
-  boolean
->
-
 /** A folder's contents as a tar archive at `file`, but what `keep` leaves out: its size and SHA-256. */
-const pack = async (folder: string, file: string, compression: 'gzip' | 'zstd', keep: (path: string) => boolean = () => true) => {
+const pack = async (folder: string, file: string, keep: (path: string) => boolean = () => true) => {
   const options = { file, cwd: folder, portable: true, noMtime: true, filter: (path: string) => keep(path) }
-  const entries = await fs.readdir(folder)
-  if (compression === 'gzip') await c({ ...options, gzip: true }, entries)
-  else await c({ ...options, zstd: STRONG_ZSTD }, entries)
+  await c({ ...options, gzip: true }, await fs.readdir(folder))
   const input = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW)
   const hash = createHash('sha256')
   const size = (await input.stat()).size
@@ -128,49 +115,31 @@ export const packageRelease = async (options: HostOptions, dependencies: Publish
       await check(folder)
       const counts = await inventory(folder)
       const temporary = join(scratch, 'release.tar.gz')
-      const { size, sha256 } = await pack(folder, temporary, 'gzip')
+      const { size, sha256 } = await pack(folder, temporary)
       /** Each archive made here, where it goes in `output`. */
       const made = [{ from: temporary, to: archive }]
-      // A worker's release in parts as well (parts.ts): its base, gzipped for the bootstrap's own tar, and each agent's
-      // program, compressed with zstd, which only an updater that knows parts unpacks.
-      let split: ReleaseParts | undefined
+      // A worker's release without its agents' own programs too (docs/plans/agents-on-first-use.md): its base, gzipped
+      // for the bootstrap's own tar, which a worker or window that knows it takes; each agent's program then comes on
+      // first use. The whole archive keeps them, for host 0.3.0's updater and windows from before.
+      let without: ReleaseManifest['base']
       if (parts.length > 0) {
         const inPart = (path: string) => parts.some((part) => path === part.path || path.startsWith(`${part.path}/`))
-        const of: ReleasePart[] = []
         let partFiles = 0
         let partBytes = 0
         for (const part of parts) {
-          const at = join(folder, part.path)
-          const name = named(`-${part.name}.tar.zst`)
-          const packed = await pack(at, join(scratch, name), 'zstd')
-          const held = await inventory(at)
+          const held = await inventory(join(folder, part.path))
           partFiles += held.files
           partBytes += held.bytes
-          of.push({
-            name: part.name,
-            path: part.path,
-            agent: part.agent,
-            tree: await treeDigest(at),
-            url: new URL(name, base).href,
-            sha256: packed.sha256,
-            bytes: packed.size,
-            files: held.files,
-            unpackedBytes: held.bytes,
-          })
-          made.push({ from: join(scratch, name), to: join(output, name) })
         }
         const baseName = named('-base.tar.gz')
-        const packed = await pack(folder, join(scratch, baseName), 'gzip', (path) => !inPart(path))
+        const packed = await pack(folder, join(scratch, baseName), (path) => !inPart(path))
         made.push({ from: join(scratch, baseName), to: join(output, baseName) })
-        split = {
-          base: {
-            url: new URL(baseName, base).href,
-            sha256: packed.sha256,
-            bytes: packed.size,
-            files: counts.files - partFiles,
-            unpackedBytes: counts.bytes - partBytes,
-          },
-          of,
+        without = {
+          url: new URL(baseName, base).href,
+          sha256: packed.sha256,
+          bytes: packed.size,
+          files: counts.files - partFiles,
+          unpackedBytes: counts.bytes - partBytes,
         }
       }
       const manifest: ReleaseManifest = {
@@ -186,7 +155,7 @@ export const packageRelease = async (options: HostOptions, dependencies: Publish
         storage: info.storage,
         // Before `archive`: a script that reads the payload's fields by their last mention (bootstrap/ssh.sh) reads the
         // whole archive's.
-        ...(split === undefined ? {} : { parts: split }),
+        ...(without === undefined ? {} : { base: without }),
         archive: { url: new URL(file, base).href, bytes: size, sha256 },
         files: counts.files,
         unpackedBytes: counts.bytes,
