@@ -17,6 +17,7 @@ import { branchOn, commitsOf, fetchBranch, fetchInto, fetchSpecs, git, PUSHED, p
 import { redacted } from './gitSaid'
 import { bounded } from './readChecks'
 import { ActionNotPerformed, ToolRefused } from './toolErrors'
+import { toolRefusalOf } from './toolRefusal'
 import type { Tool, ToolAccess } from './ToolServer'
 
 /*
@@ -49,11 +50,8 @@ type Made = Omit<AskedAction, 'read' | 'readBack' | 'act'> & {
 /** What these tools read and write with. */
 type Needs = SqlClient.SqlClient | Instance | Connections | RuntimeConfig
 
-/** Anything but a refusal said to the agent is Althar's own failure, said plainly. */
-const plainly = (error: unknown) =>
-  error instanceof ToolRefused || error instanceof ActionNotPerformed
-    ? error
-    : refused('Althar could not do that. Try again, or tell the person.')
+/** Anything but a refusal said to the agent is said in the runtime's own words for it (toolRefusal.ts). */
+const plainly = (error: unknown) => (error instanceof ActionNotPerformed ? error : toolRefusalOf(error))
 
 /** The person's word an asked-for call names: their message in this turn, or an open errand's step. */
 const Word = {

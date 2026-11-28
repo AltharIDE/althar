@@ -1544,7 +1544,7 @@ describe('a task moving between the home and its workers (ADR-103)', () => {
           assert.strictEqual((yield* Effect.flip(move(runner2))).message, 'runner-2 doesn’t offer large. Pick a model it has.')
           assert.strictEqual(
             yield* runsOn({ runs_on: 'nowhere' }),
-            'No worker of this project is called nowhere. Its workers: runner-1, runner-2, runner-3; or the home.',
+            'No worker is called nowhere. This home’s workers: runner-1, runner-2, runner-3; or the home.',
           )
           // To runner-1, which does: once its turn has ended, with what the home's worktree has.
           const first = yield* move(runner1)

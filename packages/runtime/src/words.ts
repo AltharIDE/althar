@@ -599,6 +599,9 @@ export const words = (
         return `Althar only gives ${text(error, 'tool')}'s sign-in to a server it knows, over HTTPS. ${text(error, 'address')} isn't one.`
       case 'OtherAccount':
         return `This token is ${text(error, 'login')}'s. Make one as ${text(error, 'expected')}, or connect ${text(error, 'login')} as well from the list.`
+      // Worded already, for the window (`@althar/contracts`' ApiError): the runtime's own sentence, as the window shows it.
+      case 'ApiError':
+        return text(error, 'message') === '' ? "Althar's runtime couldn't do that. Its log has the details." : text(error, 'message')
       default:
         return agentSaid(error) ?? "Althar's runtime couldn't do that. Its log has the details."
     }

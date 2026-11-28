@@ -6,7 +6,7 @@ import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
 import { placingOf } from './taskPlaces'
 import { taskWorker } from './workerExecution'
-import { workerRequirementFields } from './workerRequirements'
+import { homeOnlyOf, workerRequirementFields } from './workerRequirements'
 import { HOSTED, newPullRequestLink } from '@althar/connectors'
 import { existsSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, sep } from 'node:path'
@@ -2984,7 +2984,14 @@ export class Queries extends Context.Service<
                     id: task.planId,
                     steps: teamSteps,
                     ...(task.planState === 'proposed' && config.workers !== undefined
-                      ? yield* workerRequirementFields(taskId, field(parameters, 'here') === true, field(parameters, 'reads') === true)
+                      ? yield* workerRequirementFields(
+                          taskId,
+                          homeOnlyOf({
+                            here: field(parameters, 'here') === true,
+                            homeOnly: ((one) => (typeof one === 'boolean' ? one : undefined))(field(parameters, 'homeOnly')),
+                          }),
+                          field(parameters, 'reads') === true,
+                        )
                       : {}),
                     ...(task.planState === 'proposed' ? placedOn(parameters) : {}),
                     startsAt: task.planState === 'proposed' ? task.startsAt : null,

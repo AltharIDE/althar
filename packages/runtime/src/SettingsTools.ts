@@ -73,6 +73,7 @@ import { workedOutReach } from './sandboxReach'
 import { listSkills } from './Skills'
 import { addItem, updateItem } from './threads'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { toolRefusalOf } from './toolRefusal'
 import { agentTools } from './agentTools'
 import { changesOf, defaultEfforts, inWords, modelsTurnedOff, plainNames, said, type Names } from './settingWords'
 
@@ -1476,10 +1477,7 @@ export class SettingsTools extends Context.Service<
             Effect.catch((error) =>
               error instanceof ToolRefused
                 ? Effect.fail(error)
-                : Effect.andThen(
-                    Effect.logWarning('A settings tool did not succeed', error),
-                    Effect.fail(new ToolRefused({ message: 'Althar could not do that. Try again, or tell the person.' })),
-                  ),
+                : Effect.andThen(Effect.logWarning('A settings tool did not succeed', error), Effect.fail(toolRefusalOf(error))),
             ),
           ),
       })
