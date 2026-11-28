@@ -186,7 +186,7 @@ The app is packaged for macOS on Apple silicon and on Intel, x86_64 Linux and x6
 3. In Actions, open the release run and approve it (Review deployments). Notarizing takes from a few minutes to an hour.
 4. In Releases, open the draft, download its dmgs, and try each on its Mac (the run has opened both already, Intel's under Rosetta): it should open with only the usual "downloaded from the internet" question. Try its Windows installer on a Windows machine: SmartScreen warns while it is unsigned (More info → Run anyway).
 5. Publish the draft. Then the updater and the site's Download see it. A patch to an older line, once a newer one is out, is drafted as not the latest: publish it with "Set as the latest release" unticked, so they stay on the newest line.
-6. For a new minor or major, cut its release branch at the tag: `git push origin v0.11.0^{commit}:refs/heads/release/0.11`.
+6. For a new minor or major, cut its release branch at the tag through the cascade: `gh workflow run cascade.yml -f cut=release/0.11 -f at=v0.11.0` ([Release branches](../../DEVELOPMENT.md#release-branches)).
 
 Run by hand (Actions → release → Run workflow, on main, or on the release branch for a patch), it makes the same draft without a tag; publishing it makes the tag. Run again, a release's run brings its draft up to date, and never touches a published release. Where notarizing fails, the run's `notary-logs` artifact names each file Apple found wrong.
 

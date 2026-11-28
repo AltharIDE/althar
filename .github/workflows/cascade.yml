@@ -4,7 +4,8 @@ name: cascade
 # (DEVELOPMENT.md, "Release branches"): release/0.9 → release/0.10 → main, release/host-0.2 → main. Each push to a
 # release branch opens, or brings up to date, one pull request from cascade/<source>-into-<target>, which merges by
 # itself once its checks pass: through main's merge queue, and into a release branch, whose rules require nothing, once
-# this job has seen its checks pass. The merge pushes to the target, which cascades on in turn.
+# this job has seen its checks pass. The merge pushes to the target, which cascades on in turn. Run by hand with `cut` and
+# `at`, it cuts a release branch, first disarming the open cascades the new branch reroutes.
 #
 # A cascade that conflicts is committed with its conflict markers, and its pull request stays open as a draft that names
 # the files. Push the fix to its branch and mark it ready for review: once no conflict markers are left in those files,
@@ -24,7 +25,12 @@ on:
     inputs:
       from:
         description: The release branch to cascade on, such as release/0.10
-        required: true
+        type: string
+      cut:
+        description: Or a release branch to cut, such as release/0.11 (with at)
+        type: string
+      at:
+        description: The tag to cut it at, such as v0.11.0
         type: string
 
 permissions:
@@ -32,7 +38,7 @@ permissions:
 
 # One at a time from each release branch, so two pushes can't each open a pull request; a newer push waits.
 concurrency:
-  group: cascade-${{ inputs.from || github.event.pull_request.head.ref || github.ref_name }}
+  group: cascade-${{ inputs.from || inputs.cut || github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -70,9 +76,13 @@ jobs:
           CASCADE_CHECKS: merge queue
           EVENT: ${{ github.event_name }}
           FROM: ${{ inputs.from }}
+          CUT: ${{ inputs.cut }}
+          AT: ${{ inputs.at }}
           PULL: ${{ github.event.pull_request.number }}
         run: |
-          if [ "$EVENT" = workflow_dispatch ]; then
+          if [ "$EVENT" = workflow_dispatch ] && [ -n "$CUT" ]; then
+            python3 .github/scripts/cascade.py --cut "$CUT" --at "$AT"
+          elif [ "$EVENT" = workflow_dispatch ]; then
             python3 .github/scripts/cascade.py --from "$FROM"
           elif [ "$EVENT" = pull_request ]; then
             python3 .github/scripts/cascade.py --pull "$PULL"

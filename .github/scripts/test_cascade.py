@@ -165,7 +165,7 @@ class Repository(unittest.TestCase):
         self.write('app.ts', 'one\ntwo\nthree\nfour\nfive\nsix\nseven\n')
         self.commit('Althar 0.10.0')
         self.run_git('push', '-q', 'origin', 'HEAD:main', 'HEAD:release/0.10')
-        self.calls, self.pulls = [], {}
+        self.calls, self.pulls, self.disarmed = [], {}, []
         # Release branches have no rules here; main has a merge queue.
         self.rules = {'main': [{'type': 'merge_queue'}, {'type': 'required_status_checks'}]}
         self.rollup = [{'__typename': 'CheckRun', 'name': 'check', 'status': 'COMPLETED', 'conclusion': 'SUCCESS',
@@ -253,6 +253,10 @@ class Repository(unittest.TestCase):
         if args[:2] == ('pr', 'close'):
             self.pulls[int(args[2])]['state'] = 'CLOSED'
             return ''
+        if args[:2] == ('pr', 'merge') and '--disable-auto' in args:
+            # Whether the branch being cut was there yet when it was disarmed.
+            self.disarmed.append((int(args[2]), self.tip('release/0.11')))
+            return ''
         if args[:2] == ('pr', 'merge') and '--auto' not in args:
             self.squash(int(args[2]))
             return ''
@@ -277,7 +281,8 @@ class Repository(unittest.TestCase):
         module.after('owner/repo', number, 'main', 'cascade')
 
     def merges(self, number=None):
-        return [call for call in self.calls if call[:2] == ('pr', 'merge') and number in (None, int(call[2]))]
+        return [call for call in self.calls if call[:2] == ('pr', 'merge') and '--disable-auto' not in call
+                and number in (None, int(call[2]))]
 
     def ready(self, number):
         """A person marks it ready for review."""
@@ -516,6 +521,48 @@ class Routes(Repository):
         self.assertEqual(self.pulls[int(merge[2])]['base'], 'release/0.10')
         self.assertEqual(self.read('origin/release/0.10', 'app.ts'), TWO.strip())
         self.assertNotEqual(self.read('origin/release/0.11', 'app.ts'), TWO.strip())
+
+    def test_a_push_while_it_was_rerouted_keeps_the_branch_and_its_pull_request(self):
+        self.on('release/0.10', {'app.ts': TWO}, 'Fix two')
+        self.cascade('release/0.10')
+        (old,) = self.pulls
+        self.run_git('push', '-q', 'origin', 'origin/main:refs/heads/release/0.11')
+        self.run_git('fetch', '-q', 'origin')
+        # A person pushes to the cascade's branch after the cascade read it.
+        pushed = self.on('cascade/release-0.10-into-main', {'app.ts': 'mine\n'}, 'Mine', fetch=False)
+        module.cascade('owner/repo', 'release/0.11', 'main', 'cascade')
+        self.assertEqual(self.tip('cascade/release-0.10-into-main'), pushed)
+        self.assertEqual(self.pulls[old]['state'], 'OPEN')
+        self.assertTrue(any(call[:2] == ('pr', 'comment') and int(call[2]) == old for call in self.calls))
+
+
+class Cutting(Repository):
+    def test_a_cut_disarms_the_cascades_it_reroutes_before_the_branch_exists(self):
+        self.on('release/0.10', {'app.ts': TWO}, 'Fix two')
+        self.cascade('release/0.10')
+        (old,) = self.pulls
+        self.run_git('tag', 'v0.11.0', 'origin/main')
+        module.cut('owner/repo', 'release/0.11', 'v0.11.0', 'main', 'cascade')
+        # Disarmed while release/0.11 didn't exist yet, so GitHub couldn't merge it on its old route during the cut.
+        self.assertEqual(self.disarmed, [(old, None)])
+        self.assertEqual(self.pulls[old]['state'], 'CLOSED')
+        self.assertEqual(self.read('origin/release/0.11', 'app.ts'), TWO.strip())
+
+    def test_a_cascade_the_cut_doesnt_reroute_is_left_armed(self):
+        self.run_git('push', '-q', 'origin', 'origin/release/0.10:refs/heads/release/host-0.2')
+        self.on('release/host-0.2', {'app.ts': TWO}, 'Fix two')
+        self.cascade('release/host-0.2')
+        self.run_git('tag', 'v0.11.0', 'origin/main')
+        module.cut('owner/repo', 'release/0.11', 'v0.11.0', 'main', 'cascade')
+        self.assertEqual(self.disarmed, [])
+        self.assertEqual([pull['state'] for pull in self.pulls.values()], ['OPEN'])
+
+    def test_it_cuts_only_a_new_release_branch(self):
+        self.run_git('tag', 'v0.11.0', 'origin/main')
+        with self.assertRaisesRegex(module.Failed, 'exists already'):
+            module.cut('owner/repo', 'release/0.10', 'v0.11.0', 'main', 'cascade')
+        with self.assertRaisesRegex(module.Failed, 'not a release branch'):
+            module.cut('owner/repo', 'release/next', 'v0.11.0', 'main', 'cascade')
 
 if __name__ == '__main__':
     unittest.main()

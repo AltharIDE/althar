@@ -4,12 +4,15 @@ and from the newest into main, through a pull request that merges by itself once
   python3 .github/scripts/cascade.py --from release/0.10     carry release/0.10 on
   python3 .github/scripts/cascade.py --pull 1234             after cascade pull request 1234 was marked ready (a person
                                                               fixed its conflicts) or merged (carry on its source)
+  python3 .github/scripts/cascade.py --cut release/0.11 --at v0.11.0
+                                                             cut a release branch, rerouting the cascades it changes
 
 A line is the release branches that differ only by version: release/0.9, release/0.10 and on are the desktop app's,
 release/host-0.2 and on the host's. Each carries into the next newer one of its own line, and the newest into main, so a
 fix on release/0.9 reaches release/0.10 first, and main from there. A cascade whose target is no longer the next branch
 along, as when release/0.11 is cut while release/0.10's pull request to main is open, is closed and made again to the
-new one, on every run and before any pull request is merged.
+new one, on every run and before any pull request is merged. A branch cut through --cut first disarms those (no
+auto-merge, out of the merge queue), so none can still merge on its old route while it is cut.
 
 Main's merge queue squashes, so a cascade can't go by git's ancestry: once squashed, main shares nothing with the release
 branch past where it was cut. Each cascade commit names the source commit it carries up to instead, in a trailer
@@ -285,9 +288,14 @@ def merged(branch, tip):
     return any(pull['headRefOid'] == tip for pull in found)
 
 
-def drop(repo, branch):
-    """Deletes origin's `branch`, where the cascade is done with it."""
-    gh('api', '-X', 'DELETE', f'repos/{repo}/git/refs/heads/{branch}', check=False)
+def drop(branch, expected):
+    """Deletes origin's `branch`, only while it is still at `expected`, the tip the cascade read: False, and the branch
+    left as it is, where someone pushed to it since."""
+    result = git('push', f'--force-with-lease=refs/heads/{branch}:{expected}', 'origin', f':refs/heads/{branch}',
+                 check=False)
+    if result.returncode:
+        print(f'{branch} moved since the cascade read it, so it stays: {result.stderr.strip()}')
+    return result.returncode == 0
 
 
 def push(branch, commit, expected):
@@ -378,8 +386,15 @@ def retarget(repo, pull, source, target, branches, default, workflow):
            f'one has your commits, so it stays open: move them to the cascade into `{now}`, then close this.')
         print(f"::warning::#{pull} targets {target}, but {source} carries into {now} now. It has a person's commits.")
         return False
-    gh('pr', 'close', str(pull), '--comment', f'Cascades from `{source}` go to `{now}` now, so this one is made again there.')
-    drop(repo, branch)
+    if tip and not drop(branch, tip):
+        # Someone pushed to it after it was read: theirs to settle, as above.
+        gh('pr', 'comment', str(pull), '--body', f'Cascades from `{source}` go to `{now}` now, not `{target}`. Its '
+           f'branch moved while the cascade made it again there, so it stays open: move what you pushed to the '
+           f'cascade into `{now}`, then close this.')
+        return False
+    # Its branch gone, GitHub has closed it already.
+    gh('pr', 'close', str(pull), '--comment', f'Cascades from `{source}` go to `{now}` now, so this one is made again '
+       'there.', check=False)
     git('fetch', '--prune', '--quiet', 'origin')
     print(f'#{pull} closed: {source} carries into {now} now.')
     cascade(repo, source, default, workflow, reconciled=True)
@@ -414,7 +429,7 @@ def land(repo, pull, source, target, head, workflow):
         subject, _, rest = messages.partition('\n')
         gh('pr', 'merge', str(pull), '--squash', '--match-head-commit', head,
            '--subject', f'{subject} (#{pull})', '--body', rest.strip())
-        drop(repo, head_branch(source, target))
+        drop(head_branch(source, target), head)
         print(f'Merged #{pull} into {target}.')
     elif outcome == 'failed':
         gh('pr', 'comment', str(pull), '--body', 'A check failed, so this stays open. Fix it here and push: the '
@@ -430,6 +445,39 @@ def reconcile(repo, branches, default, workflow):
         source, target = source_of(pull['body'])
         if pull['baseRefName'] == target and version(source) and source in branches:
             retarget(repo, pull['number'], source, target, branches, default, workflow)
+
+
+def disarm(pull):
+    """Takes the pull request out of auto-merge and the merge queue, so GitHub can't merge it by itself: its state then."""
+    gh('pr', 'merge', str(pull), '--disable-auto', check=False)
+    node = gh('pr', 'view', str(pull), '--json', 'id', '--jq', '.id')
+    gh('api', 'graphql', '-f', 'query=mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }',
+       '-F', f'id={node}', check=False)
+    return json.loads(gh('pr', 'view', str(pull), '--json', 'state'))['state']
+
+
+def cut(repo, branch, at, default, workflow):
+    """Cuts the release branch `branch` at `at`. First every open cascade whose route it changes is disarmed, so none can
+    merge on the old route while it is cut; then they are made again on the new one."""
+    if not version(branch):
+        raise Failed(f'{branch} is not a release branch, such as release/0.11 or release/host-0.3.')
+    if remote(branch):
+        raise Failed(f'{branch} exists already.')
+    commit = out('rev-parse', '--verify', f'{at}^{{commit}}')
+    branches = release_branches()
+    for pull in open_pulls():
+        source, target = source_of(pull['body'])
+        if version(source) and source in branches and next_branch(source, branches + [branch], default) != target:
+            state = disarm(pull['number'])
+            print(f'#{pull["number"]} ({source} into {target}) disarmed: {source} carries into '
+                  f'{next_branch(source, branches + [branch], default)} once {branch} is cut.')
+            if state == 'MERGED':
+                # Merged before it could be stopped: the cascade from its source brings it to the new branch after.
+                print(f'::warning::#{pull["number"]} merged into {target} before {branch} was cut.')
+    push(branch, commit, None)
+    git('fetch', '--prune', '--quiet', 'origin')
+    print(f'{branch} cut at {at} ({commit[:8]}).')
+    reconcile(repo, release_branches(), default, workflow)
 
 
 def cascade(repo, source, default, workflow, reconciled=False):
@@ -463,9 +511,9 @@ def cascade(repo, source, default, workflow, reconciled=False):
     conflicts = sorted(set(conflicts) | set(unsure))
     if base == head or (not conflicts and tree == out('rev-parse', f'{ours}^{{tree}}')):
         print(f'{target} has everything of {source} already.')
-        if existing:
-            gh('pr', 'close', str(existing['number']), '--comment', f'{target} has everything of {source} already.')
-            drop(repo, branch)
+        if existing and (not tip or drop(branch, tip)):
+            gh('pr', 'close', str(existing['number']), '--comment', f'{target} has everything of {source} already.',
+               check=False)
         return
     commit = out('commit-tree', tree, '-p', ours, '-F', '-', input=message(source, target, base, head, conflicts),
                  env=identity())
@@ -535,12 +583,18 @@ def main():
     given = arguments.add_mutually_exclusive_group(required=True)
     given.add_argument('--from', dest='source')
     given.add_argument('--pull', type=int)
+    given.add_argument('--cut', help='a release branch to cut, at --at')
+    arguments.add_argument('--at', help='the tag or commit to cut it at')
     given = arguments.parse_args()
+    if given.cut and not given.at:
+        arguments.error('--cut needs --at, the tag or commit to cut it at')
     repo, default = os.environ['GITHUB_REPOSITORY'], os.environ.get('DEFAULT_BRANCH', 'main')
     workflow = os.environ.get('GITHUB_WORKFLOW', 'cascade')
     try:
         if given.source:
             cascade(repo, given.source, default, workflow)
+        elif given.cut:
+            cut(repo, given.cut, given.at, default, workflow)
         else:
             after(repo, given.pull, default, workflow)
     except Failed as failure:
