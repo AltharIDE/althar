@@ -63,7 +63,10 @@ function Middle({ text, keep, className }: { text: string; keep: number; classNa
 
 /** A folder keeps its last name whole: …/althar. */
 const folderTail = (path: string) => {
-  const at = path.replace(/[/\\]+$/, '').search(/[/\\][^/\\]*$/)
+  // Past any slashes it ends with, its last separator: a loop, not a pattern, so a run of slashes costs nothing.
+  let end = path.length
+  while (end > 0 && (path[end - 1] === '/' || path[end - 1] === '\\')) end -= 1
+  const at = Math.max(path.lastIndexOf('/', end - 1), path.lastIndexOf('\\', end - 1))
   return at < 0 ? path.length : Math.min(path.length - at, 28)
 }
 
