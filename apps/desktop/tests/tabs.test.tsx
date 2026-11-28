@@ -442,9 +442,13 @@ describe('the window’s tabs', () => {
         release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.3.0', base: 'https://x' })),
       } as unknown as Host['workers'],
     })
+    // The home records an update asked, and its reads say so after.
+    let asked = false
     return windowAt('/', [project], host, homeOf, {
-      getWorkers: vi.fn(async () => ({ enabled: true, workers: [hermes] })),
-      updateWorker: vi.fn(async () => undefined),
+      getWorkers: vi.fn(async () => ({ enabled: true, workers: [asked ? { ...hermes, update: { state: 'started' as const } } : hermes] })),
+      updateWorker: vi.fn(async () => {
+        asked = true
+      }),
     })
   }
 

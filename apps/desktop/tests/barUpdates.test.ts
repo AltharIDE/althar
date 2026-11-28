@@ -71,7 +71,13 @@ describe('a worker’s update', () => {
     expect(updating({ enabled: true, workers: [worker()] })).toBe(false)
     expect(updating({ enabled: true, workers: [worker({ update: { state: 'started' } })] })).toBe(true)
     expect(updating(null)).toBe(false)
-    expect(updatingWorkersOf({ enabled: true, workers: [worker({ busy: true, task })] }, '0.3.0', new Map())).toEqual([
+    expect(
+      updatingWorkersOf({ enabled: true, workers: [worker({ busy: true, task })] }, '0.3.0', {
+        intents: new Map(),
+        refused: new Map(),
+        cancelRefused: new Map(),
+      }),
+    ).toEqual([
       {
         id: 'wrk_hermes',
         name: 'hermes-box',

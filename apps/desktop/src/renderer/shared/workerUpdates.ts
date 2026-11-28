@@ -12,14 +12,20 @@ import { useServices } from '../data/services'
  * A worker's update, as the window offers and runs it: the newest worker
  * release (main reads it, as Add a worker does), each worker's release
  * against it, and what its home says of an update asked for
- * (`HomeWorker.update`), as the kit says it (`WorkerUpdateView`). Asking
- * shows at once, the worker's update asked; where the home refuses, that
- * worker's update says why, with Try again, until it's asked again.
+ * (`HomeWorker.update`), as the kit says it (`WorkerUpdateView`).
+ *
+ * What the person pressed shows at once and holds, by worker, until a read
+ * the home answered after taking it says so: a read that left before it
+ * (the poll, a refresh, another view's) can't put Update or Cancel back
+ * meanwhile. Where the home refuses an update, that worker's update says
+ * why, with Try again, until it's asked again; a Cancel too late says so on
+ * the update under way.
  */
 
 export const updateText = {
   noneNewer: 'It found no newer release it trusts. It checks again within the hour.',
   refused: 'Couldn’t ask it to update.',
+  cancelRefused: 'It had started already, so it goes on.',
 }
 
 /** The newest worker release published, where main can find it: null where none is, or it can't be found out. */
@@ -41,26 +47,70 @@ export const useNewestWorkerRelease = (enabled = true): string | null => {
   )
 }
 
-/* ---- refusals, kept here until asked again ------------------------------------------------- */
+/* ---- what was pressed, and what the home refused, by worker ----------------------------------- */
 
-let refusals: ReadonlyMap<string, string> = new Map()
+/** An update asked, or taken back, by worker: held until a read the home answered after taking it. */
+export type Intent = 'update' | 'cancel'
+
+interface Pressed {
+  /** Pressed, and not yet confirmed by a fresh read. */
+  readonly intents: ReadonlyMap<string, Intent>
+  /** Why the home refused to ask a worker, as it said: until it's asked again. */
+  readonly refused: ReadonlyMap<string, string>
+  /** A Cancel the home refused, as the update had started: said on it until it ends, or the next press. */
+  readonly cancelRefused: ReadonlyMap<string, string>
+}
+
+let pressed: Pressed = { intents: new Map(), refused: new Map(), cancelRefused: new Map() }
 const listeners = new Set<() => void>()
-const setRefusals = (next: ReadonlyMap<string, string>) => {
-  refusals = next
+const change = (next: (was: Pressed) => Partial<Pressed>) => {
+  pressed = { ...pressed, ...next(pressed) }
   for (const listener of listeners) listener()
 }
 const subscribe = (listener: () => void) => {
   listeners.add(listener)
   return () => void listeners.delete(listener)
 }
-/** Why the home refused to ask each worker, by its id, as it said. */
-export const useRefusals = () => useSyncExternalStore(subscribe, () => refusals)
+const without = <V>(map: ReadonlyMap<string, V>, id: string) => {
+  const next = new Map(map)
+  next.delete(id)
+  return next
+}
+/** What was pressed and not yet confirmed, and what the home refused, by worker. */
+export const usePressed = (): Pressed => useSyncExternalStore(subscribe, () => pressed)
+
+/**
+ * The workers as a read says them, with what was pressed and not yet confirmed laid over: an update asked shows asked
+ * where the read doesn't yet say it's under way; one taken back shows none where the read still has it asked.
+ */
+export const withIntents = (workers: HomeWorkers | null, intents: ReadonlyMap<string, Intent>): HomeWorkers | null =>
+  workers === null || intents.size === 0
+    ? workers
+    : {
+        ...workers,
+        workers: workers.workers.map((one) => {
+          const intent = intents.get(one.workerId)
+          const state = one.update?.state
+          const going = state === 'asked' || state === 'started' || state === 'waiting'
+          if (intent === 'update' && !going) return { ...one, update: { state: 'asked' } }
+          if (intent === 'cancel' && (state === 'asked' || state === 'waiting')) {
+            const { update: _, ...rest } = one
+            return rest
+          }
+          return one
+        }),
+      }
 
 /**
  * Where a worker's update stands, as the window shows it: none where it runs the newest and none was asked for, or
  * neither its release nor the newest is known.
  */
-export const workerUpdateOf = (worker: HomeWorker, newest: string | null, refused?: string): WorkerUpdateView | undefined => {
+export const workerUpdateOf = (
+  worker: HomeWorker,
+  newest: string | null,
+  refused?: string,
+  cancelRefused?: string,
+): WorkerUpdateView | undefined => {
   const behind = worker.release !== undefined && newest !== null && newer(newest, worker.release)
   const to = newest ?? worker.release ?? ''
   if (refused !== undefined) return { state: 'failed', to, message: refused }
@@ -72,10 +122,18 @@ export const workerUpdateOf = (worker: HomeWorker, newest: string | null, refuse
         ? { state: 'whenOnline', to }
         : worker.task !== null
           ? { state: 'afterTask', to }
-          : { state: 'running', to, step: 'getting' }
+          : { state: 'running', to, step: 'getting', ...(cancelRefused === undefined ? {} : { note: cancelRefused }) }
+    case 'waiting':
+      // Something of its own runs there: its home asks it again before long.
+      return worker.connected ? { state: 'afterTask', to } : { state: 'whenOnline', to }
     case 'started':
       // Its updater restarts it: gone from its home meanwhile.
-      return { state: 'running', to, step: worker.connected ? 'getting' : 'restarting' }
+      return {
+        state: 'running',
+        to,
+        step: worker.connected ? 'getting' : 'restarting',
+        ...(cancelRefused === undefined ? {} : { note: cancelRefused }),
+      }
     case 'done':
       return { state: 'done', version: update.version }
     case 'failed':
@@ -91,21 +149,19 @@ export const workerUpdateOf = (worker: HomeWorker, newest: string | null, refuse
 }
 
 /** The home's workers as their updates need them, for the kit's `fleetUpdate`. */
-export const updatingWorkersOf = (
-  workers: HomeWorkers | null,
-  newest: string | null,
-  refused: ReadonlyMap<string, string>,
-): UpdatingWorker[] =>
-  (workers?.workers ?? []).map((worker) => ({
+export const updatingWorkersOf = (workers: HomeWorkers | null, newest: string | null, said: Pressed): UpdatingWorker[] =>
+  (withIntents(workers, said.intents)?.workers ?? []).map((worker) => ({
     id: worker.workerId,
     name: workerName(worker),
     task: worker.task === null ? null : { title: worker.task.title },
-    update: workerUpdateOf(worker, newest, refused.get(worker.workerId)),
+    update: workerUpdateOf(worker, newest, said.refused.get(worker.workerId), said.cancelRefused.get(worker.workerId)),
   }))
 
 /** Whether any worker's update is asked for or under way: its home is read more often then. */
 export const updating = (workers: HomeWorkers | null | undefined) =>
-  (workers?.workers ?? []).some((one) => one.update?.state === 'asked' || one.update?.state === 'started')
+  (workers?.workers ?? []).some(
+    (one) => one.update?.state === 'asked' || one.update?.state === 'started' || one.update?.state === 'waiting',
+  )
 
 export interface WorkerUpdatesModel {
   /** Asks these workers to update: each shows asked at once; one the home refuses says why. */
@@ -116,51 +172,66 @@ export interface WorkerUpdatesModel {
 
 export const useWorkerUpdates = (): WorkerUpdatesModel => {
   const { client, cache } = useServices()
-  const patch = useCallback(
-    (ids: ReadonlySet<string>, update: HomeWorker['update']) => {
-      void cache.cancelQueries({ queryKey: keys.workers })
-      cache.setQueryData<HomeWorkers>(keys.workers, (was) =>
-        was === undefined
-          ? was
-          : {
-              ...was,
-              workers: was.workers.map((one) => {
-                if (!ids.has(one.workerId)) return one
-                const { update: _, ...rest } = one
-                return update === undefined ? rest : { ...rest, update }
-              }),
-            },
-      )
-    },
+  /**
+   * The home took it, or refused it: a read sent from now on (any read still out is let go) says it, and once that's in,
+   * what was pressed is let go too.
+   */
+  const settle = useCallback(
+    (workerId: string, intent: Intent) =>
+      void cache
+        .refetchQueries({ queryKey: keys.workers }, { cancelRefetch: true })
+        .catch(() => undefined)
+        .finally(() => {
+          if (pressed.intents.get(workerId) === intent) change((was) => ({ intents: without(was.intents, workerId) }))
+        }),
     [cache],
   )
   const update = useCallback(
     (workerIds: readonly string[]) => {
       if (workerIds.length === 0) return
-      const next = new Map(refusals)
-      for (const id of workerIds) next.delete(id)
-      setRefusals(next)
-      patch(new Set(workerIds), { state: 'asked' })
+      void cache.cancelQueries({ queryKey: keys.workers })
+      change((was) => {
+        const intents = new Map(was.intents)
+        const refused = new Map(was.refused)
+        const cancelRefused = new Map(was.cancelRefused)
+        for (const id of workerIds) {
+          intents.set(id, 'update')
+          refused.delete(id)
+          cancelRefused.delete(id)
+        }
+        return { intents, refused, cancelRefused }
+      })
       for (const workerId of workerIds)
         client.updateWorker(workerId).then(
-          () => undefined,
+          () => settle(workerId, 'update'),
           (error: unknown) => {
-            setRefusals(new Map(refusals).set(workerId, error instanceof Error ? error.message : updateText.refused))
-            void cache.refetchQueries({ queryKey: keys.workers })
+            change((was) => ({ refused: new Map(was.refused).set(workerId, error instanceof Error ? error.message : updateText.refused) }))
+            settle(workerId, 'update')
           },
         )
     },
-    [cache, client, patch],
+    [cache, client, settle],
   )
   const cancel = useCallback(
     (workerId: string) => {
-      patch(new Set([workerId]), undefined)
+      void cache.cancelQueries({ queryKey: keys.workers })
+      change((was) => ({ intents: new Map(was.intents).set(workerId, 'cancel'), cancelRefused: without(was.cancelRefused, workerId) }))
       client.cancelWorkerUpdate(workerId).then(
-        () => undefined,
-        () => void cache.refetchQueries({ queryKey: keys.workers }),
+        () => settle(workerId, 'cancel'),
+        () => {
+          // Told already: it goes on, and says so where Cancel was pressed.
+          change((was) => ({
+            intents: without(was.intents, workerId),
+            cancelRefused: new Map(was.cancelRefused).set(workerId, updateText.cancelRefused),
+          }))
+          settle(workerId, 'cancel')
+        },
       )
     },
-    [cache, client, patch],
+    [cache, client, settle],
   )
   return { update, cancel }
 }
+
+/** For tests: forgets what was pressed. */
+export const forgetPressed = () => change(() => ({ intents: new Map(), refused: new Map(), cancelRefused: new Map() }))

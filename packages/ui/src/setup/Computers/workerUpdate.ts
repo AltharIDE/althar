@@ -15,8 +15,11 @@ export type WorkerUpdateView =
   | { readonly state: 'afterTask'; readonly to: string }
   /** Asked while it's offline: it updates once it connects. */
   | { readonly state: 'whenOnline'; readonly to: string }
-  /** Its updater runs: getting the release while it's connected, restarting once it drops. */
-  | { readonly state: 'running'; readonly to: string; readonly step: 'getting' | 'restarting' }
+  /**
+   * Its updater runs: getting the release while it's connected, restarting once it drops; with a note where something
+   * pressed meanwhile couldn't be done, such as a Cancel too late.
+   */
+  | { readonly state: 'running'; readonly to: string; readonly step: 'getting' | 'restarting'; readonly note?: string | undefined }
   | { readonly state: 'done'; readonly version: string }
   | { readonly state: 'failed'; readonly to: string; readonly message: string }
 
@@ -225,7 +228,7 @@ export function fleetUpdate(list: readonly UpdatingWorker[], text: Partial<Worke
           state: 'running',
           one: single,
           title: t.running.one(name),
-          line: update.step === 'getting' ? t.step.getting(update.to) : t.step.restarting(name),
+          line: update.note ?? (update.step === 'getting' ? t.step.getting(update.to) : t.step.restarting(name)),
           step: { at: update.step === 'getting' ? 0 : 1, names: steps(name) },
           ids: [],
           byHand: false,

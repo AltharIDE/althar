@@ -8,7 +8,7 @@ import { LAST_WITHOUT_HOME_SETTINGS, newer } from '../../../homes'
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { useUpdate } from '../../shared/useUpdate'
-import { updating, updatingWorkersOf, useNewestWorkerRelease, useRefusals, useWorkerUpdates } from '../../shared/workerUpdates'
+import { updating, updatingWorkersOf, useNewestWorkerRelease, usePressed, useWorkerUpdates } from '../../shared/workerUpdates'
 import { useHomeName, useHomeUpdating } from '../homes/useHomes'
 import { hideUpdate, useHiddenUpdates } from './hidden'
 import { appRow, homeRow, whereStill, workersRow } from './rows'
@@ -62,9 +62,9 @@ export function BarUpdates() {
   })
   const workers = workersRead.data ?? null
   const newest = useNewestWorkerRelease((workers?.workers ?? []).some((one) => one.release !== undefined))
-  const refusals = useRefusals()
+  const pressed = usePressed()
   const updates = useWorkerUpdates()
-  const list = updatingWorkersOf(workers, newest, refusals)
+  const list = updatingWorkersOf(workers, newest, pressed)
   const counted = list.filter((one) => one.update !== undefined).length
 
   const hidden = useHiddenUpdates()
