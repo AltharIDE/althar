@@ -72,10 +72,6 @@
   flex-direction: column;
   gap: 10px;
 }
-/* The issue a task came from, heading its thread. */
-.issue {
-  display: flex;
-}
 .fileAll {
   display: flex;
   justify-content: flex-end;
