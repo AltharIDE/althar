@@ -70,8 +70,17 @@ test('pairs a phone with This Mac from the homes menu, over HTTPS, and takes it 
     await dialog.getByRole('button', { name: 'Done' }).click()
     await expect(dialog).toBeHidden()
 
-    // Again: a new code at once, the phone listed under it, and Remove takes it off.
-    dialog = await openPairing()
+    // Paired, it's among the Mac's computers too: Settings › Computers lists it under Phones.
+    await page.keyboard.press('ControlOrMeta+Shift+Comma')
+    await page.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'Computers' }).click()
+    const phones = page.getByRole('main').getByRole('region', { name: 'Phones' })
+    await expect(phones.getByText('iPhone', { exact: true })).toBeVisible()
+    await phones.scrollIntoViewIfNeeded()
+    await shoot(page, '3-settings-computers')
+
+    // Again, from Settings' own Pair a phone…: a new code at once, the phone listed under it, and Remove takes it off.
+    await phones.getByRole('button', { name: 'Pair a phone…' }).click()
+    dialog = page.getByRole('dialog', { name: 'Pair a phone with This Mac' })
     await expect(dialog.getByText('Scan it with your phone’s camera')).toBeVisible()
     await expect(dialog.getByText('Paired with a code')).toBeVisible()
     await dialog.getByText('iPhone', { exact: true }).hover()
@@ -80,6 +89,8 @@ test('pairs a phone with This Mac from the homes menu, over HTTPS, and takes it 
     await shoot(page, '4-remove')
     await asking.getByRole('button', { name: 'Remove' }).click()
     await expect(dialog.getByText('Paired with a code')).toBeHidden()
+    await page.keyboard.press('Escape')
+    await expect(phones.getByText('No phones paired with This Mac yet.')).toBeVisible()
   } finally {
     await electronApp.close()
   }
