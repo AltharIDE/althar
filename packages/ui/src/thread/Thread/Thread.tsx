@@ -34,7 +34,15 @@ export function Thread({ children, label, busy, className, ref, ...rest }: Threa
     [ref],
   )
   return (
-    <section ref={both} aria-label={label} aria-busy={busy || undefined} className={cx(s.thread, className)} data-arrivals="" {...rest}>
+    <section
+      ref={both}
+      aria-label={label}
+      aria-busy={busy || undefined}
+      className={cx(s.thread, className)}
+      data-arrivals=""
+      data-thread-column=""
+      {...rest}
+    >
       {children}
     </section>
   )
