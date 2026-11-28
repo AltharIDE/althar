@@ -30,6 +30,10 @@ message AgentWorkerFrame {
     AgentFileChunk file_chunk = 13;
     AgentRunBytes index_patch = 14;
     AgentRunAccepted accepted = 15;
+    // How an update the home asked for went, where it ended without the
+    // worker restarting: on success it restarts, and its next hello says its
+    // new release.
+    AgentWorkerUpdateState update_state = 16;
   }
 }
 
@@ -57,6 +61,10 @@ message AgentHomeFrame {
     // computer. Sent between runs, or instead of a hello to a worker the home
     // removed while it was away.
     AgentWorkerRemoved removed = 19;
+    // The person asked the worker to update now: it runs its own updater, as
+    // its hourly timer would. Sent between runs, and only to a worker whose
+    // hello says it updates on request.
+    AgentWorkerUpdate update = 20;
   }
 }
 
@@ -77,6 +85,9 @@ message AgentWorkerHello {
   string release = 10;
   // What its own check found it can do, where it has checked.
   AgentWorkerReadiness readiness = 11;
+  // It updates when its home asks (AgentWorkerUpdate): it has its updater's
+  // service. An older worker, or one set up by hand, doesn't.
+  bool updates_on_request = 12;
 }
 
 // A worker's check of itself, as its setup and its hourly timer run it: whether
@@ -520,3 +531,25 @@ message DiagnosticLog {
 }
 
 message AgentWorkerRemoved {}
+
+message AgentWorkerUpdate {}
+
+// Where an update the home asked for got to, as the worker's updater said.
+message AgentWorkerUpdateState {
+  AgentWorkerUpdateOutcome outcome = 1;
+  // The newest release its updater found, where it says.
+  string version = 2;
+  // Why it failed, in the updater's own words; at most 512 characters.
+  string message = 3;
+}
+
+enum AgentWorkerUpdateOutcome {
+  AGENT_WORKER_UPDATE_OUTCOME_UNSPECIFIED = 0;
+  // Its updater started: it restarts into the new release once it has it.
+  AGENT_WORKER_UPDATE_OUTCOME_STARTED = 1;
+  // No newer release it trusts.
+  AGENT_WORKER_UPDATE_OUTCOME_CURRENT = 2;
+  // Something of its own runs: it updates later, between runs.
+  AGENT_WORKER_UPDATE_OUTCOME_WAITING = 3;
+  AGENT_WORKER_UPDATE_OUTCOME_FAILED = 4;
+}

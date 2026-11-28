@@ -1203,6 +1203,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getPlaces: vi.fn(async () => ({ busy: 2, configured: 4, atOnce: 4, why: null, waiting: 0 })),
     getWorkers: vi.fn(async () => ({ enabled: false, workers: [] })),
     removeWorker: vi.fn(async () => undefined),
+    updateWorker: vi.fn(async () => undefined),
+    cancelWorkerUpdate: vi.fn(async () => undefined),
     addWorker: vi.fn(async () => {
       throw new Error('No worker to add here.')
     }),

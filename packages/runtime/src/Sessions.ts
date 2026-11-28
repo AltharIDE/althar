@@ -54,7 +54,7 @@ import {
   tailOf,
   uncoloured,
 } from './leftRunning'
-import { Limits, backWords, routeWords } from './Limits'
+import { Limits, backWords, goneWords, routeWords } from './Limits'
 import { type KeptLineComment, withLineComments } from './lineComments'
 import { Live } from './Live'
 import { noteServerStatus } from './mcpHealth'
@@ -70,7 +70,7 @@ import { MERGE_REVIEW, mergeCopyOf, reviewCopyOf } from './reviewCopy'
 import { type InputFile, keptId, requestFilesForTurn } from './sentFiles'
 import type { InputImage } from './sentImages'
 import { makeSessionBriefs } from './sessionBriefs'
-import { Models } from './Models'
+import { Models, isModel } from './Models'
 import { Installs } from './Installs'
 import { type SessionConnectionsDependencies, makeSessionConnections } from './sessionConnections'
 import {
@@ -106,7 +106,7 @@ import { teamLeadOf } from './teamLead'
 import { type OutputSoFar, addItem, keepAltharCall, moveToEnd, toolItem } from './threads'
 import { ToolServer } from './ToolServer'
 import { canUndoTask, recoverTurnUndo, undoConversation, undoTarget } from './turnUndo'
-import { agentSaid, lostWords, startedAfreshWords, words } from './words'
+import { agentSaid, lostWords, startedAfreshWords, summarize, words } from './words'
 import { taskWorker } from './workerExecution'
 import { holdOn, holdWords, WORKER_WAIT, WorkerTaken } from './workerWait'
 
@@ -1561,7 +1561,7 @@ export class Sessions extends Context.Service<
           )
         })
 
-      const { activate, beforeTakingOver, busyNow, connectSession, stopRunning } = makeSessionConnections({
+      const { activate, beforeTakingOver, busyNow, callOffWaits, connectSession, stopRunning } = makeSessionConnections({
         accounts,
         get asideState(): SessionConnectionsDependencies['asideState'] {
           return asideState
@@ -1584,6 +1584,19 @@ export class Sessions extends Context.Service<
             onNone: () => Effect.succeed(false),
             onSome: (service) => service.install(definition).pipe(Effect.as(true)),
           }),
+        modelGone: (accountId, model) =>
+          Option.match(models, { onNone: () => Effect.void, onSome: (known) => known.gone(accountId, model) }),
+        listedLately: (agentId, model) =>
+          Option.match(models, {
+            onNone: () => Effect.succeed(false),
+            onSome: (known) =>
+              known.catalog.pipe(
+                Effect.map(
+                  (catalog) => catalog.find((one) => one.agentId === agentId)?.models.some((one) => isModel(model, one.id)) ?? false,
+                ),
+                Effect.orElseSucceed(() => false),
+              ),
+          }),
         quietFor,
         signInFault: planUsage.signInFault,
         run,
@@ -1605,6 +1618,14 @@ export class Sessions extends Context.Service<
       const locks = makeKeyedLock()
       const exclusive = locks.withLock
 
+      /** Each thread's stops so far: a start's wait for its model ends at one counted since it was asked for, and nothing is handed on after (`elsewhereIfGone`). */
+      const stops = new Map<string, number>()
+      const stopsOf = (threadId: string) => stops.get(threadId) ?? 0
+      const stoppedSince = (threadId: string, since: number) => stopsOf(threadId) !== since
+      /** A start handed on that its thread's stop came before: nothing starts. */
+      const stoppedFirst = (agentId: string) =>
+        Effect.fail(new SessionFailed({ agentId, reason: 'Stopped before it started.', summary: 'Stopped before it started.' }))
+
       const startLocked = (
         input: {
           readonly threadId: string
@@ -1616,12 +1637,18 @@ export class Sessions extends Context.Service<
           readonly goalRevision?: number
           /** Who it stands in for, as the session it starts again after did. */
           readonly standsIn?: StandIn
+          /** The thread's stops counted as its start was asked for (`stopsOf`). */
+          readonly stopsSince?: number
+          /** Handed the work as another agent stopped listing its model: a stop counted since starts nothing. */
+          readonly handedOn?: boolean
         },
         created?: Deferred.Deferred<string>,
       ) =>
         exclusive(
           input.threadId,
           Effect.gen(function* () {
+            const since = input.stopsSince ?? stopsOf(input.threadId)
+            if (input.handedOn === true && stoppedSince(input.threadId, since)) return yield* stoppedFirst(input.agentId)
             const current = threads.get(input.threadId)
             if (current !== undefined) {
               // A live request may have resumed it before startup recovery took the lock. That already owns the queue.
@@ -1692,9 +1719,9 @@ export class Sessions extends Context.Service<
               Effect.onError(() => (briefing === undefined ? Effect.void : Fiber.interrupt(briefing))),
             )
             if (created !== undefined) yield* Deferred.succeed(created, sessionId)
-            const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort).pipe(
-              Effect.onError(() => (briefing === undefined ? Effect.void : Fiber.interrupt(briefing))),
-            )
+            const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort, () =>
+              stoppedSince(input.threadId, since),
+            ).pipe(Effect.onError(() => (briefing === undefined ? Effect.void : Fiber.interrupt(briefing))))
             // Every session starts from a brief (ADR-005), even the first on a task.
             const brief = yield* (briefing === undefined ? briefFor(thread, { kind: 'start' }) : Fiber.join(briefing)).pipe(
               Effect.tap(() => goalStillActive),
@@ -2183,10 +2210,15 @@ export class Sessions extends Context.Service<
           readonly origin?: 'news' | 'system'
         }
         readonly byPerson?: boolean
+        /** As `startLocked`'s. */
+        readonly stopsSince?: number
+        readonly handedOn?: boolean
       }) =>
         exclusive(
           input.threadId,
           Effect.gen(function* () {
+            const since = input.stopsSince ?? stopsOf(input.threadId)
+            if (input.handedOn === true && stoppedSince(input.threadId, since)) return yield* stoppedFirst(input.agentId)
             yield* notAbandoned(input.threadId)
             const thread = yield* loadThread(input.threadId)
             const entry = yield* (yield* Agents).get(input.agentId)
@@ -2227,9 +2259,9 @@ export class Sessions extends Context.Service<
             if (previous !== undefined) previous.handover = 'under_way'
             return yield* Effect.gen(function* () {
               const sessionId = yield* createSession(thread, entry.definition.id, account, input.model, standsIn)
-              const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort).pipe(
-                Effect.catchTag('WorkerTaken', takenWords),
-              )
+              const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort, () =>
+                stoppedSince(input.threadId, since),
+              ).pipe(Effect.catchTag('WorkerTaken', takenWords))
               const brief = yield* Effect.gen(function* () {
                 if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })
                 const options = yield* connected.agent.options
@@ -2327,9 +2359,10 @@ export class Sessions extends Context.Service<
             )
             holder = to
             const sessionId = yield* createSession(thread, previous.entry.definition.id, previous.account, model, standsIn)
-            const connected = yield* connectSession(thread, sessionId, previous.entry, previous.account, model, effort).pipe(
-              Effect.catchTag('WorkerTaken', takenWords),
-            )
+            const since = stopsOf(previous.thread.threadId)
+            const connected = yield* connectSession(thread, sessionId, previous.entry, previous.account, model, effort, () =>
+              stoppedSince(previous.thread.threadId, since),
+            ).pipe(Effect.catchTag('WorkerTaken', takenWords))
             yield* Effect.andThen(
               stopRunning(previous, { state: 'superseded', by: sessionId }),
               addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
@@ -2422,17 +2455,9 @@ export class Sessions extends Context.Service<
       ) =>
         Effect.gen(function* () {
           if (!replacing && threads.has(input.threadId)) return { input, said: undefined }
-          const sql = yield* SqlClient.SqlClient
-          const [thread] = yield* sql<{ projectId: string; kind: string; nodeKey: string | null; taskId: string | null }>`
-            SELECT project_id, kind, node_key, task_id FROM threads WHERE id = ${input.threadId}`
+          const thread = yield* placeOf(input.threadId)
           if (thread === undefined) return { input, said: undefined }
-          // A review's thread: the lead it reviews, as it leads now on the task's thread.
-          const [lead] =
-            thread.kind === 'step' && thread.nodeKey === 'review' && thread.taskId !== null
-              ? yield* sql<{ agentId: string; model: string | null }>`
-                  SELECT s.agent_id, s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
-                  WHERE t.task_id = ${thread.taskId} AND t.kind = 'task' ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
-              : []
+          const { lead } = thread
           const way = yield* limits.route({
             agentId: input.agentId,
             model: input.model ?? null,
@@ -2481,11 +2506,136 @@ export class Sessions extends Context.Service<
       /** A session started where its model runs (`routed`), the thread saying where that isn't where it was asked for. */
       const start = (asked: Parameters<typeof startOn>[0], created?: Deferred.Deferred<string>, waiting?: Deferred.Deferred<void>) =>
         Effect.gen(function* () {
+          const since = stopsOf(asked.threadId)
           const { input, said, refused } = yield* routed(asked, false)
           if (refused !== undefined) return yield* new SessionFailed({ agentId: input.agentId, reason: refused, summary: refused })
-          const sessionId = yield* startOn(input, created, waiting)
+          const sessionId = yield* startOn({ ...input, stopsSince: since }, created, waiting).pipe(
+            Effect.catchTag('SessionFailed', (failed) => elsewhereIfGone(input, failed, since, (moved) => startOn(moved, created))),
+          )
           if (said !== undefined) yield* sayRouted(input.threadId, sessionId, said)
           return sessionId
+        })
+
+      /**
+       * The task's lead as it leads now: its live session; else the last that took the thread over, not a start or a switch
+       * that failed or is still under way, which left the lead before it where it was.
+       */
+      const leadOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
+          if (task === undefined) return undefined
+          const live = threads.get(task.id)
+          const [lead] =
+            live !== undefined
+              ? yield* sql<{ agentId: string; model: string | null }>`
+                  SELECT agent_id, model FROM provider_sessions WHERE id = ${live.sessionId}`
+              : yield* sql<{ agentId: string; model: string | null }>`
+                  SELECT agent_id, model FROM provider_sessions WHERE thread_id = ${task.id} AND state NOT IN ('failed', 'starting')
+                  ORDER BY started_at DESC, rowid DESC LIMIT 1`
+          return lead
+        })
+
+      /** A thread's project, and on a review's thread the lead it reviews, as it leads now on the task's thread. */
+      const placeOf = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ projectId: string; kind: string; nodeKey: string | null; taskId: string | null }>`
+            SELECT project_id, kind, node_key, task_id FROM threads WHERE id = ${threadId}`
+          if (thread === undefined) return undefined
+          // A review after merge too, on a thread of its own (MergeReviews.ts): never on the lead's agent and model either.
+          const lead =
+            thread.kind === 'step' && (thread.nodeKey === 'review' || thread.nodeKey === MERGE_REVIEW) && thread.taskId !== null
+              ? yield* leadOf(thread.taskId)
+              : undefined
+          return { projectId: thread.projectId, lead }
+        })
+
+      /**
+       * A start whose agent stopped listing its model, and still didn't when asked again a while (`modelGone`,
+       * sessionConnections.ts): the same model through another agent with room, never one the person turned it off for, nor
+       * another model unasked, and never the lead a review reviews; the thread says so. One that doesn't list it either goes
+       * on to the next, the first failure's words kept. Where none has it, or its thread was stopped meanwhile, the start fails
+       * saying what happened, and its step asks the person. Any other failure stays as it is.
+       */
+      const elsewhereIfGone = <
+        I extends { readonly threadId: string; readonly agentId: string; readonly model?: string; readonly accountId?: string },
+        E,
+        R,
+      >(
+        input: I,
+        failed: SessionFailed,
+        since: number,
+        again: (moved: I) => Effect.Effect<string, E, R>,
+      ) =>
+        Effect.gen(function* () {
+          const model = failed.modelGone
+          if (model === undefined) return yield* failed
+          const thread = yield* placeOf(input.threadId).pipe(Effect.orElseSucceed(() => undefined))
+          const tried: Array<string> = []
+          const failing = (more: string) =>
+            new SessionFailed({ agentId: failed.agentId, reason: failed.reason, summary: `${failed.summary} ${more}`, modelGone: model })
+          for (;;) {
+            if (stopsOf(input.threadId) !== since) return yield* failed
+            const way =
+              thread === undefined
+                ? undefined
+                : yield* limits
+                    .route({
+                      agentId: input.agentId,
+                      model,
+                      projectId: thread.projectId,
+                      gone: true,
+                      besides: tried,
+                      ...(thread.lead === undefined ? {} : { reviewing: thread.lead }),
+                    })
+                    .pipe(
+                      Effect.map((found) => (found.kind === 'elsewhere' ? found.to : undefined)),
+                      Effect.catchCause((cause) =>
+                        Effect.as(Effect.logWarning('Could not look for another agent with a model gone from its own', cause), undefined),
+                      ),
+                    )
+            const names = yield* Effect.forEach(tried, (agentId) =>
+              Effect.map(limits.named(agentId, null), (one) => one.agent).pipe(Effect.orElseSucceed(() => agentId)),
+            )
+            if (way === undefined)
+              return yield* failing(
+                names.length === 0
+                  ? 'No other agent with room offers it.'
+                  : `${names.join(' and ')} stopped listing it too, and no other agent with room offers it.`,
+              )
+            const { model: _model, accountId: _account, ...rest } = input
+            // Its start counts stops from the first one's, and starts nothing once one came (`startLocked`).
+            const moved = {
+              ...rest,
+              agentId: way.agentId,
+              accountId: way.accountId,
+              ...(way.model === null ? {} : { model: way.model }),
+              stopsSince: since,
+              handedOn: true,
+            } as unknown as I
+            const to = yield* limits
+              .named(way.agentId, way.model, way.accountId)
+              .pipe(Effect.orElseSucceed(() => ({ agent: way.agentId, model: way.model })))
+            const started = yield* Effect.exit(again(moved))
+            if (started._tag === 'Failure') {
+              const error = Cause.findErrorOption(started.cause)
+              const other = Option.isSome(error) && error.value instanceof SessionFailed ? error.value : undefined
+              if (stopsOf(input.threadId) !== since) return yield* failed
+              // That one refused it too, as gone from its list or as never offered by what Althar knew: on to the next.
+              if (other?.modelGone !== undefined || other?.modelRefused !== undefined) {
+                tried.push(way.agentId)
+                continue
+              }
+              return yield* failing(
+                `${to.agent} couldn't take it over: ${other === undefined ? summarize(started.cause) : other.summary}`.trim(),
+              )
+            }
+            // Named as the agent taking it over lists it: the one it went from no longer does.
+            const from = yield* limits.named(input.agentId, null).pipe(Effect.orElseSucceed(() => ({ agent: input.agentId })))
+            yield* sayRouted(input.threadId, started.value, goneWords({ from: { agent: from.agent, model: to.model ?? model }, to }))
+            return started.value
+          }
         })
 
       /** Whether a thread's task runs on a worker: its lead's start there may wait for it. */
@@ -2556,9 +2706,12 @@ export class Sessions extends Context.Service<
       /** Another agent taking the thread over, where its model runs (`routed`), as `start`. */
       const switchAgent = (asked: Parameters<typeof switchOn>[0]) =>
         Effect.gen(function* () {
+          const since = stopsOf(asked.threadId)
           const { input, said, refused } = yield* routed(asked, true)
           if (refused !== undefined) return yield* new SessionFailed({ agentId: input.agentId, reason: refused, summary: refused })
-          const sessionId = yield* switchOn(input)
+          const sessionId = yield* switchOn({ ...input, stopsSince: since }).pipe(
+            Effect.catchTag('SessionFailed', (failed) => elsewhereIfGone(input, failed, since, switchOn)),
+          )
           if (said !== undefined) yield* sayRouted(input.threadId, sessionId, said)
           return sessionId
         })
@@ -3283,9 +3436,12 @@ export class Sessions extends Context.Service<
           }),
         stop: (threadId) =>
           Effect.gen(function* () {
-            // Every start waiting for its worker is called off at once, without its thread's lock, which none holds.
+            // Every start waiting for its worker, or for its agent to list its model again, is called off at once, without its
+            // thread's lock, which the first holds none of and the second holds; nothing it would hand on to starts either.
+            stops.set(threadId, stopsOf(threadId) + 1)
             const waits = [...(workerWaits.get(threadId) ?? [])]
-            const waiting = waits.length === 0 ? undefined : waits
+            const listing = yield* callOffWaits(threadId)
+            const waiting = waits.length === 0 && !listing ? undefined : waits
             for (const one of waits) yield* Deferred.succeed(one, undefined)
             return yield* exclusive(
               threadId,

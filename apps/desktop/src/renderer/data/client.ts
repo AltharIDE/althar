@@ -812,6 +812,10 @@ export interface Client {
   readonly getWorkers: () => Promise<HomeWorkers>
   /** Takes a worker out of this home: its certificate is no longer accepted. */
   readonly removeWorker: (workerId: string) => Promise<void>
+  /** Asks a worker to update now: between its runs, or once it connects. Its update unfolds on `HomeWorker.update`. */
+  readonly updateWorker: (workerId: string) => Promise<void>
+  /** Takes back an update asked of a worker that hasn't started. */
+  readonly cancelWorkerUpdate: (workerId: string) => Promise<void>
   /** Has the home sign a worker's own key, as the worker set up over SSH made it: what the worker needs, to hand to it. */
   readonly addWorker: (input: { readonly publicKey: string; readonly name: string; readonly ssh?: string }) => Promise<WorkerGrant>
   /** A one-time code for a machine without SSH to add itself with. */
@@ -1477,6 +1481,8 @@ export const connect = async (
     getPlaces: () => settle(api.GetPlaces({})),
     getWorkers: () => settle(api.GetWorkers({})),
     removeWorker: (workerId) => command((commandId) => api.RemoveWorker({ commandId, workerId })),
+    updateWorker: (workerId) => command((commandId) => api.UpdateWorker({ commandId, workerId })),
+    cancelWorkerUpdate: (workerId) => command((commandId) => api.CancelWorkerUpdate({ commandId, workerId })),
     addWorker: (input) => command((commandId) => api.AddWorker({ commandId, ...input })),
     createWorkerCode: (name) => settle(api.CreateWorkerCode({ name })),
     setWorkerProjects: (workerId, projectIds) => command((commandId) => api.SetWorkerProjects({ commandId, workerId, projectIds })),

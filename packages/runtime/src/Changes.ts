@@ -1562,18 +1562,22 @@ export class Changes extends Context.Service<
         const sql = yield* SqlClient.SqlClient
         for (const project of yield* sql<{ id: string }>`SELECT id FROM projects WHERE archived_at IS NULL`)
           yield* errands.remind(project.id).pipe(contained('Errands.remind', () => undefined))
-        const links = yield* sql<LinkRow>`
-          SELECT id, project_id, task_id, connection_id, product, snapshot, cursor, listening FROM external_links
+        const links = yield* sql<{ id: string; taskId: string }>`
+          SELECT id, task_id FROM external_links
           WHERE kind = 'change' AND listening = 1 AND json_extract(snapshot, '$.state') = 'open'
             AND project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
           ORDER BY created_at`
-        for (const link of links)
-          yield* locked(link.taskId)(
+        for (const listed of links)
+          yield* locked(listed.taskId)(
             Effect.gen(function* () {
+              // Read again once it has the task's lock: a look that held it meanwhile may have heard more of it, such as its
+              // host saying now that it conflicts, and what the sweep read before it waited would undo that.
+              const link = (yield* linksOf(listed.taskId)).find((one) => one.id === listed.id)
+              if (link === undefined || link.listening !== 1) return
               const adapters = yield* connections.adapters(link.connectionId ?? '')
               if (adapters.host === undefined) return
               const before = yield* decodeSnapshot(link.snapshot)
-              if (before.target === undefined) return
+              if (before.state !== 'open' || before.target === undefined) return
               const repository = yield* adapters.host.repository(before.repository)
               yield* lookAt(
                 link,

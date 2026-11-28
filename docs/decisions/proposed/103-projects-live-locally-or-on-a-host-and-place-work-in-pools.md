@@ -649,6 +649,8 @@ covers certificate and journal setup.
 
 **Workers added from the window, 23 Nov 2026:** a personal worker is added from Settings › Computers over SSH or with a one-time code; the home is its own certificate authority, signs the worker's own key and opens its worker port on demand; the worker runs from the signed release as a systemd user service that updates itself, offers its agents for any project the home grants, and says which are signed in. Projects are granted in the window. [Foundations](../foundations.md#remote-connections-and-native-workers) records the trust model; [the host README](../../../apps/host/README.md#add-a-worker) how it runs.
 
+**Workers update when asked, 28 Nov 2026:** the window offers a worker's update against the newest worker release, in Settings › Computers and under the bar's Updates glyph. The home asks a worker that says it can (`AgentWorkerUpdate`, between runs, kept across its streams until it is idle or connects); the worker runs the updater its timer runs, in a unit of its own, and says how it ended (`AgentWorkerUpdateState`), or comes back on its new release. [Packaging](../packaging.md#every-update-under-one-glyph) records how the window shows it.
+
 Client enrollment, self-hosted projects and managed worker capacity can
 advance independently where they share the existing home and execution
 contract. The first paid release tests a managed worker from an existing

@@ -162,6 +162,18 @@ describe('what a task changed, card by card', () => {
     expect(onAccept).toHaveBeenLastCalledWith([{ head: published.head, url: published.url, bypassQueue: true }])
   })
 
+  it('makes merging here the quieter choice under Ship, and the main one without it', () => {
+    const here = [{ repository: 'meridian', name: 'meridian', branch: 'main', head: 'abc111' }]
+    const made = { end: 'none' as const, commits: 3, files: [FILE], here }
+    show(task({ ...made, held: { since: '2026-11-28T10:00:00.000Z', commits: 3 } }))
+    expect(screen.getByRole('button', { name: /^Ship/ }).className).toContain('signal')
+    expect(screen.getByRole('button', { name: /^Merge into main/ }).className).not.toContain('signal')
+    cleanup()
+    show(task(made, { host: null }))
+    expect(screen.queryByRole('button', { name: /^Ship|pull request/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /^Merge into main/ }).className).toContain('signal')
+  })
+
   it.each(['draft', 'ready'] as const)('offers Ship for committed work ending in a %s pull request before any hold exists', async (end) => {
     const here = [
       {

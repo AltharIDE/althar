@@ -725,7 +725,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           draft: change.draft,
           source: change.source,
           target: change.target,
-          headSha: `head-${number}`,
+          // As GitHub answers it: the head of the branch it was opened from, where the test says what that is, as every read after does.
+          headSha: options.headOf?.(number) ?? `head-${number}`,
           author: me,
           additions: 12,
           deletions: 3,

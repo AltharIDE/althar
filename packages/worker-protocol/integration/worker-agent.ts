@@ -162,6 +162,7 @@ const hello = (
     signedIn: [],
     release: '',
     reserveBeforeTransfer: false,
+    updatesOnRequest: false,
     workerId: id,
     version: 1,
     journalId: journal,

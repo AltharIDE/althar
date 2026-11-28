@@ -65,6 +65,7 @@ it.live('opens the Desktop profile’s worker listener and exposes only workers 
                   signedIn: [],
                   release: '',
                   reserveBeforeTransfer: false,
+                  updatesOnRequest: false,
                   version: 1,
                   workerId,
                   journalId: 'wjn_' + '3'.repeat(32),

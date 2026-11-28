@@ -10,6 +10,7 @@ import {
   CLAUDE_UNREAD,
   CODEX_BEHIND,
   CODEX_EXPIRED,
+  CODEX_MAIN_SIGNED_OUT,
   CODEX_NEARLY,
   CODEX_PLENTY,
   CODEX_SIGNED_OUT,
@@ -63,10 +64,12 @@ export const Open: Story = {
     await expect(page.getByText('Plan usage', { selector: 'h2' })).toBeInTheDocument()
     await expect(page.queryByText('Codex is nearly out')).toBeNull()
     await expect(page.getByText('Personal · Weekly limit · until Fri 09:00')).toBeInTheDocument()
-    // An agent opens in place to every account and window, an old one saying so.
+    // An agent opens in place to a card for each account, which say what the figure is of, so the line under its bar goes.
     await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
-    await expect(page.getByText('read 2 hours ago')).toBeInTheDocument()
-    await expect(page.getByText('Work')).toBeInTheDocument()
+    await expect(page.queryByText('Personal · Weekly limit · until Fri 09:00')).toBeNull()
+    await expect(page.getByRole('group', { name: 'Personal' })).toBeInTheDocument()
+    await expect(page.getByRole('group', { name: 'Work' })).toBeInTheDocument()
+    await expect(page.getByText('Last read 2 hours ago')).toBeInTheDocument()
   },
 }
 
@@ -83,10 +86,29 @@ export const SignedOut: Story = {
     ).toBeInTheDocument()
     await userEvent.click(page.getByRole('button', { name: 'Sign in again' }))
     await expect(args.onSignIn).toHaveBeenCalledWith(CODEX_SIGNED_OUT.id)
-    // Its saved numbers stay in its detail, with why it runs nothing.
+    // Its saved numbers stay in its detail, faded, with how old: the row's button says why it runs nothing, once.
     await userEvent.click(page.getByRole('button', { name: /^Codex/ }))
-    await expect(page.getByText('Signed out. Sign in again to read usage.')).toBeInTheDocument()
+    await expect(page.queryByText('Signed out. Sign in again to read usage.')).toBeNull()
     await expect(page.getByText('80%')).toBeInTheDocument()
+    await expect(page.getByText('Last read 3 hours ago')).toBeInTheDocument()
+  },
+}
+
+/**
+ * Codex on two accounts, Main signed out: work goes to Plus, whose figure the row shows. Opened, Main's card is on the
+ * danger wash, Signed out with its own Sign in, its last month faded with how old it is.
+ */
+export const AccountSignedOut: Story = {
+  args: { agents: [CODEX_MAIN_SIGNED_OUT, CLAUDE_PLENTY], defaultOpen: true, onSignIn: fn() },
+  play: async ({ args }) => {
+    const page = within(document.body)
+    await userEvent.click(page.getByRole('button', { name: /^Codex/ }))
+    const main = within(page.getByRole('group', { name: 'Main' }))
+    await expect(main.getByRole('alert')).toHaveTextContent('Main Signed out')
+    await expect(main.getByText('Last read 1h ago')).toBeInTheDocument()
+    await expect(within(page.getByRole('group', { name: 'Plus' })).queryByRole('alert')).toBeNull()
+    await userEvent.click(main.getByRole('button', { name: 'Sign in' }))
+    await expect(args.onSignIn).toHaveBeenCalledWith(CODEX_MAIN_SIGNED_OUT.id, 'codex-main')
   },
 }
 
@@ -121,14 +143,15 @@ export const ResetsTwoAccounts: Story = {
   },
 }
 
-/** Codex's sign-in expired, on both its accounts: one short line for them both, under the row's Sign in again, and their last week quieter. */
+/** Codex's sign-in expired, on both its accounts: the row's Sign in again says it, once, and each card has its last week faded with how old. */
 export const ReadingFailed: Story = {
   args: { agents: [CLAUDE_PLENTY, CODEX_EXPIRED], defaultOpen: true, onSignIn: fn() },
   play: async () => {
     const page = within(document.body)
     await userEvent.click(page.getByRole('button', { name: /^Codex/ }))
-    await expect(page.getAllByText('Signed out. Sign in again to read usage.')).toHaveLength(1)
-    await expect(page.getAllByText('read 20m ago')).toHaveLength(2)
+    await expect(page.queryByText('Signed out. Sign in again to read usage.')).toBeNull()
+    await expect(page.queryAllByRole('alert')).toHaveLength(0)
+    await expect(page.getAllByText('Last read 20m ago')).toHaveLength(2)
     await expect(page.queryByTitle(/of the way through/)).toBeNull()
   },
 }
@@ -150,7 +173,9 @@ export const StaleReading: Story = {
     const page = within(document.body)
     await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
     await expect(page.getByText('No reply. Tries again soon.')).toBeInTheDocument()
-    await expect(page.getByText('read 2 hours ago')).toBeInTheDocument()
+    await expect(page.getByText('Last read 2 hours ago')).toBeInTheDocument()
+    // A read that tries again by itself isn't a fault to act on.
+    await expect(page.queryAllByRole('alert')).toHaveLength(0)
   },
 }
 
@@ -162,7 +187,7 @@ export const Unread: Story = {
     await expect(within(canvasElement).getByRole('button', { name: /^Plan usage: Codex has / })).toBeInTheDocument()
     await expect(page.getByText('Not read since reset')).toBeInTheDocument()
     await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
-    await expect(page.getByText('read 2 days ago')).toBeInTheDocument()
+    await expect(page.getByText('Last read 2 days ago')).toBeInTheDocument()
     await expect(page.getByText(/Sign-in expired/)).toBeInTheDocument()
   },
 }
@@ -207,11 +232,15 @@ export const OpenCodeGoConnected: Story = {
   },
 }
 
-/** OpenCode Go's key refused: its row's button signs it in again. */
+/** OpenCode Go's key refused: its row's button signs it in again; opened, it says nothing was read. */
 export const OpenCodeGoSignIn: Story = {
   args: { agents: [CLAUDE_PLENTY, OPENCODE_GO_SIGN_IN], defaultOpen: true, onSignIn: fn() },
   play: async ({ args }) => {
-    await userEvent.click(within(document.body).getByRole('button', { name: 'Sign in again' }))
+    const page = within(document.body)
+    await userEvent.click(page.getByRole('button', { name: /^OpenCode Go/ }))
+    await expect(page.getByText('No usage read yet.')).toBeInTheDocument()
+    await expect(page.queryByText('OpenCode Go needs signing in again.')).toBeNull()
+    await userEvent.click(page.getByRole('button', { name: 'Sign in again' }))
     await expect(args.onSignIn).toHaveBeenCalledWith('opencode')
   },
 }

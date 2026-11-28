@@ -3,10 +3,10 @@ import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { Brand } from '../../foundations/brands/brands'
-import { CLOUD_USE, WORKER_AT_WORK, WORKER_FREE, WORKER_OFFLINE, WORKERS } from '../../fixtures/computers'
+import { CLOUD_USE, WORKER_AT_WORK, WORKER_FREE, WORKER_FULL, WORKER_OFFLINE, WORKERS } from '../../fixtures/computers'
 import { AGENTS_BUSY, AGENTS_FEWER, LOAD_BUSY, LOAD_MEMORY_SHORT, LOAD_SLOTS } from '../../fixtures/load'
 import { AgentsAtOnce, SettingList } from '../Preferences/Preferences'
-import { AddWorkerByHandDialog, Computers, type ComputersProps, HOME } from './Computers'
+import { AddWorkerByHandDialog, Computers, type ComputersProps, type ComputerWorker, HOME } from './Computers'
 
 const width = (px: number) => (Story: () => ReactNode) => <div style={{ maxWidth: px }}>{Story()}</div>
 
@@ -340,3 +340,62 @@ export const WorkerNotReady: Story = {
 }
 
 export const WorkerNotReadyDark: Story = { ...WorkerNotReady, globals: { theme: 'dark' } }
+
+const behind = (worker: ComputerWorker, update: NonNullable<ComputerWorker['update']>): ComputerWorker => ({
+  ...worker,
+  release: '0.2.2',
+  update,
+})
+
+/** A newer release out: Workers leads with it, one press for all; a module says only what differs, as the one at work. */
+export const WorkersCanUpdate: Story = {
+  args: {
+    onUpdate: fn(),
+    newest: '0.3.0',
+    workers: {
+      enabled: true,
+      list: [
+        behind(WORKER_AT_WORK, { state: 'offer', to: '0.3.0' }),
+        behind(WORKER_FREE, { state: 'offer', to: '0.3.0' }),
+        behind(WORKER_FULL, { state: 'byItself', to: '0.3.0' }),
+        WORKER_OFFLINE,
+      ],
+    },
+  },
+}
+
+/** Under way: Updating where Free was, how many are done of all, the one at work after its task. */
+export const WorkersUpdating: Story = {
+  args: {
+    onUpdate: fn(),
+    newest: '0.3.0',
+    workers: {
+      enabled: true,
+      list: [
+        behind(WORKER_AT_WORK, { state: 'afterTask', to: '0.3.0' }),
+        behind(WORKER_FREE, { state: 'running', to: '0.3.0', step: 'restarting' }),
+        { ...WORKER_FULL, release: '0.3.0', update: { state: 'done', version: '0.3.0' } },
+        WORKER_OFFLINE,
+      ],
+    },
+  },
+}
+
+/** One opened out whose update failed: why, Try again, the command to run there folded under it, its release beside the newest. */
+export const WorkerUpdateFailed: Story = {
+  args: {
+    opened: WORKER_FREE.id,
+    onUpdate: fn(),
+    newest: '0.3.0',
+    workers: {
+      enabled: true,
+      list: [
+        behind(WORKER_FREE, {
+          state: 'failed',
+          to: '0.3.0',
+          message: '0.3.0 didn’t start there, so it went back to 0.2.2 and takes tasks as before.',
+        }),
+      ],
+    },
+  },
+}

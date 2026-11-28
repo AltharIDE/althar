@@ -54,9 +54,18 @@
   padding: 30px 0 0;
   scroll-padding-top: 30px;
 }
-/* the end of the thread clears whatever floats on the composer's edge, as tall as it is (the composer says: --composer-floats) */
+/* The end of the thread: with the composer's 12px, the 30px a turn is from the next, above the composer; and clear of whatever floats on its edge, as tall as it is (the composer says: --composer-floats). What the last turn offers on hover sits in this room, as below. */
 .clear {
-  height: max(72px, calc(var(--composer-floats, 0px) + 16px));
+  height: max(18px, calc(var(--composer-floats, 0px) + 16px));
+}
+/*
+ * The last turn's actions (Copy), unseen until it is hovered, keep their room
+ * out of the room left at the end, so it doesn't add to the gap above the
+ * composer; 4px of that room stays under them, for Copy's focus ring. A thread
+ * drawn in part has an empty gap after its last turn.
+ */
+.scroll :global([data-thread-column] > :is(:last-child, :has(+ [data-virtual-gap]:last-child)) > [data-turn-actions]:last-child) {
+  margin-bottom: -14px;
 }
 .composer {
   flex: none;

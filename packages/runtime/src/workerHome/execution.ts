@@ -11,6 +11,7 @@ import {
   type AgentWorkerPool,
   type WorkerAgentProcess,
   type WorkerManagedProcess,
+  WORKER_UPDATE_UNSUPPORTED,
 } from '@althar/worker-protocol/agent-runs'
 import { Effect, Scope, Semaphore } from 'effect'
 
@@ -103,7 +104,10 @@ export const workerExecution = (
       if (working(workerId)) return
       reserved.set(workerId, workspaceId)
       return () => {
-        if (reserved.get(workerId) === workspaceId) reserved.delete(workerId)
+        if (reserved.get(workerId) !== workspaceId) return
+        reserved.delete(workerId)
+        // Held no longer, and not run after all: an update asked meanwhile goes now.
+        if (readying(workerId) === undefined) active()?.retryUpdate(workerId)
       }
     },
     settle: (workerId) => {
@@ -141,7 +145,12 @@ export const workerExecution = (
         // The workspace its run holds, connected or not: one that dropped mid-run still holds it until it says it stopped.
         const workspaceId = listing.outstanding?.(workerId)?.workspaceId ?? readying(workerId)
         const holding = workspaceId === undefined ? {} : { workspaceId }
-        const known = { ...(name === undefined ? {} : { name }), ...(ssh === undefined ? {} : { ssh }) }
+        const update = active()?.updateOf(workerId)
+        const known = {
+          ...(name === undefined ? {} : { name }),
+          ...(ssh === undefined ? {} : { ssh }),
+          ...(update === undefined ? {} : { update }),
+        }
         if (worker === undefined)
           return { workerId, ...known, connected: false, busy: workspaceId !== undefined, providers: [], projectIds, ...holding }
         return {
@@ -149,6 +158,7 @@ export const workerExecution = (
           ...known,
           ...(worker.signedIn === undefined ? {} : { signedIn: worker.signedIn }),
           ...(worker.release === undefined ? {} : { release: worker.release }),
+          ...(worker.updatesOnRequest === true ? { updatesOnRequest: true } : {}),
           ...(worker.readiness === undefined ? {} : { readiness: worker.readiness }),
           ...(worker.anyProject === undefined ? {} : { anyProject: worker.anyProject }),
           connected: true,
@@ -173,6 +183,25 @@ export const workerExecution = (
           listing.revoke(workerId)
         },
         catch: (error) => (error instanceof Error ? error.message : 'Could not remove the worker.'),
+      }),
+    update: (workerId) =>
+      Effect.try({
+        try: () => {
+          const pool = active()
+          const listing = ledger?.()
+          if (pool === undefined || listing === undefined) throw new Error('This home takes no workers.')
+          if (!listing.workers().some((one) => one.workerId === workerId)) throw new Error('This home has no such worker.')
+          // Not while the home readies it for a task: told once that's let go, or after the run, between runs.
+          if (!pool.update(workerId, undefined, (id) => readying(id) !== undefined)) throw new Error(WORKER_UPDATE_UNSUPPORTED)
+        },
+        catch: (error) => (error instanceof Error ? error.message : 'Could not ask the worker to update.'),
+      }),
+    cancelUpdate: (workerId) =>
+      Effect.try({
+        try: () => {
+          if (active()?.cancelUpdate(workerId) !== true) throw new Error('Its update has started already, or wasn’t asked for.')
+        },
+        catch: (error) => (error instanceof Error ? error.message : 'Could not take the update back.'),
       }),
     startCommand: (input) =>
       Effect.gen(function* () {
@@ -358,7 +387,12 @@ export const workerExecution = (
                 preparing.set(workerId, workspaceId)
                 return Effect.void
               }),
-              () => Effect.sync(() => void preparing.delete(workerId)),
+              () =>
+                Effect.sync(() => {
+                  preparing.delete(workerId)
+                  // Readied, or let go: an update asked meanwhile goes where nothing runs there now.
+                  if (readying(workerId) === undefined) active()?.retryUpdate(workerId)
+                }),
             )
             const entries = yield* Effect.forEach(
               repositories ?? [{ workspaceId, directory: '', worktree }],

@@ -1404,6 +1404,9 @@ says why.
 - A failed start never says a bare "Internal error": each agent's ways of
   failing to start are read from what it really said, and one that may pass
   starts again by itself.
+- A start on a model its agent listed lately and doesn't list now asks it
+  again a while, then goes to the same model on another agent, before its
+  step asks the person.
 - Every session's brief is recorded.
 
 ## References

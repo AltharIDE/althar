@@ -85,8 +85,28 @@ describe('locked host dependency bundles', () => {
     pkg(root, '@agentclientprotocol/claude-agent-acp')
     pkg(root, '@agentclientprotocol/codex-acp')
     pkg(root, 'sharp')
+    // node-pty as npm leaves it on a Linux home: compiled into build/, beside node-gyp's link to Python and every
+    // other platform's prebuilds and Windows' ConPTY.
+    const pty = pkg(root, 'node-pty')
+    const others = ['darwin-arm64', 'win32-x64', 'linux-riscv64'].filter((name) => name !== `${process.platform}-${process.arch}`)
+    for (const other of others) {
+      mkdirSync(join(pty, 'prebuilds', other), { recursive: true })
+      writeFileSync(join(pty, 'prebuilds', other, 'pty.node'), 'other build')
+    }
+    mkdirSync(join(pty, 'third_party/conpty'), { recursive: true })
+    writeFileSync(join(pty, 'third_party/conpty/conpty.dll'), 'windows')
+    mkdirSync(join(pty, 'build/node_gyp_bins'), { recursive: true })
+    symlinkSync(process.execPath, join(pty, 'build/node_gyp_bins/python3'))
+    const withoutBuild = join(temporary(), 'release')
+    await expect(assembleBundle({ entry, node, version: '1.2.3' }, withoutBuild)).rejects.toThrow()
+    mkdirSync(join(pty, 'build/Release'), { recursive: true })
+    writeFileSync(join(pty, 'build/Release/pty.node'), 'own build')
     const destination = join(temporary(), 'release')
     await assembleBundle({ entry, node, version: '1.2.3' }, destination)
+    const shipped = join(destination, 'node_modules/node-pty')
+    expect(readFileSync(join(shipped, 'build/Release/pty.node'), 'utf8')).toBe('own build')
+    for (const gone of [...others.map((other) => `prebuilds/${other}`), 'third_party', 'build/node_gyp_bins'])
+      expect(existsSync(join(shipped, gone)), gone).toBe(process.platform === 'win32' && gone === 'third_party')
     expect(readFileSync(join(destination, 'node/bin/node'), 'utf8')).toBe('node binary')
     expect(readFileSync(join(destination, 'node/LICENSE'), 'utf8')).toBe('Node license')
     expect(readFileSync(join(destination, 'dist/althar-host.js'), 'utf8')).toBe('host code')

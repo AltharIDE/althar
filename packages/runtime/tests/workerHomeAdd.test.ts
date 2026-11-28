@@ -36,6 +36,7 @@ const hello = (workerId: string): AgentWorkerHello => ({
   signedIn: ['codex'],
   release: '0.11.0',
   reserveBeforeTransfer: false,
+  updatesOnRequest: false,
   version: 1,
   workerId,
   journalId,

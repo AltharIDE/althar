@@ -96,6 +96,17 @@ export const signInEndedWords = 'Its sign-in has ended. Sign it in again in Sett
 /** An agent that couldn't reach its servers: nothing to sign in, the connection to look at. */
 export const unreachableWords = (device: string) => `Its servers can't be reached. Check ${device}'s connection, then try again.`
 
+/**
+ * A start whose agent doesn't list the model it was put on just now, where it listed it lately: an agent's list can come
+ * back short for a while, so it is asked again for a while before the work goes elsewhere.
+ */
+export const modelMissingWords = (agent: string, model: string, within: string) =>
+  `${agent} doesn't list ${model} just now. Asking it again for up to ${within} before the work goes to another agent.`
+
+/** A start whose agent stopped listing its model, and still didn't list it when asked again for a while. */
+export const modelGoneWords = (model: string, within: string) =>
+  `It stopped listing ${model}, and still didn't after ${within} of asking again.`
+
 /** An agent that couldn't start where the folder it starts in is gone: deleted by hand, or a Local task's checkout moved. */
 export const folderGoneWords = (path: string) => `Its folder isn't there any more: ${path}.`
 

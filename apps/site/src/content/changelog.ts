@@ -36,7 +36,7 @@ export const releaseUrl = (version: string) => `${REPO}/releases/tag/v${version}
 const WRITTEN: readonly Release[] = [
   {
     version: '0.10.0',
-    date: '2026-11-27',
+    date: '2026-11-28',
     title: 'Althar on your own machines',
     changes: [
       {
@@ -369,6 +369,41 @@ const WRITTEN: readonly Release[] = [
       { kind: 'fixed', text: 'A stopped task with a green pull request can still be merged.' },
       { kind: 'fixed', text: 'A conversation Claude Code lost starts afresh.' },
       { kind: 'fixed', text: 'Jira Cloud on its own domain works.' },
+    ],
+  },
+  {
+    version: '0.6.1',
+    date: '2026-10-31',
+    title: 'Fewer things wait on you',
+    changes: [
+      {
+        kind: 'new',
+        text: 'A lead’s commits push on their own: on a task with an open pull request, what it commits goes up when its turn ends, only to the pull request’s own branch and never forced. Project settings turns it off.',
+      },
+      {
+        kind: 'improved',
+        text: 'The sandbox is the line: Claude Code’s leads and the coordinator run what stays inside it without stopping to ask.',
+      },
+      {
+        kind: 'improved',
+        text: 'Git itself stops what can’t be undone: a push to the default branch, a force push, or deleting or rewinding a branch that isn’t the task’s.',
+      },
+      { kind: 'improved', text: 'Project settings › Rules shows how each kind of ask and refusal went over the last 14 days.' },
+      { kind: 'improved', text: 'A failed push says why, in a sentence naming the host, with its way out.' },
+      {
+        kind: 'improved',
+        text: 'A task without a pull request merges past uncommitted changes in your checkout, as long as they’re in files the merge doesn’t touch.',
+      },
+      { kind: 'improved', text: 'A tracker signed in to several workspaces lists each on its own row, with its own Disconnect.' },
+      { kind: 'improved', text: 'Claude Code’s adapter is 0.99.1, and Codex’s is 2.5.0.' },
+      { kind: 'fixed', text: 'Claude Code’s plan usage is fresh again, read from its own sessions as they run.' },
+      { kind: 'fixed', text: 'A pull request queued from GitHub is followed like one Althar queued.' },
+      {
+        kind: 'fixed',
+        text: 'A task just started from its plan no longer shows as Stopped, with “Invalid Date”, while its folder is set up.',
+      },
+      { kind: 'fixed', text: 'On Windows, a permission the coordinator would have allowed no longer comes to you.' },
+      { kind: 'fixed', text: 'Installing or upgrading with Homebrew no longer prints a warning about Althar’s cask.' },
     ],
   },
   {

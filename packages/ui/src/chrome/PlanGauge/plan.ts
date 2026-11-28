@@ -36,12 +36,14 @@ export interface PlanAccount {
   id: string
   /** Named only where the agent has several accounts. */
   name: string | null
-  /** How old its numbers are, only where they are old: read 2 hours ago. */
+  /** How old its numbers are, only where they are old: Last read 2 hours ago. */
   age: string | null
   /** Why its numbers are missing or old, in one short line. */
   fault: string | null
-  /** Its windows are the last good reading, which a read since failed to renew: drawn quieter, its age beside its name. */
+  /** Its windows are the last good reading, which a read since failed to renew: drawn quieter, with how old they are. */
   stale?: boolean
+  /** Its sign-in has gone: no work starts on it until it is signed in again, and its windows are the last read. */
+  signedOut?: boolean
   windows: readonly PlanWindow[]
 }
 
@@ -59,7 +61,7 @@ export interface PlanAgent {
   elapsed?: number
   /** That account's name, where the agent has several. */
   account: string | null
-  /** Every account read, tightest first. */
+  /** Every account read: the one work would start on first, then the rest tightest first, signed out last. */
   accounts: readonly PlanAccount[]
   /** Why every account's numbers are missing or old, where it is the same for all: said once, above them, and not under each. */
   fault?: string

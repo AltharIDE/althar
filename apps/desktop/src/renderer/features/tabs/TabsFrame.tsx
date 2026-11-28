@@ -1,7 +1,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useEffectEvent, useState, useSyncExternalStore } from 'react'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 
-import { commandDown, LoadMeter, modKey, Offline, primaryDown, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
+import { commandDown, LoadMeter, modKey, Offline, primaryDown, ProjectTabs, Room, TitleBar } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { HomeButton } from '../homes/HomeConnections'
@@ -17,12 +17,12 @@ import { PlanBar } from '../usage/PlanBar'
 import { SignInEnding } from '../usage/SignInEnding'
 import { useWindowChrome } from '../../shared/useWindowChrome'
 import { useOnline } from '../../shared/useOnline'
-import { useUpdate } from '../../shared/useUpdate'
 import type { Destination } from '../../shared/dictation/sessions'
 import { tabsStoreOf } from './store'
 import { beside, byNumber } from './tabs'
 import s from './Tabs.module.css'
 import { setLoadPeek, useLoadPeek } from '../../shared/loadPeek'
+import { BarUpdates } from '../updates/BarUpdates'
 import { SLOTS, useLoad } from './useLoad'
 import { useTabs } from './useTabs'
 
@@ -44,8 +44,9 @@ const text = {
  * window's one bar, with nothing of a screen's own: a project's views and a
  * task's faces are in the bar under it, the screen's header.
  * Before it, on every screen, how hard the computer works, in two short
- * meters the person may turn off (`useLoad`), that the computer is offline,
- * where it is, and a newer Althar ready to install, each in one quiet line; after it, at the very end, Althar's settings'
+ * meters the person may turn off (`useLoad`), and before them every update
+ * under one glyph (`BarUpdates`: Althar's, the window's home's, its
+ * workers'); that the computer is offline, and where it is, each in one quiet line; after it, at the very end, Althar's settings'
  * gear, whose quick settings ⌘, opens and closes, and whose All settings,
  * or ⌘⇧,, opens the settings' tab. Before there is any project there are no
  * tabs: the first screen has the whole window.
@@ -114,7 +115,6 @@ function TabsBar({
 }) {
   const { host, client } = useServices()
   const chrome = useWindowChrome()
-  const update = useUpdate()
   const online = useOnline()
   const load = useLoad(tabs.tabs.length > 0 || tabs.others.length > 0)
   // Its popover opens from the meter, or from what else says how this computer's agents stand (Up next, held back). The bar
@@ -176,6 +176,8 @@ function TabsBar({
       end={
         <>
           <HomeButton />
+          {/* Every update under one glyph, left of CPU and MEM: Althar's, the window's home's, its workers'. */}
+          <BarUpdates />
           {load.glance !== null && (
             <LoadMeter
               open={peek}
@@ -192,7 +194,6 @@ function TabsBar({
           )}
           <PlanBar open={usage.open} onOpenChange={usage.set} />
           {!online && <Offline />}
-          {update.ready !== null && <UpdateReady {...update.ready} />}
           <SignInEnding />
           <QuickSettings open={quick} onOpenChange={onQuick} onSettings={tabs.openSettings} />
         </>

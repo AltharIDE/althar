@@ -9,7 +9,6 @@ import {
   readlinkSync,
   realpathSync,
   statSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { createServer } from 'node:https'

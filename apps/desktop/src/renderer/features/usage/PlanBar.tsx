@@ -40,9 +40,9 @@ export function PlanBar({ open, onOpenChange }: { readonly open: boolean; readon
       agents={agents}
       open={open}
       onOpenChange={onOpenChange}
-      onSignIn={(agentId) => {
+      onSignIn={(agentId, accountId) => {
         onOpenChange(false)
-        ways.signIn(agentId)
+        ways.signIn(agentId, accountId)
       }}
     />
   )

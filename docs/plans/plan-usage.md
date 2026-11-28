@@ -138,7 +138,10 @@ something to read.
   short. Nothing pops up and nothing has to be dismissed.
 - **Its peek**, on a click or Cmd/Ctrl+U (`PlanPeek`): a row per agent, least
   room first, its tightest limit and reset; a row opens in place to every
-  account and window, old numbers saying how old. Agents with no reading
+  account and window, each account a card of its own where there are
+  several, the one work starts on first. An account signed out is on the
+  danger wash with its own Sign in; a read that tries again by itself is
+  said quietly; old numbers are faded and say how old. Agents with no reading
   share one line at the foot that opens to why. Opening it reads every
   account again, each at most once a minute.
 - **Each model's room in the pickers** (`ModelPick`, All models): the share

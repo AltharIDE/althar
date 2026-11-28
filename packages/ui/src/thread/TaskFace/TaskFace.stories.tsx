@@ -17,6 +17,7 @@ import { Document } from '../Document/Document'
 import { Review } from '../Review/Review'
 import { ThreadShellProvider, type DocRef, type ThreadShell } from '../Shell/Shell'
 import { Thread } from '../Thread/Thread'
+import { VirtualBlocks } from '../Thread/VirtualBlocks'
 import { Tool } from '../Tool/Tool'
 import { Prose, Turn } from '../Turn/Turn'
 import { You } from '../You/You'
@@ -173,7 +174,7 @@ export const LastMessageClearsTheEdge: Story = {
     const host = canvasElement.querySelector<HTMLElement>('[data-floats-host]')!
     await waitFor(() => expect(host.style.getPropertyValue('--composer-floats')).not.toBe(''))
     const last = c.getByText('This is the last message.')
-    const chip = canvasElement.querySelector('button[aria-expanded]')!
+    const chip = canvasElement.querySelector('[data-tray-host] button[aria-expanded]')!
     const alert = c.getByRole('alert')
     const keep = c.getByRole('button', { name: /^Keep/ })
     // Boxes exist only in a browser; jsdom draws none, so the geometry is asserted there alone.
@@ -186,6 +187,89 @@ export const LastMessageClearsTheEdge: Story = {
     )
     await expect(chip.getBoundingClientRect().bottom).toBeLessThanOrEqual(alert.getBoundingClientRect().top)
     await expect(alert.getBoundingClientRect().bottom).toBeLessThanOrEqual(keep.getBoundingClientRect().top)
+  },
+}
+
+/** At its end the thread sits close to the composer: the last turn's unseen Copy takes its room from the end's, and an empty slot on the composer's edge takes none. */
+export const EndSitsClose: Story = {
+  render: () => (
+    <div style={{ height: 420, width: 640 }}>
+      <TaskFace composer={<Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Tell the lead" above={<></>} />}>
+        <Thread label="Task 432">
+          {THREAD}
+          <Turn model={OPUS} at="12:01" copy="This is the last message.">
+            <Prose>This is the last message.</Prose>
+          </Turn>
+        </Thread>
+      </TaskFace>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const host = canvasElement.querySelector<HTMLElement>('[data-floats-host]')!
+    const last = c.getByText('This is the last message.')
+    const composer = canvasElement.querySelector('form')!
+    // Boxes exist only in a browser; jsdom draws none, so the geometry is asserted there alone.
+    if (composer.getBoundingClientRect().width === 0) return
+    await expect(host.style.getPropertyValue('--composer-floats')).toBe('0px')
+    await waitFor(() => expect(composer.getBoundingClientRect().top - last.getBoundingClientRect().bottom).toBeLessThanOrEqual(48))
+    // Copy, shown on hover, ends inside the scroller, with room under it for its focus ring.
+    const scroller = last.closest('[data-thread-column]')!.parentElement!.parentElement!
+    const actions = Array.from(canvasElement.querySelectorAll('[data-turn-actions]')).at(-1)!
+    await expect(scroller.getBoundingClientRect().bottom - actions.getBoundingClientRect().bottom).toBeGreaterThanOrEqual(3)
+  },
+}
+
+/** A long thread drawn in part, read from above: Latest brings its last turn down clear of what floats on the composer's edge. */
+export const LatestClearsTheEdge: Story = {
+  render: () => (
+    <div style={{ height: 420, width: 640 }}>
+      <TaskFace
+        composer={
+          <Composer
+            value=""
+            onChange={() => {}}
+            onSubmit={() => {}}
+            placeholder="Tell the lead"
+            above={<Behind sources={[{ id: 'pr', mark: Brand.GitHub, label: 'PR #317', what: 'review comments and checks' }]} />}
+          />
+        }
+      >
+        <Thread label="Task 432">
+          <VirtualBlocks
+            count={80}
+            keyOf={(i) => `block-${i}`}
+            holds={() => false}
+            stopOf={() => null}
+            render={(i) => (
+              <Turn model={OPUS} at="12:01" copy="Said.">
+                <Prose>{i === 79 ? 'This is the last message.' : `Checked batch ${i + 1} of the refunds: nothing to change.`}</Prose>
+              </Turn>
+            )}
+          />
+        </Thread>
+      </TaskFace>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const column = canvasElement.querySelector('[data-thread-column]')!
+    const scroller = column.parentElement!.parentElement!
+    // Boxes exist only in a browser; jsdom draws none, so the geometry is asserted there alone.
+    if (scroller.getBoundingClientRect().width === 0) return
+    const chip = () => canvasElement.querySelector('[data-tray-host] button[aria-expanded]')!
+    await waitFor(() => expect(c.getByText('This is the last message.')).toBeVisible())
+    // Far enough up that the end is no longer drawn.
+    await waitFor(async () => {
+      scroller.scrollTo({ top: 0 })
+      await expect(c.queryByText('This is the last message.')).toBeNull()
+    })
+    await userEvent.click(await c.findByRole('button', { name: /latest/i }))
+    await waitFor(async () => {
+      const last = c.getByText('This is the last message.').getBoundingClientRect()
+      await expect(chip().getBoundingClientRect().top - last.bottom).toBeGreaterThanOrEqual(0)
+      await expect(chip().getBoundingClientRect().top - last.bottom).toBeLessThanOrEqual(48)
+    })
   },
 }
 
