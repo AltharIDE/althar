@@ -7,8 +7,8 @@ name: cascade
 # this job has seen its checks pass. The merge pushes to the target, which cascades on in turn.
 #
 # A cascade that conflicts is committed with its conflict markers, and its pull request stays open as a draft that names
-# the files. Push the fix to its branch: this marks it ready and merges it the same way. .github/scripts/cascade.py says
-# how it works.
+# the files. Push the fix to its branch and mark it ready for review: once no conflict markers are left in those files,
+# it merges the same way. .github/scripts/cascade.py says how it works.
 #
 # It pushes and opens pull requests with CASCADE_TOKEN, a repository secret: GitHub starts no workflow for what the run's
 # own token does, so with it the pull request's checks, and the cascade from the branch it merges into, would never
@@ -16,9 +16,10 @@ name: cascade
 # cascade can carry a change to .github/workflows).
 on:
   push:
-    branches: ['release/**', 'cascade/**']
+    branches: ['release/**']
   pull_request:
-    types: [closed]
+    # A cascade a person made ready, once they fixed its conflicts, and one that merged, for what landed meanwhile.
+    types: [closed, ready_for_review]
   workflow_dispatch:
     inputs:
       from:
@@ -36,14 +37,12 @@ concurrency:
 
 jobs:
   cascade:
-    # Its own pushes to cascade/… are left alone: the run that made them carries on with them. A person's push there is
-    # the fix for a conflict. A closed pull request counts only when it is a cascade's, merged. A deleted branch is none.
+    # Only a cascade's own pull requests, made ready or merged; any other's job is skipped. A deleted branch is none.
     if: >-
-      (github.event_name == 'push' && !github.event.deleted && (startsWith(github.ref_name, 'release/') ||
-        github.event.head_commit.author.email != '41898282+github-actions[bot]@users.noreply.github.com')) ||
-      (github.event_name == 'pull_request' && github.event.pull_request.merged &&
-        github.event.pull_request.head.repo.full_name == github.repository &&
-        startsWith(github.event.pull_request.head.ref, 'cascade/')) ||
+      (github.event_name == 'push' && !github.event.deleted) ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
+        startsWith(github.event.pull_request.head.ref, 'cascade/') &&
+        (github.event.action == 'ready_for_review' || github.event.pull_request.merged)) ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     # The wait for a release branch's pull request's checks (cascade.py, under two hours), and the merge around it.
@@ -66,6 +65,9 @@ jobs:
       - env:
           GH_TOKEN: ${{ secrets.CASCADE_TOKEN }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          # Into a release branch, whose rules require nothing, a cascade merges once this has passed on its head: queue's
+          # gate, which passes only once all of the pull request's own checks have (queue.yml runs on every one).
+          CASCADE_CHECKS: merge queue
           EVENT: ${{ github.event_name }}
           FROM: ${{ inputs.from }}
           PULL: ${{ github.event.pull_request.number }}
@@ -74,8 +76,6 @@ jobs:
             python3 .github/scripts/cascade.py --from "$FROM"
           elif [ "$EVENT" = pull_request ]; then
             python3 .github/scripts/cascade.py --pull "$PULL"
-          elif [[ "$GITHUB_REF_NAME" == cascade/* ]]; then
-            python3 .github/scripts/cascade.py --pushed "$GITHUB_REF_NAME"
           else
             python3 .github/scripts/cascade.py --from "$GITHUB_REF_NAME"
           fi

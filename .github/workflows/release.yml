@@ -383,8 +383,14 @@ jobs:
           fi
           # A patch to an older line (0.10.1 once 0.11.0 is out) is never the latest release: the updater and the
           # Homebrew tap follow the latest, and must stay on the newest line.
-          newest="$( (gh release list --exclude-drafts --exclude-pre-releases --limit 100 --json tagName --jq '.[].tagName' \
-            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//'; echo "$VERSION") | sort -V | tail -n 1)"
+          # Every published release, the host's too, page by page; one that can't be read stops the draft.
+          if ! published="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select((.draft | not) and (.prerelease | not)) | .tag_name')"; then
+            echo "::error::Couldn't read the published releases, to tell whether $TAG is the newest. Re-run this."
+            exit 1
+          fi
+          newest="$( (printf '%s\n' "$published" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' || true
+            echo "$VERSION") | sort -V | tail -n 1)"
           latest=true
           if [ "$newest" != "$VERSION" ]; then latest=false; fi
           if [ "$state" = true ]; then
