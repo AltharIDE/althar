@@ -187,9 +187,9 @@ describe('a step on a model its agent stops listing', () => {
     return Effect.gen(function* () {
       const sessions = yield* Sessions
       yield* catalogRead
-      // A session on Sol, whose list said Sol, as Codex's did all day.
+      // A session whose list said Sol, as Codex's did all day.
       const { task: earlier } = yield* task()
-      yield* sessions.start({ threadId: earlier.threadId, agentId: 'codex', model: SOL.id })
+      yield* sessions.start({ threadId: earlier.threadId, agentId: 'codex', model: LUNA.id })
       yield* sessions.stop(earlier.threadId)
       // Then Codex stops listing it, and asking again doesn't bring it back.
       each['codex@usual'] = { models: [LUNA] }
