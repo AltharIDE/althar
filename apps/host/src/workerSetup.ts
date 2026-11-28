@@ -27,7 +27,7 @@ import { privateDirectory, readPrivate, writePrivate } from './privateFiles'
 import { authenticateRelease, verifyRelease } from './updates/release'
 import { downloadRelease, getUpdateBytes } from './updates/network'
 import { extractRelease } from './updates/archive'
-import { completeRelease, type Completed } from './updates/parts'
+import { completeRelease, freeBytes, NoRoom, type Completed } from './updates/parts'
 import { checkHere, checkWorker, linkShipped, shippedSandbox, workerPath, type CheckSystem } from './workerCheck'
 import { installTools } from './workerTools'
 
@@ -164,6 +164,8 @@ export interface WorkerSystem {
   readonly sudo: (script: string) => Promise<boolean>
   /** Where its release ships each program its agents' sandbox needs. */
   readonly shipped: (current: string) => Readonly<Partial<Record<string, string>>>
+  /** The bytes free on the disk a folder is on. */
+  readonly free: (folder: string) => Promise<number>
 }
 let system: WorkerSystem = {
   systemctl: async (args) => (await run('systemctl', ['--user', ...args], { timeout: 30_000 })).stdout,
@@ -172,6 +174,7 @@ let system: WorkerSystem = {
   check: checkHere,
   sudo: async (script) => (await checkHere.run('sudo', ['-n', 'sh', '-c', script], { timeout: 30_000 })).ok,
   shipped: (current) => shippedSandbox(current),
+  free: freeBytes,
 }
 /** For tests: the system it runs on, in part; puts it back when called. */
 export const withWorkerSystem = (given: Partial<WorkerSystem>) => {
@@ -576,6 +579,7 @@ export const update = async (out: (text: string) => void, fetcher: typeof fetch 
         donors: await releasesHere(program, current),
         scratch,
         fetcher,
+        free: system.free,
       })
     await fs.writeFile(join(scratch, 'release', '.manifest'), bytes, { mode: 0o600 })
     await fs.writeFile(join(scratch, 'release', '.release-key'), `${keys[0]}\n`, { mode: 0o600 })
@@ -637,6 +641,7 @@ const completeInstalled = async (release: string, out: (text: string) => void, f
       donors: (await releasesHere(dirname(release))).filter((path) => path !== release),
       scratch,
       fetcher,
+      free: system.free,
       // At most once a second: the window shows it as the download's progress.
       progress: (bytes) => {
         if (Date.now() - said < 1000) return
@@ -647,6 +652,8 @@ const completeInstalled = async (release: string, out: (text: string) => void, f
   } catch (error) {
     // Where it can't download them, the window sends the whole release from its own computer instead.
     if (error instanceof HostError && error.code === 'UpdateUnavailable') throw failed('CannotDownload', error.message)
+    // As the bootstrap says it of the base.
+    if (error instanceof NoRoom) throw failed('NotEnoughDisk', error.message)
     throw error
   } finally {
     await fs.rm(scratch, { recursive: true, force: true })

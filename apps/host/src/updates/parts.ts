@@ -77,6 +77,18 @@ const isFolder = (path: string) =>
     () => false,
   )
 
+export const freeBytes = async (folder: string) => {
+  const found = await fs.statfs(folder)
+  return found.bavail * found.bsize
+}
+
+/** This computer's disk hasn't the room for a part: `needed` bytes, its archive and what it unpacks to. */
+export class NoRoom extends Error {
+  constructor(readonly needed: number) {
+    super(`This computer needs ${Math.ceil(needed / 1_048_576)} MB free for the worker’s agents.`)
+  }
+}
+
 export interface Completed {
   /** The parts lent from a release already here, by name. */
   readonly lent: ReadonlyArray<string>
@@ -100,6 +112,8 @@ export const completeRelease = async (
     readonly fetcher?: UpdateFetch
     readonly signal?: AbortSignal
     readonly progress?: (bytes: number) => void
+    /** The bytes free on the disk a folder is on. */
+    readonly free?: (folder: string) => Promise<number>
   },
 ): Promise<Completed> => {
   const lent: string[] = []
@@ -128,6 +142,10 @@ export const completeRelease = async (
     } else {
       const file = join(options.scratch, `part-${index}.archive`)
       await fs.rm(file, { force: true })
+      // Its archive and what it unpacks to, at once, with room to spare: else it would fail partway, in words that blame
+      // the archive.
+      if ((await (options.free ?? freeBytes)(options.scratch)) < part.bytes + part.unpackedBytes + 64 * 1_048_576)
+        throw new NoRoom(part.bytes + part.unpackedBytes)
       try {
         await downloadRelease(part, file, options.fetcher, options.signal, undefined, (received) => options.progress?.(bytes + received))
         await extractRelease(file, staged, part, options.signal)

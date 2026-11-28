@@ -1036,5 +1036,11 @@ describe('a release in parts', () => {
     writeFileSync(join(other, '.release-key'), unreachable.publicKey, { mode: 0o600 })
     // The window sends the whole release from its own computer then.
     await expect(install(other, out, unreachable.fetcher)).rejects.toMatchObject({ code: 'CannotDownload' })
+    // Nor where its disk hasn't the room for one, said as the bootstrap says it.
+    const was = restore
+    restore = withWorkerSystem({ free: async () => 1_048_576 })
+    await expect(install(other, out, unreachable.fetcher)).rejects.toMatchObject({ code: 'NotEnoughDisk' })
+    restore()
+    restore = was
   })
 })
