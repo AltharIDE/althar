@@ -2682,6 +2682,22 @@ export type ProjectWorker = typeof ProjectWorker.Type
 export type WorkerCapacity = typeof WorkerCapacity.Type
 
 /**
+ * Where an update the person asked of a worker stands on its home: asked (until the worker is between runs and held for
+ * no task, or connects), started (told to the worker, so no longer taken back), waiting (the worker said something of
+ * its own runs: it's asked again before long), or how it ended: on a new release (`done`), with nothing newer it trusts
+ * (`current`), or failed, and why. One that ended is said for a while, then not at all.
+ */
+export const WorkerUpdate = Schema.Union([
+  Schema.Struct({ state: Schema.Literal('asked') }),
+  Schema.Struct({ state: Schema.Literal('started') }),
+  Schema.Struct({ state: Schema.Literal('waiting') }),
+  Schema.Struct({ state: Schema.Literal('done'), version: Schema.String }),
+  Schema.Struct({ state: Schema.Literal('current'), version: Schema.optionalKey(Schema.String) }),
+  Schema.Struct({ state: Schema.Literal('failed'), message: Schema.String }),
+])
+export type WorkerUpdate = typeof WorkerUpdate.Type
+
+/**
  * A worker the home enrolled, as Settings › Computers and the load popover
  * list it (ADR-103): whether it is connected now, whether it runs a task (one
  * at a time) and which, what it reported last, the agents it can run and the
@@ -2707,6 +2723,10 @@ export const HomeWorker = Schema.Struct({
   signedIn: Schema.optionalKey(Schema.Array(Schema.String)),
   /** The Althar release it runs, where it says. */
   release: Schema.optionalKey(Schema.String),
+  /** It updates when its home asks (`UpdateWorker`), where it says: an older worker, or one set up by hand, doesn't. */
+  updatesOnRequest: Schema.optionalKey(Schema.Boolean),
+  /** Where an update the person asked of it stands, where one was. */
+  update: Schema.optionalKey(WorkerUpdate),
   /** What its own check found, while it is connected and has checked. */
   readiness: Schema.optionalKey(WorkerReadiness),
   /** It works on whatever project it is given, as one the home set up does: its projects are picked in the window. */
@@ -5422,6 +5442,8 @@ const socketCalls = new Set<string>([
   'CreateWorkerCode',
   'SetWorkerProjects',
   'RemoveWorker',
+  'UpdateWorker',
+  'CancelWorkerUpdate',
   'SearchTasks',
   'GetSearchDocuments',
   'GetSearchFiles',
@@ -6888,6 +6910,13 @@ const WorkApi = RpcGroup.make(
   call('GetWorkers', {}, HomeWorkers),
   /** Takes a worker out of this home: its certificate is no longer accepted, and it gets no more work. */
   command('RemoveWorker', { workerId: WorkerId }, Schema.Void),
+  /**
+   * Asks a worker to update now, as its hourly timer would: at once where it is between runs, else once its run ends or
+   * it connects. Its update unfolds on `HomeWorker.update`. Refused for a worker that can't be asked.
+   */
+  command('UpdateWorker', { workerId: WorkerId }, Schema.Void),
+  /** Takes back an update asked of a worker that hasn't started yet. */
+  command('CancelWorkerUpdate', { workerId: WorkerId }, Schema.Void),
   /**
    * Adds a worker: the home signs the worker's own P-256 public key (SPKI DER, base64url) as its certificate, enrolls it
    * by that key under the name the person knows it by, and opens its worker port where it hasn't yet. Again for the same

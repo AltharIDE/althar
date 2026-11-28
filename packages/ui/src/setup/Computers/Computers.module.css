@@ -713,3 +713,144 @@
     transition: none;
   }
 }
+
+/*
+ * The workers' update: a strip flat on the sheet, as a home's update sits in its Settings (HomeWelcome's strip), at the
+ * head of Workers and over a worker opened out; the command to run by hand folded under it.
+ */
+.workers {
+  display: grid;
+  gap: 14px;
+}
+.updateStrip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.update {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px 12px 14px;
+  border-radius: 12px;
+  background: var(--sunk);
+}
+.updateTile {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: var(--t-2);
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition:
+    color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease);
+}
+.update[data-state='failed'] .updateTile {
+  color: var(--danger);
+  background: var(--danger-dim);
+}
+.update[data-state='done'] .updateTile {
+  color: var(--ok-ink);
+}
+.updateText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.updateTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-1);
+}
+.updateLine {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-3);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  text-wrap: pretty;
+}
+.updateEnd {
+  display: flex;
+  justify-content: flex-end;
+}
+.updateTrack {
+  width: 120px;
+}
+/* how many are done of all, its width held as the count moves */
+.updateCount {
+  min-width: 64px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--t-2);
+}
+.byHand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding-left: 14px;
+}
+.byHandTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.byHandBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 560px;
+  padding-top: 8px;
+}
+
+/* a worker's update, in a line at its module's foot: the offer in ink, waiting quiet, done in green */
+.release {
+  display: inline-flex;
+  align-self: stretch;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--t-2);
+  white-space: nowrap;
+}
+.release > svg {
+  flex: none;
+  color: var(--t-3);
+}
+.release[data-tone='wait'] {
+  color: var(--t-3);
+}
+.release[data-tone='ok'],
+.release[data-tone='ok'] > svg {
+  color: var(--ok-ink);
+}
+.releaseProblem {
+  align-self: stretch;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+/* the opened worker's Release fact: the release it runs, and the newest beside it */
+.releaseFact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.factNote {
+  font-size: 12px;
+  color: var(--t-3);
+}

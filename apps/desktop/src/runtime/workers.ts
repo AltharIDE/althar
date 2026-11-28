@@ -70,6 +70,9 @@ export const workersForProfile = (
       // Not loaded: the profile keeps no worker configuration, so the home adds them itself.
       adds: () => execution?.adds?.() ?? true,
       revoke: (workerId) => (execution?.revoke === undefined ? Effect.fail('This home takes no workers.') : execution.revoke(workerId)),
+      update: (workerId) => (execution?.update === undefined ? Effect.fail('This home takes no workers.') : execution.update(workerId)),
+      cancelUpdate: (workerId) =>
+        execution?.cancelUpdate === undefined ? Effect.fail('This home takes no workers.') : execution.cancelUpdate(workerId),
       admin: {
         add: (input) => Effect.flatMap(load, (loading) => platform(loading).admin!.add(input)),
         code: (name) => Effect.flatMap(load, (loading) => platform(loading).admin!.code(name)),

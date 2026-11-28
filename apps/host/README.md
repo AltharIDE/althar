@@ -175,7 +175,13 @@ A worker cleans up after its tasks too. Each run gets its own checkout, its help
 | The worker release it runs, as `current`, and the one before | `${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program` |
 | Its services | `${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/althar-worker.service`, `althar-worker-update.timer` |
 
-The timer checks hourly for a newer worker release from the same place its own came from, signed by the same key, and switches to it while the worker runs no task. A worker installed from a home's release moves to the worker's own release of the same version at its first check. `journalctl --user -u althar-worker.service` shows what the worker did.
+The timer checks hourly for a newer worker release on Althar's releases page, signed by the same key, and switches to it while the worker runs no task. A worker installed from a home's release moves to the worker's own release of the same version at its first check. `journalctl --user -u althar-worker.service` shows what the worker did, and `journalctl --user -u althar-worker-update.service` what its updates did.
+
+**Updating now.** Once a newer worker release is out, the window offers it: under the Updates glyph in its bar, and in Settings › Computers. The home asks the worker between its runs, after the task it runs, or once it connects; the worker runs the same update in a unit of its own and says how it ended, or comes back on its new release. A worker from before this, or one set up by hand, can't be asked: it updates on its own timer, and the window gives the line to run on it now, as its own login:
+
+```sh
+systemctl --user start althar-worker-update.service
+```
 
 ## Set a worker up by hand
 

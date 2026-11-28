@@ -22,6 +22,8 @@ import { AddTile, SheetFact } from '../ToolTiles/ToolParts'
 import tt from '../ToolTiles/ToolTiles.module.css'
 import { CloudLine, type CloudUse } from './Cloud'
 import s from './Computers.module.css'
+import { WorkerUpdateStrip } from './WorkerUpdateStrip'
+import { fleetUpdate, shortUpdate, type WorkerUpdateView, workerUpdateText } from './workerUpdate'
 
 /*
  * Settings › Computers: where the home's agents run (ADR-103). Sections, as
@@ -81,6 +83,10 @@ export interface ComputerWorker {
    * administrator runs there, to copy; none where it is ready, or hasn't checked.
    */
   unready?: { title: string; body?: string | undefined; command?: string | undefined } | undefined
+  /** The Althar release it runs, where it says. */
+  release?: string | undefined
+  /** Where its update stands, where a newer release is out or one was asked for. */
+  update?: WorkerUpdateView | undefined
 }
 
 /** The home's workers: whether it takes any (it listens for them), and each it enrolled. */
@@ -308,10 +314,38 @@ function Reading({ name, figure }: { name: string; figure: string }) {
 
 /** Where a worker stands, big, and a line under it: the task it runs, or what is off. */
 function Standing({ worker, t }: { worker: ComputerWorker; t: ComputersText }) {
+  // While its updater runs it takes no task: said big, where Free or At work would be, with its step under it.
+  const updating = worker.update?.state === 'running'
   return (
     <span className={s.standing}>
-      <span className={cx(s.state, troubled(worker.state) && s.danger)}>{t.state[worker.state]}</span>
-      <span className={s.line}>{t.stateLine(worker)}</span>
+      <span className={cx(s.state, !updating && troubled(worker.state) && s.danger)}>
+        {updating ? workerUpdateText.updating : t.state[worker.state]}
+      </span>
+      <span className={s.line}>{updating ? shortUpdate(worker.update, worker.name) : t.stateLine(worker)}</span>
+    </span>
+  )
+}
+
+/**
+ * Its update, in a line at its module's foot: none while it's on the newest, or Updating says it. Under a strip that
+ * says it already, quiet: nothing where the strip is about this worker alone, else only what differs from its offer.
+ */
+function ReleaseLine({ worker, quiet }: { worker: ComputerWorker; quiet: 'none' | 'offer' | 'all' }) {
+  const { update } = worker
+  if (update === undefined || update.state === 'running' || quiet === 'all') return null
+  if (quiet === 'offer' && update.state === 'offer') return null
+  const words = shortUpdate(update, worker.name)
+  if (update.state === 'failed')
+    return (
+      <Problem as="span" size="small" className={s.releaseProblem}>
+        {words}
+      </Problem>
+    )
+  const tone = update.state === 'done' ? 'ok' : update.state === 'offer' ? 'offer' : 'wait'
+  return (
+    <span className={s.release} data-tone={tone}>
+      <Icon name={tone === 'ok' ? 'check' : tone === 'offer' ? 'download' : 'clock'} size={12} />
+      {words}
     </span>
   )
 }
@@ -353,6 +387,12 @@ export interface ComputersProps {
   canRemove?: boolean | undefined
   /** Opens the task a worker runs. */
   onTask?: ((id: string) => void) | undefined
+  /** Asks these workers to update now; without it, their updates are only said. */
+  onUpdate?: ((ids: readonly string[]) => void) | undefined
+  /** Takes back an update asked of a worker that hasn't started. */
+  onCancelUpdate?: ((id: string) => void) | undefined
+  /** The newest release published, where it's known: beside a worker's own, opened out. */
+  newest?: string | undefined
   /** The home's projects, for a worker's projects to be picked from. */
   allProjects?: readonly { id: string; name: string }[] | undefined
   /** The projects a worker works on, as the person picks them; none where this connection can't. */
@@ -384,6 +424,9 @@ export function Computers({
   onRemove,
   canRemove = true,
   onTask,
+  onUpdate,
+  onCancelUpdate,
+  newest,
   allProjects,
   onProjects,
   onSignIn,
@@ -398,6 +441,9 @@ export function Computers({
   const t = { ...computersText, ...text }
   const list = workers?.list ?? []
   const worker = list.find((one) => one.id === opened)
+  const fleet = fleetUpdate(list)
+  // Under the fleet's strip, a module says only what the strip doesn't.
+  const quiet = fleet === null ? 'none' : list.filter((one) => one.update !== undefined).length === 1 ? 'all' : 'offer'
   if (opened === HOME)
     return (
       <div className={s.computers}>
@@ -413,6 +459,9 @@ export function Computers({
           onBack={() => onOpen(null)}
           onRemove={canRemove ? () => onRemove(worker.id) : null}
           onTask={onTask}
+          onUpdate={onUpdate}
+          onCancelUpdate={onCancelUpdate}
+          newest={newest}
           allProjects={allProjects}
           onProjects={onProjects === undefined ? undefined : (ids) => onProjects(worker.id, ids)}
           onSignIn={onSignIn === undefined ? undefined : (agent) => onSignIn(worker.id, agent)}
@@ -443,32 +492,36 @@ export function Computers({
         title={t.workers}
         {...(list.length > 0 ? { action: <LinkButton onClick={onAdd}>{t.add}</LinkButton> } : {})}
       >
-        <div className={s.grid}>
-          {workers === null ? (
-            <span className={s.line}>{t.reading}</span>
-          ) : list.length === 0 ? (
-            <AddTile onClick={onAdd} className={s.add}>
-              <span className={s.addWords}>
-                <span>{t.add}</span>
-                <span className={s.addLine}>{t.addLine}</span>
-              </span>
-            </AddTile>
-          ) : (
-            list.map((one) => (
-              <Module key={one.id} onClick={() => onOpen(one.id)}>
-                <Head
-                  picture="worker"
-                  name={one.name}
-                  line={one.kind ?? t.unknown}
-                  {...(one.state === 'offline' ? { tone: 'away' as const } : {})}
-                />
-                <span className={s.glance}>
-                  <Standing worker={one} t={t} />
-                  <Free worker={one} t={t} />
+        <div className={s.workers}>
+          {fleet !== null && <WorkerUpdateStrip fleet={fleet} onUpdate={onUpdate} onCancel={onCancelUpdate} />}
+          <div className={s.grid}>
+            {workers === null ? (
+              <span className={s.line}>{t.reading}</span>
+            ) : list.length === 0 ? (
+              <AddTile onClick={onAdd} className={s.add}>
+                <span className={s.addWords}>
+                  <span>{t.add}</span>
+                  <span className={s.addLine}>{t.addLine}</span>
                 </span>
-              </Module>
-            ))
-          )}
+              </AddTile>
+            ) : (
+              list.map((one) => (
+                <Module key={one.id} onClick={() => onOpen(one.id)}>
+                  <Head
+                    picture="worker"
+                    name={one.name}
+                    line={one.kind ?? t.unknown}
+                    {...(one.state === 'offline' ? { tone: 'away' as const } : {})}
+                  />
+                  <span className={s.glance}>
+                    <Standing worker={one} t={t} />
+                    <Free worker={one} t={t} />
+                  </span>
+                  <ReleaseLine worker={one} quiet={quiet} />
+                </Module>
+              ))
+            )}
+          </div>
         </div>
       </SettingGroup>
       {cloud != null && onCloud !== undefined && (
@@ -532,6 +585,9 @@ function WorkerSheet({
   onBack,
   onRemove,
   onTask,
+  onUpdate,
+  onCancelUpdate,
+  newest,
   allProjects,
   onProjects,
   onSignIn,
@@ -547,6 +603,9 @@ function WorkerSheet({
   /** Null where this connection can't take workers out. */
   onRemove: (() => void) | null
   onTask: ((id: string) => void) | undefined
+  onUpdate: ((ids: readonly string[]) => void) | undefined
+  onCancelUpdate: ((id: string) => void) | undefined
+  newest: string | undefined
   allProjects: readonly { id: string; name: string }[] | undefined
   onProjects: ((projectIds: readonly string[]) => void) | undefined
   onSignIn: ((agent: string) => void) | undefined
@@ -565,10 +624,12 @@ function WorkerSheet({
   const working = worker.state === 'working'
   const stranded = !working && worker.stranded === true
   const why = onRemove === null ? t.removeElsewhere(home) : working ? t.removeLater : stranded ? t.removeStranded : null
+  const update = fleetUpdate([worker])
   return (
     <div className={tt.opened}>
       <ControlDetail title={worker.name} onBack={onBack} text={{ back: t.computers }} aside={t.worker}>
         <div className={s.body}>
+          {update !== null && <WorkerUpdateStrip fleet={update} onUpdate={onUpdate} onCancel={onCancelUpdate} />}
           <div className={cx(tt.sheet, s.sheetGlance)}>
             <div className={s.sheetReadings}>
               <Standing worker={worker} t={t} />
@@ -581,6 +642,16 @@ function WorkerSheet({
             </div>
             <div className={s.facts}>
               <SheetFact label={t.facts.computer}>{worker.kind ?? t.unknown}</SheetFact>
+              {worker.release !== undefined && (
+                <SheetFact label={workerUpdateText.release}>
+                  <span className={s.releaseFact}>
+                    {worker.release}
+                    {newest !== undefined && newest !== worker.release && worker.update !== undefined && (
+                      <span className={s.factNote}>{workerUpdateText.out(newest)}</span>
+                    )}
+                  </span>
+                </SheetFact>
+              )}
               {worker.unready !== undefined && (
                 <SheetFact label={t.facts.ready}>
                   <span className={s.stopped}>

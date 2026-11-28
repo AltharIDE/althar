@@ -1587,6 +1587,8 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   addWorker: "person: adding a worker installs a service on a machine of the person's own and lets it into the home",
   createWorkerCode: "person: a worker's one-time code lets a machine into the home, the person's to hand over",
   setWorkerProjects: "person: which projects a worker works on grants that machine their code, the person's to give",
+  updateWorker: "person: updating a worker restarts its service between its runs, the person's to time (althar/computers' updates)",
+  cancelWorkerUpdate: 'person: takes back an update the person asked of a worker',
   // althar/computers: phones
   pairedDevices: 'person: only reads the phones paired with this computer; pairing and removing one are the person’s',
   removePairedDevice: 'person: removing a phone takes its key off this computer, the person’s',

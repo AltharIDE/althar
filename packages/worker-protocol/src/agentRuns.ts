@@ -18,6 +18,8 @@ import {
   type AgentWorkerCapacity,
   AgentWorkspaceSetupSchema,
   AgentWorkerRemovedSchema,
+  AgentWorkerUpdateOutcome,
+  AgentWorkerUpdateSchema,
   WorkerControlService,
   type AgentHomeFrame,
   type AgentRunExit,
@@ -39,6 +41,44 @@ export { MAX_WORKER_SKILL_BYTES, MAX_WORKER_SKILL_FILES, type WorkerSkillFile } 
 
 export const MAX_AGENT_CHUNK = 2_048
 export const AGENT_WORKER_LEASE_MS = 8_000
+/**
+ * How a worker's update is timed on its home: how long one told to update has to come back on its new release before it
+ * counts as failed; how long one that ended stays said (done or nothing newer for a short while, failed longer); and how
+ * soon one that said it waits for its own work is asked again on the same stream, doubling up to the last.
+ */
+export const workerUpdateTiming = {
+  returnMs: 15 * 60_000,
+  shownMs: 2 * 60_000,
+  failedShownMs: 60 * 60_000,
+  retryMs: 60_000,
+  retryMaxMs: 15 * 60_000,
+}
+/** For tests: the timing, in part, for the rest of the test; puts it back when called. */
+export const withWorkerUpdateTiming = (given: Partial<typeof workerUpdateTiming>) => {
+  const was = { ...workerUpdateTiming }
+  Object.assign(workerUpdateTiming, given)
+  return () => void Object.assign(workerUpdateTiming, was)
+}
+const MAX_UPDATE_MESSAGE = 512
+
+/**
+ * Where an update the person asked for stands, by worker, on its home: asked (until the worker is between runs and the
+ * home holds it for no task, or connects); started (told to the worker: it can't be taken back then); waiting (the
+ * worker said something of its own runs: asked again soon, on the same stream); or how it ended: on a new release,
+ * with nothing newer, or failed, and why.
+ */
+export type WorkerUpdate =
+  | { readonly state: 'asked' }
+  | { readonly state: 'started' }
+  | { readonly state: 'waiting' }
+  | { readonly state: 'done'; readonly version: string }
+  | { readonly state: 'current'; readonly version?: string }
+  | { readonly state: 'failed'; readonly message: string }
+
+/** Asked of a worker that can't be asked: an older one, or one set up by hand, which updates on its own timer, if it has one. */
+export const WORKER_UPDATE_UNSUPPORTED =
+  'This worker can’t be asked to update: it updates on its own within the hour, or the way it was set up.'
+export const WORKER_UPDATE_LOST = 'It began updating and hasn’t come back since.'
 const MAX_CAPABILITIES = 32
 const MAX_BUFFERED_BYTES = 64 * 1024
 const START_TIMEOUT_MS = 30_000
@@ -248,6 +288,8 @@ export interface AvailableAgentWorker {
   readonly signedIn?: ReadonlyArray<string>
   /** The Althar release it runs, where it says. */
   readonly release?: string
+  /** It updates when its home asks, where it says. */
+  readonly updatesOnRequest?: boolean
   /** What its own check found, where it has checked. */
   readonly readiness?: WorkerReadiness
   /** It offers its agents for any project the home grants it. */
@@ -261,7 +303,7 @@ export interface AvailableAgentWorker {
 interface Slot {
   readonly workerId: string
   /** What it said of itself; who is signed in, again with its heartbeats. */
-  said: Pick<AvailableAgentWorker, 'signedIn' | 'release' | 'anyProject' | 'readiness'>
+  said: Pick<AvailableAgentWorker, 'signedIn' | 'release' | 'anyProject' | 'readiness' | 'updatesOnRequest'>
   readonly capacity: () => WorkerCapacity | undefined
   readonly capabilities: ReadonlyArray<AgentWorkerCapability>
   readonly start: (placement: AgentPlacement, options: AgentRunOptions) => Promise<WorkerAgentProcess>
@@ -269,6 +311,11 @@ interface Slot {
   readonly busy: () => boolean
   /** Tells it the person removed it, so it takes itself off its computer, and ends its stream: where it is idle. */
   readonly remove: () => boolean
+  /**
+   * Tells it to update now, where it is idle, says it can, and its home holds it for no task: busy until it says how that
+   * went, or restarts. The update counts as started from then: it can't be taken back.
+   */
+  readonly update: () => boolean
   /**
    * Stops the run it holds, where the home holds it no longer: confirmed stopped, the slot frees; unconfirmed, the stream
    * ends and the run stays outstanding, for the worker to reconcile when it reconnects. False where it holds none now.
@@ -390,6 +437,29 @@ export const isWorkerBusy = (error: unknown): boolean =>
 /** The home routes by a verified certificate and the worker's operator-granted project and provider. */
 export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: (outcome: AgentWorkerConnection) => void) => {
   const slots = new Map<string, Slot>()
+  /**
+   * Updates asked for, by worker, outliving its streams (one a run, and the restart an update makes): what it ran when
+   * asked, to tell its new release by, and when the update last moved.
+   */
+  const updates = new Map<string, { update: WorkerUpdate; from: string | undefined; at: number; waits: number }>()
+  /** Moves a worker's update on, keeping what it ran when asked, and how many times it said it waits unless given. */
+  const setUpdate = (workerId: string, update: WorkerUpdate, waits?: number): void => {
+    const was = updates.get(workerId)
+    updates.set(workerId, { update, from: was?.from, at: performance.now(), waits: waits ?? was?.waits ?? 0 })
+  }
+  /** Asking again one that waits for its own work, by worker. */
+  const retries = new Map<string, NodeJS.Timeout>()
+  const stopRetry = (workerId: string): void => {
+    clearTimeout(retries.get(workerId))
+    retries.delete(workerId)
+  }
+  /** Whether the home holds a worker for a task it is readying there (reserved, or preparing): an update waits for it. */
+  let held: (workerId: string) => boolean = () => false
+  /** Tells a worker asked to update, where it can be told now; else it's told on its next stream, its home's hold lifted, or on retry. */
+  const dispatch = (workerId: string): void => {
+    const state = updates.get(workerId)?.update.state
+    if (state === 'asked' || state === 'waiting') slots.get(workerId)?.update()
+  }
   const previews = makePreviewTunnels()
   const reportConnection = (outcome: AgentWorkerConnection): void => {
     try {
@@ -407,6 +477,8 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
     let reserveBeforeTransfer = false
     let run: Run | undefined
     let recovering: AgentRunAssignment | undefined
+    // Asked to update on this stream, and not yet said how it went: no run starts here meanwhile.
+    let updating = false
     let closed = false
     let sequence = 0
     let timer: NodeJS.Timeout
@@ -540,6 +612,8 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
     const start: Slot['start'] = (placement, { checkout, repositories, signal, toolPort, setup, skills }) => {
       if (closed || run !== undefined || recovering !== undefined)
         return Promise.reject(workerBusyError('The worker is already running an agent.'))
+      // Told to update, it runs nothing until it says how that went: the task waits for it, as for a busy worker.
+      if (updating) return Promise.reject(workerBusyError('The worker is updating. Its task starts once that’s done.'))
       if (signal?.aborted === true) return Promise.reject(new Error('The agent start was cancelled.'))
       const group = setup !== undefined && 'repositories' in setup ? setup.repositories : undefined
       if (
@@ -769,12 +843,16 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
               ...(hello.release === '' ? {} : { release: hello.release }),
               ...(hello.anyProject ? { anyProject: true } : {}),
               ...(hello.readiness === undefined ? {} : { readiness: readinessOf(hello.readiness) }),
+              ...(hello.updatesOnRequest ? { updatesOnRequest: true } : {}),
             },
             capabilities,
             start,
             openTools,
             busy: () =>
-              run !== undefined || recovering !== undefined || (accountReserved && performance.now() - sampledAt <= AGENT_WORKER_LEASE_MS),
+              run !== undefined ||
+              recovering !== undefined ||
+              updating ||
+              (accountReserved && performance.now() - sampledAt <= AGENT_WORKER_LEASE_MS),
             capacity: () => (performance.now() - sampledAt > AGENT_WORKER_LEASE_MS ? undefined : capacity),
             stopRun: () => {
               if (closed || run === undefined) return false
@@ -792,6 +870,24 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
               )
               return true
             },
+            update: () => {
+              if (
+                closed ||
+                slot === undefined ||
+                run !== undefined ||
+                recovering !== undefined ||
+                updating ||
+                slot.said.updatesOnRequest !== true ||
+                held(slot.workerId)
+              )
+                return false
+              updating = true
+              stopRetry(slot.workerId)
+              // Told now: started, from the home's side, and no longer the person's to take back.
+              setUpdate(slot.workerId, { state: 'started' })
+              sendControl({ case: 'update', value: create(AgentWorkerUpdateSchema) })
+              return true
+            },
           }
           slots.set(workerId, slot)
           renew(AGENT_WORKER_LEASE_MS)
@@ -807,6 +903,48 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
             }),
           })
           if (recovering !== undefined) sendControl({ case: 'reconcile', value: create(AgentRunReconcileSchema, recovering) })
+          // An update asked for: back on a new release, it's done; otherwise asked again here, where it can be.
+          const asked = updates.get(workerId)
+          if (
+            asked !== undefined &&
+            (asked.update.state === 'asked' || asked.update.state === 'started' || asked.update.state === 'waiting')
+          ) {
+            if (hello.release !== '' && asked.from !== undefined && hello.release !== asked.from)
+              setUpdate(workerId, { state: 'done', version: hello.release })
+            else if (!hello.updatesOnRequest) setUpdate(workerId, { state: 'failed', message: WORKER_UPDATE_UNSUPPORTED })
+            else if (recovering === undefined) slot.update()
+          }
+          return
+        }
+        if (payload.case === 'updateState') {
+          // Only as an answer to the home asking, on this stream.
+          if (!updating) return fail(status.FAILED_PRECONDITION, 'The worker said how an update went that wasn’t asked for.')
+          const { outcome, version, message } = payload.value
+          if (version.length > 64) return fail(status.INVALID_ARGUMENT, 'The worker sent an invalid update version.')
+          if (outcome === AgentWorkerUpdateOutcome.STARTED) setUpdate(workerId, { state: 'started' })
+          else if (outcome === AgentWorkerUpdateOutcome.CURRENT) {
+            updating = false
+            setUpdate(workerId, { state: 'current', ...(version === '' ? {} : { version }) })
+          } else if (outcome === AgentWorkerUpdateOutcome.WAITING) {
+            // Something of its own runs: asked again here before long, sooner the first times, and on any new stream.
+            updating = false
+            const waits = updates.get(workerId)?.waits ?? 0
+            setUpdate(workerId, { state: 'waiting' }, waits + 1)
+            stopRetry(workerId)
+            const again = setTimeout(
+              () => {
+                retries.delete(workerId)
+                dispatch(workerId)
+              },
+              Math.min(workerUpdateTiming.retryMaxMs, workerUpdateTiming.retryMs * 2 ** waits),
+            )
+            again.unref()
+            retries.set(workerId, again)
+          } else if (outcome === AgentWorkerUpdateOutcome.FAILED) {
+            updating = false
+            const said = message.trim().slice(0, MAX_UPDATE_MESSAGE)
+            setUpdate(workerId, { state: 'failed', message: said === '' ? 'Its updater stopped without saying why.' : said })
+          } else return fail(status.INVALID_ARGUMENT, 'The worker sent an invalid update outcome.')
           return
         }
         // A project grant can end independently of the worker certificate. Let the same
@@ -1075,6 +1213,53 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
     stopRun: (workerId: string): boolean => slots.get(workerId)?.stopRun() ?? false,
     /** Tells a worker connected now that the person removed it: whether it was there, idle, to hear it. */
     remove: (workerId: string): boolean => slots.get(workerId)?.remove() ?? false,
+    /**
+     * Asks a worker to update now: at once where it is connected and idle, else as soon as it is (its next stream, after
+     * its run or once it connects). Refused for one connected that can't be asked. What it ran when asked tells its new
+     * release by; `release` is what the home last knew of one that isn't connected.
+     */
+    update: (workerId: string, release?: string, isHeld?: (workerId: string) => boolean): boolean => {
+      if (isHeld !== undefined) held = isHeld
+      const slot = slots.get(workerId)
+      if (slot !== undefined && slot.said.updatesOnRequest !== true) return false
+      const was = updates.get(workerId)?.update.state
+      if (was !== 'asked' && was !== 'started' && was !== 'waiting')
+        updates.set(workerId, { update: { state: 'asked' }, from: slot?.said.release ?? release, at: performance.now(), waits: 0 })
+      // Asked again while it waits: now, not at its retry.
+      stopRetry(workerId)
+      dispatch(workerId)
+      return true
+    },
+    /** Tells a worker asked to update, now that its home holds it no longer (`update`'s `isHeld`), where it can be told. */
+    retryUpdate: (workerId: string): void => dispatch(workerId),
+    /** Takes back an update asked for that the worker hasn't been told of yet: whether there was one. */
+    cancelUpdate: (workerId: string): boolean => {
+      const state = updates.get(workerId)?.update.state
+      if (state !== 'asked' && state !== 'waiting') return false
+      stopRetry(workerId)
+      updates.delete(workerId)
+      return true
+    },
+    /**
+     * Where a worker's update stands, where one was asked for: one that ended is said for a while, then forgotten; one
+     * that began and never came back on a new release, failed.
+     */
+    updateOf: (workerId: string): WorkerUpdate | undefined => {
+      const entry = updates.get(workerId)
+      if (entry === undefined) return undefined
+      const age = performance.now() - entry.at
+      const { update } = entry
+      if (update.state === 'started' && age > workerUpdateTiming.returnMs && !slots.has(workerId)) {
+        setUpdate(workerId, { state: 'failed', message: WORKER_UPDATE_LOST })
+        return updates.get(workerId)?.update
+      }
+      const shown = update.state === 'failed' ? workerUpdateTiming.failedShownMs : workerUpdateTiming.shownMs
+      if ((update.state === 'done' || update.state === 'current' || update.state === 'failed') && age > shown) {
+        updates.delete(workerId)
+        return undefined
+      }
+      return update
+    },
     start: async (workerId: string, placement: AgentPlacement, options: AgentRunOptions = {}): Promise<WorkerAgentProcess> => {
       const { checkout, repositories, toolPort, skills } = options
       if (toolPort !== undefined && (!Number.isInteger(toolPort) || toolPort < 1 || toolPort > 65_535))

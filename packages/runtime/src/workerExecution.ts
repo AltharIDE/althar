@@ -1,4 +1,4 @@
-import type { ProjectWorker, WorkerGrant, WorkerReadiness } from '@althar/contracts'
+import type { ProjectWorker, WorkerGrant, WorkerReadiness, WorkerUpdate } from '@althar/contracts'
 import type { AgentRequestFailed, AgentStartFailed, Transport } from '@althar/provider-adapters'
 import type {
   WorkerFile,
@@ -93,6 +93,10 @@ export interface EnrolledWorkerState {
   readonly signedIn?: ReadonlyArray<string>
   /** The Althar release it runs, where it says. */
   readonly release?: string
+  /** It updates when its home asks, where it says. */
+  readonly updatesOnRequest?: boolean
+  /** Where an update asked of it stands, where one was. */
+  readonly update?: WorkerUpdate
   /** What its own check found, where it has checked. */
   readonly readiness?: WorkerReadiness
   /** It works on whatever project it is given: the home's grants say which. */
@@ -120,6 +124,9 @@ export interface WorkerExecutionPlatform {
   readonly enrolled?: () => ReadonlyArray<EnrolledWorkerState> | null
   /** Takes a worker out of this home for good: its certificate is no longer accepted. Fails with words to show. */
   readonly revoke?: (workerId: string) => Effect.Effect<void, string>
+  /** Asks a worker to update now, or takes that back while it hasn't started. Fails with words to show. */
+  readonly update?: (workerId: string) => Effect.Effect<void, string>
+  readonly cancelUpdate?: (workerId: string) => Effect.Effect<void, string>
   /** Adding workers, where the home does that itself; none where an operator enrolls them by command. */
   readonly admin?: WorkerAdmin
   /** Whether it adds workers itself now: it listens as its own authority, or doesn't listen yet. */

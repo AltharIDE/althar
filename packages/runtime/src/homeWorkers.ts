@@ -57,6 +57,8 @@ export const homeWorkers = (platform: WorkerExecutionPlatform | undefined) =>
       ...(worker.ssh === undefined ? {} : { ssh: worker.ssh }),
       ...(worker.signedIn === undefined ? {} : { signedIn: worker.signedIn }),
       ...(worker.release === undefined ? {} : { release: worker.release }),
+      ...(worker.updatesOnRequest === true ? { updatesOnRequest: true } : {}),
+      ...(worker.update === undefined ? {} : { update: worker.update }),
       ...(worker.readiness === undefined ? {} : { readiness: worker.readiness }),
       ...(worker.anyProject === undefined ? {} : { anyProject: worker.anyProject }),
       connected: worker.connected,

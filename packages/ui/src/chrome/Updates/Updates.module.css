@@ -1,0 +1,203 @@
+/* Every update under one glyph in the window's bar, and its popover. */
+.updates {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* the glyph: as the bar's own buttons, a glyph alone; the problem mark in the danger colour, done in green */
+.glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r);
+  color: var(--t-3);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease),
+    transform var(--press) var(--ease-out);
+}
+.glyph:hover {
+  background: var(--line);
+  color: var(--t-1);
+}
+.glyph:active {
+  background: var(--line-2);
+  transform: scale(var(--scale-press));
+}
+.glyph[aria-expanded='true'] {
+  background: var(--line-2);
+  color: var(--t-2);
+}
+.glyph[data-tone='failed'],
+.glyph[data-tone='asking'] {
+  color: var(--danger);
+}
+.glyph[data-tone='done'] {
+  color: var(--ok-ink);
+}
+/* something can update: a dot at its corner, as a chrome button has one */
+.marked {
+  position: relative;
+}
+.marked::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 99px;
+  background: var(--t-2);
+  box-shadow: 0 0 0 1.5px var(--dot-cutout, var(--n-1)); /* on dark, cut out of the bar it sits on (dark.css) */
+}
+
+/* with nothing left under it: where the updates still are, for a moment, then gone */
+.still {
+  display: inline-flex;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+  animation: still 4s var(--ease-out) forwards;
+}
+@keyframes still {
+  0% {
+    opacity: 0;
+  }
+  8%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.peek {
+  display: grid;
+  gap: 6px;
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 2px;
+}
+.heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.check {
+  font-size: 12px;
+}
+
+/* a row an update: what it's of, what, the press or where it's got to, and its × on hover */
+.rows {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto 22px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+}
+.row + .row {
+  border-top: 1px solid var(--line);
+}
+.tile {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: var(--t-2);
+  background: var(--sunk);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.row[data-tone='failed'] .tile,
+.row[data-tone='asking'] .tile {
+  color: var(--danger);
+  background: var(--danger-dim);
+}
+.words {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-width: 0;
+}
+.title {
+  max-width: 100%;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-1);
+}
+.line {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  text-wrap: pretty;
+}
+.end {
+  display: flex;
+  justify-content: flex-end;
+}
+.ask {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.track {
+  width: 84px;
+}
+/* how many are done of all, its width held as the count moves */
+.count {
+  min-width: 52px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--t-2);
+}
+
+/* its × at rest out of sight, there on hover or keyboard focus; always there where nothing hovers */
+.hide {
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.row:hover .hide,
+.row:focus-within .hide {
+  opacity: 1;
+}
+@media (hover: none) {
+  .hide {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glyph {
+    transition: none;
+  }
+  .still {
+    animation-name: still-fade;
+  }
+  @keyframes still-fade {
+    0%,
+    100% {
+      opacity: 1;
+    }
+  }
+}
