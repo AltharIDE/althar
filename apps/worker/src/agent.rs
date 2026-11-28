@@ -26,9 +26,10 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Streaming, transport::Channel};
 
 use crate::{
-    PROTOCOL_VERSION,
+    MAX_HELLO_BYTES, PROTOCOL_VERSION,
     agent_capacity::worker_capacity,
     agent_files::send_file,
+    agent_history,
     agent_managed::ManagedCommands,
     agent_readiness::readiness_from,
     agent_reservation::{agent_service, reserve},
@@ -1084,28 +1085,34 @@ pub async fn watch_agent_slot(
             None => endpoint.connect().await?,
         };
         let (outgoing, receiver) = mpsc::channel(4);
-        send(
-            &outgoing,
-            WorkerMessage::Hello(AgentWorkerHello {
-                worker_id: enrollment.worker_id.into(),
-                version: PROTOCOL_VERSION,
-                journal_id,
-                capacity: worker_capacity(&config.root),
-                reserve_before_transfer: true,
-                capabilities: config
-                    .providers
-                    .iter()
-                    .map(|provider| provider.capability.clone())
-                    .collect(),
-                any_project: config.any_project(),
-                reports_sign_in: config.signed_in.is_some(),
-                signed_in: config.signed_in(),
-                release: config.release.clone(),
-                readiness: config.readiness(),
-                updates_on_request: update::available(),
-            }),
-        )
-        .await?;
+        let mut hello = AgentWorkerHello {
+            worker_id: enrollment.worker_id.into(),
+            version: PROTOCOL_VERSION,
+            journal_id,
+            capacity: worker_capacity(&config.root),
+            reserve_before_transfer: true,
+            capabilities: config
+                .providers
+                .iter()
+                .map(|provider| provider.capability.clone())
+                .collect(),
+            any_project: config.any_project(),
+            reports_sign_in: config.signed_in.is_some(),
+            signed_in: config.signed_in(),
+            release: config.release.clone(),
+            readiness: config.readiness(),
+            updates_on_request: update::available(),
+            // It keeps each project's history, so the home sends only what that copy lacks.
+            keeps_history: true,
+            histories: Vec::new(),
+        };
+        // What it holds, as much as its hello has room for once framed.
+        agent_history::tell(
+            &mut hello,
+            &agent_history::known(&config.root).await,
+            MAX_HELLO_BYTES - 256,
+        );
+        send(&outgoing, WorkerMessage::Hello(hello)).await?;
         let mut incoming = control_client(channel.clone())
             .run_agent(ReceiverStream::new(receiver))
             .await?
@@ -1467,7 +1474,11 @@ async fn stage_workspace(
         }
         return Ok(Some(AgentWorkspace::single(path)));
     };
-    let mut transfer = WorkspaceTransfer::create(path, &run.run_id, source)?;
+    let project = path
+        .parent()
+        .ok_or_else(|| invalid("The assigned worker workspace is unavailable"))?
+        .to_owned();
+    let mut transfer = WorkspaceTransfer::create(path, &run.run_id, source, &project)?;
     while !transfer.complete() {
         match slot.message().await? {
             HomeMessage::Checkout(frame)

@@ -152,6 +152,8 @@ test('shows an enrolled worker in the popover and Computers as it connects and d
       signedIn: [],
       release: '',
       reserveBeforeTransfer: false,
+      keepsHistory: false,
+      histories: [],
       updatesOnRequest: false,
       version: 1,
       workerId,

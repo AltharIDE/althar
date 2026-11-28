@@ -28,7 +28,17 @@ import {
   type AgentWorkspaceSetupResult,
 } from './gen/althar/worker/v1/control_pb.ts'
 import { validWorkerProtocolId, WORKER_PROTOCOL_VERSION } from './handshake.ts'
-import { MAX_WORKER_BUNDLE_BYTES, gitObjectId as objectId, sourceOf, validCheckout, type WorkerCheckout } from './agentCheckout.ts'
+import {
+  MAX_WORKER_BUNDLE_BYTES,
+  MAX_WORKER_HISTORIES,
+  MAX_WORKER_HISTORY_COMMITS,
+  gitObjectId as objectId,
+  sendLimitOf,
+  sourceOf,
+  transferMsOf,
+  validCheckout,
+  type WorkerCheckout,
+} from './agentCheckout.ts'
 import { makeWorkerFiles, type WorkerFile } from './agentFiles.ts'
 import { makeManagedCommands, type WorkerHelperRequest, type WorkerManagedCommand, type WorkerManagedProcess } from './agentManaged.ts'
 import { makePreviewTunnels } from './agentPreviews.ts'
@@ -89,7 +99,7 @@ const MAX_PATCH_BYTES = 16 * 1024 * 1024
 const MAX_COMMIT_BUNDLE_BYTES = 64 * 1024 * 1024
 const MAX_SETUP_BYTES = 128 * 1024
 const SETUP_TIMEOUT_MS = 10 * 60_000 + START_TIMEOUT_MS
-export { MAX_WORKER_BUNDLE_BYTES, type WorkerCheckout } from './agentCheckout.ts'
+export { MAX_WORKER_BUNDLE_BYTES, MAX_WORKER_HISTORY_BYTES, sendLimitOf, type WorkerCheckout } from './agentCheckout.ts'
 const PROVIDER_ID = /^[a-z][a-z0-9-]{0,47}$/
 const MCP_COMMAND_NAME = /^[a-zA-Z0-9_.-]{1,64}$/
 const MAX_MCP_COMMANDS = 16
@@ -300,8 +310,20 @@ export interface AvailableAgentWorker {
   readonly busy: boolean
 }
 
+/**
+ * What a worker holds of a project's Git history, as it said it last: whether it keeps a copy at all, and the commits that
+ * copy holds with all their history. A send to it need carry only what those lack, up to `maxBytes`.
+ */
+export interface WorkerHistory {
+  readonly keeps: boolean
+  readonly commits: ReadonlyArray<string>
+  readonly maxBytes: number
+}
+
 interface Slot {
   readonly workerId: string
+  /** Whether it keeps each project's history, and the commits it holds of each (`WorkerHistory`). */
+  readonly history: { readonly keeps: boolean; readonly commits: ReadonlyMap<string, ReadonlyArray<string>> }
   /** What it said of itself; who is signed in, again with its heartbeats. */
   said: Pick<AvailableAgentWorker, 'signedIn' | 'release' | 'anyProject' | 'readiness' | 'updatesOnRequest'>
   readonly capacity: () => WorkerCapacity | undefined
@@ -376,10 +398,11 @@ const supports = (slot: Slot, projectId: string, providerId: string): boolean =>
   slot.capabilities.some((item) => covers(item, projectId) && item.providerId === providerId)
 
 export const MAX_WORKER_REPOSITORIES = 8
+/** All of a repository set's sends together, to a worker that doesn't keep history. One that does takes each up to its limit. */
 export const MAX_WORKER_SET_BYTES = 2 * MAX_WORKER_BUNDLE_BYTES
 export const WORKER_REPOSITORY_FOLDER = /^[a-z0-9][a-z0-9._-]{0,63}$/
 
-const validRepositorySet = (entries: ReadonlyArray<WorkerRepository>, primary: string): boolean =>
+const validRepositorySet = (entries: ReadonlyArray<WorkerRepository>, primary: string, keepsHistory: boolean): boolean =>
   entries.length >= 2 &&
   entries.length <= MAX_WORKER_REPOSITORIES &&
   entries.some((entry) => entry.workspaceId === primary) &&
@@ -387,9 +410,11 @@ const validRepositorySet = (entries: ReadonlyArray<WorkerRepository>, primary: s
   new Set(entries.map((entry) => entry.directory)).size === entries.length &&
   entries.every(
     (entry) =>
-      validWorkerProtocolId(entry.workspaceId, 'ws_') && WORKER_REPOSITORY_FOLDER.test(entry.directory) && validCheckout(entry.checkout),
+      validWorkerProtocolId(entry.workspaceId, 'ws_') &&
+      WORKER_REPOSITORY_FOLDER.test(entry.directory) &&
+      validCheckout(entry.checkout, sendLimitOf(keepsHistory)),
   ) &&
-  entries.reduce((sum, entry) => sum + entry.checkout.size, 0) <= MAX_WORKER_SET_BYTES
+  (keepsHistory || entries.reduce((sum, entry) => sum + entry.checkout.size, 0) <= MAX_WORKER_SET_BYTES)
 
 const validPath = (path: string): boolean =>
   path.startsWith('/') &&
@@ -649,10 +674,13 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
       output.on('error', () => undefined)
       const exit = deferred<AgentRunExit>()
       void exit.promise.catch(() => undefined)
+      // A large send, such as a project's whole history the first time, has longer to arrive.
+      const sending = (checkout?.size ?? 0) + (repositories ?? []).reduce((sum, one) => sum + one.checkout.size, 0)
       const starting = setTimeout(
         () => fail(status.DEADLINE_EXCEEDED, 'The worker did not start the agent in time.'),
-        (checkout === undefined && repositories === undefined && assets === undefined ? START_TIMEOUT_MS : CHECKOUT_TIMEOUT_MS) +
-          (plan === undefined ? 0 : SETUP_TIMEOUT_MS),
+        (checkout === undefined && repositories === undefined && assets === undefined
+          ? START_TIMEOUT_MS
+          : CHECKOUT_TIMEOUT_MS + transferMsOf(sending)) + (plan === undefined ? 0 : SETUP_TIMEOUT_MS),
       )
       starting.unref()
       const transfer = new AbortController()
@@ -699,6 +727,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
               close: (commandId) => previews.close(workerId, commandId),
             }
           : undefined,
+        sendLimitOf(slot.history.keeps),
       )
       const files = makeWorkerFiles(
         id,
@@ -824,7 +853,15 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
             ) ||
             payload.value.signedIn.length > MAX_CAPABILITIES ||
             payload.value.signedIn.some((providerId) => !PROVIDER_ID.test(providerId)) ||
-            payload.value.release.length > 64
+            payload.value.release.length > 64 ||
+            payload.value.histories.length > MAX_WORKER_HISTORIES ||
+            new Set(payload.value.histories.map(({ projectId }) => projectId)).size !== payload.value.histories.length ||
+            payload.value.histories.some(
+              ({ projectId, commits }) =>
+                !validWorkerProtocolId(projectId, 'proj_') ||
+                commits.length > MAX_WORKER_HISTORY_COMMITS ||
+                commits.some((commit) => !objectId.test(commit)),
+            )
           )
             return fail(status.INVALID_ARGUMENT, 'The worker sent invalid agent capabilities.')
           if (slots.has(workerId)) return fail(status.ALREADY_EXISTS, 'This worker already has an agent stream.')
@@ -846,6 +883,10 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
               ...(hello.updatesOnRequest ? { updatesOnRequest: true } : {}),
             },
             capabilities,
+            history: {
+              keeps: hello.keepsHistory,
+              commits: new Map(hello.keepsHistory ? hello.histories.map(({ projectId, commits }) => [projectId, [...commits]]) : []),
+            },
             start,
             openTools,
             busy: () =>
@@ -1209,6 +1250,19 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
         }
       }),
     openTools: (workerId: string, runId: string, invalidate: () => void) => slots.get(workerId)?.openTools(runId, invalidate),
+    /**
+     * What a connected worker holds of a project's history, as its stream said: what a send to it for that project may leave
+     * out, and how large it may be. None where it isn't connected.
+     */
+    history: (workerId: string, projectId: string): WorkerHistory | undefined => {
+      const slot = slots.get(workerId)
+      if (slot === undefined) return undefined
+      return {
+        keeps: slot.history.keeps,
+        commits: slot.history.commits.get(projectId) ?? [],
+        maxBytes: sendLimitOf(slot.history.keeps),
+      }
+    },
     /** Stops the run a connected worker holds that the home has no use for any more (`Slot.stopRun`). */
     stopRun: (workerId: string): boolean => slots.get(workerId)?.stopRun() ?? false,
     /** Tells a worker connected now that the person removed it: whether it was there, idle, to hear it. */
@@ -1276,9 +1330,10 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
         const unready = unreadyOf(slot.said.readiness, placement.providerId)
         if (unready !== undefined) return Promise.reject(new Error(unready))
       }
-      if (checkout !== undefined && !validCheckout(checkout)) throw new Error('The worker needs a valid, bounded Git bundle.')
+      const limit = sendLimitOf(slot.history.keeps)
+      if (checkout !== undefined && !validCheckout(checkout, limit)) throw new Error('The worker needs a valid, bounded Git bundle.')
       if (repositories !== undefined) {
-        if (checkout !== undefined || !validRepositorySet(repositories, placement.workspaceId))
+        if (checkout !== undefined || !validRepositorySet(repositories, placement.workspaceId, slot.history.keeps))
           throw new Error('The worker needs a valid, bounded set of Git repositories.')
         if (
           !slot.capabilities.some((cap) => covers(cap, placement.projectId) && cap.providerId === placement.providerId && cap.workspaceSets)

@@ -10,10 +10,13 @@ use ring::digest::{Context, SHA256};
 use rustix::fs::{CWD, RenameFlags, renameat_with};
 use tokio::process::Command;
 
-use crate::wire::AgentWorkspaceSource;
+use crate::{
+    agent_history::{History, git_command, run_git},
+    wire::AgentWorkspaceSource,
+};
 
-pub(crate) const MAX_BUNDLE_BYTES: u32 = 128 * 1024 * 1024;
-const SNAPSHOT_REF: &str = "refs/althar/worker-snapshot";
+#[cfg(test)]
+use crate::agent_history::SNAPSHOT_REF;
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
@@ -22,6 +25,8 @@ fn invalid(message: &'static str) -> io::Error {
 pub(crate) struct WorkspaceTransfer {
     staging: PathBuf,
     destination: PathBuf,
+    /// The project's folder, where its copy of the history is kept (agent_history.rs).
+    project: PathBuf,
     archive: BufWriter<File>,
     digest: Context,
     remaining: u32,
@@ -32,13 +37,15 @@ pub(crate) fn private_directory(path: &Path) -> io::Result<()> {
 }
 
 impl WorkspaceTransfer {
+    /// A send for `destination`, staged beside it and made into a checkout from the copy of the history kept in
+    /// `project`. A send may be as large as its 32-bit size says: after the first, it carries only what's new.
     pub(crate) fn create(
         destination: PathBuf,
         run_id: &str,
         source: &AgentWorkspaceSource,
+        project: &Path,
     ) -> io::Result<Self> {
         if source.size == 0
-            || source.size > MAX_BUNDLE_BYTES
             || source.sha256.len() != 32
             || !matches!(source.head.len(), 40 | 64)
             || !source
@@ -48,13 +55,16 @@ impl WorkspaceTransfer {
         {
             return Err(invalid("The home sent invalid Git workspace metadata"));
         }
-        let project = destination
+        let parent = destination
             .parent()
             .ok_or_else(|| invalid("No project directory"))?;
-        match private_directory(project) {
+        match private_directory(parent) {
             Ok(()) => (),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => (),
             Err(error) => return Err(error),
+        }
+        if parent.canonicalize()? != parent || !parent.is_dir() {
+            return Err(invalid("The worker project directory is unavailable"));
         }
         if project.canonicalize()? != project || !project.is_dir() {
             return Err(invalid("The worker project directory is unavailable"));
@@ -64,7 +74,7 @@ impl WorkspaceTransfer {
                 "A worker workspace already exists; keep it for recovery",
             ));
         }
-        let staging = project.join(format!(".{run_id}.import"));
+        let staging = parent.join(format!(".{run_id}.import"));
         private_directory(&staging)?;
         let archive = match OpenOptions::new()
             .mode(0o600)
@@ -81,6 +91,7 @@ impl WorkspaceTransfer {
         Ok(Self {
             staging,
             destination,
+            project: project.to_owned(),
             archive: BufWriter::new(archive),
             digest: Context::new(&SHA256),
             remaining: source.size,
@@ -112,49 +123,48 @@ impl WorkspaceTransfer {
         self.archive.get_ref().sync_all()?;
         let checkout = self.staging.join("checkout");
         private_directory(&checkout)?;
-        let object_format = if source.head.len() == 40 {
-            "--object-format=sha1"
-        } else {
+        let sha256 = source.head.len() == 64;
+        let object_format = if sha256 {
             "--object-format=sha256"
+        } else {
+            "--object-format=sha1"
         };
         run_git(
             &checkout,
             &["init", "--quiet", "--template=", object_format],
         )
         .await?;
+        // The project's copy of the history takes the send in, whole or only what it lacked, and the checkout is
+        // fetched from the copy.
+        let history = History::open(&self.project, sha256).await?;
+        let taken = history.take(&self.staging.join("source.bundle")).await?;
+        let installed = self.check_out(&checkout, &history, &taken, source).await;
+        history
+            .settle(taken, installed.is_ok().then_some(source.head.as_str()))
+            .await;
+        installed
+    }
 
-        let archive = self.staging.join("source.bundle");
-        let archive_path = archive
-            .to_str()
-            .ok_or_else(|| invalid("The workspace root must be UTF-8"))?;
-        run_git(
-            &checkout,
-            &[
-                "fetch",
-                "--quiet",
-                "--no-tags",
-                "--no-recurse-submodules",
-                archive_path,
-                SNAPSHOT_REF,
-            ],
-        )
-        .await?;
-        let parent = run_git(&checkout, &["rev-parse", "--verify", "FETCH_HEAD^"]).await?;
+    async fn check_out(
+        &self,
+        checkout: &Path,
+        history: &History,
+        taken: &crate::agent_history::Taken,
+        source: &AgentWorkspaceSource,
+    ) -> io::Result<PathBuf> {
+        history.fetch_into(checkout, taken).await?;
+        let parent = run_git(checkout, &["rev-parse", "--verify", "FETCH_HEAD^"]).await?;
         if parent.trim() != source.head {
             return Err(invalid(
                 "The Git snapshot does not match the expected starting commit",
             ));
         }
-        run_git(
-            &checkout,
-            &["checkout", "--quiet", "--detach", "FETCH_HEAD"],
-        )
-        .await?;
-        run_git(&checkout, &["reset", "--quiet", "--mixed", &source.head]).await?;
-        install_git_guard(&checkout).await?;
+        run_git(checkout, &["checkout", "--quiet", "--detach", "FETCH_HEAD"]).await?;
+        run_git(checkout, &["reset", "--quiet", "--mixed", &source.head]).await?;
+        install_git_guard(checkout).await?;
         renameat_with(
             CWD,
-            &checkout,
+            checkout,
             CWD,
             &self.destination,
             RenameFlags::NOREPLACE,
@@ -204,37 +214,6 @@ impl Drop for WorkspaceTransfer {
             );
         }
     }
-}
-
-fn git_command(directory: &Path) -> Command {
-    let mut command = Command::new("/usr/bin/git");
-    command
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .args([
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "protocol.file.allow=always",
-        ])
-        .current_dir(directory)
-        .stdin(Stdio::null())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(true);
-    command
-}
-
-async fn run_git(directory: &Path, args: &[&str]) -> io::Result<String> {
-    let response = git_command(directory).args(args).output().await?;
-    if !response.status.success() {
-        return Err(invalid(
-            "Could not build the Git checkout from the received workspace",
-        ));
-    }
-    String::from_utf8(response.stdout).map_err(io::Error::other)
 }
 
 const MAX_PATCH_BYTES: u64 = 16 * 1024 * 1024;
@@ -558,12 +537,14 @@ mod tests {
         assert!(workspace.checkout("").is_none());
         assert_eq!(fs::read_to_string(grouped.join("web/README.md"))?, "Home\n");
         let destination = fixture.path().join("project").join("attempt");
+        let project = fixture.path().join("project");
         let mut bad_transfer =
-            WorkspaceTransfer::create(destination.clone(), "bad", &specification)?;
+            WorkspaceTransfer::create(destination.clone(), "bad", &specification, &project)?;
         bad_transfer.put(&vec![0; bytes.len()])?;
         assert!(bad_transfer.install(&specification).await.is_err());
         assert!(!destination.exists());
-        let mut transfer = WorkspaceTransfer::create(destination, "good", &specification)?;
+        let mut transfer =
+            WorkspaceTransfer::create(destination, "good", &specification, &project)?;
         for chunk in bytes.chunks(128) {
             transfer.put(chunk)?;
         }

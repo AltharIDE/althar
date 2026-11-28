@@ -111,7 +111,7 @@ export class WorkerSnapshots extends Context.Service<
                       return yield* blocked('The worker did not return staged files for every repository.')
                     const bundle = yield* prepareWorkerWorkspace(
                       workspace.path,
-                      Math.min(MAX_WORKER_BUNDLE_BYTES, remaining),
+                      { maxBytes: Math.min(MAX_WORKER_BUNDLE_BYTES, remaining) },
                       true,
                       captured?.index,
                     )

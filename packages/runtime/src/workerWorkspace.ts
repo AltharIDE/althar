@@ -7,7 +7,7 @@ import { cleanUp } from '@althar/provider-adapters'
 import { Effect } from 'effect'
 
 import { GitFailed } from './errors'
-import { commitTree, git, treeOf, untouched } from './git'
+import { commitTree, git, gitExactly, gitWithin, gitWithInput, treeOf, untouched } from './git'
 
 const SNAPSHOT_REF = 'refs/althar/worker-snapshot'
 const INDEX_REF = 'refs/althar/worker-index'
@@ -15,13 +15,111 @@ const COMMITS_REF = 'refs/althar/worker-head'
 
 const failed = (cwd: string, args: ReadonlyArray<string>, reason: string) => new GitFailed({ cwd, args, reason, stderr: '' })
 
+/** Long enough to bundle a large project's whole history, as a worker's first send of it does. */
+const BUNDLE_TIMEOUT_MS = 30 * 60_000
+
+/** A send's size for the thread: 12 KB, 3.4 MB, 81 MB, 1.2 GB. */
+export const sendSizeWords = (bytes: number): string => {
+  const units = [
+    [1024 ** 3, 'GB'],
+    [1024 ** 2, 'MB'],
+    [1024, 'KB'],
+  ] as const
+  for (const [size, unit] of units) {
+    if (bytes < size) continue
+    const value = bytes / size
+    return `${value < 10 ? Number(value.toFixed(1)) : Math.round(value)} ${unit}`
+  }
+  return `${bytes} bytes`
+}
+
+/** What the home sent a worker as a task started there, for the thread: its size, and what it carried. */
+export const sentWords = (sent: { readonly bytes: number; readonly thin: boolean; readonly keeps: boolean }, worker: string): string => {
+  const size = sendSizeWords(sent.bytes)
+  if (sent.thin) return `Sent ${size} to ${worker}: only what’s new to the history it keeps.`
+  if (sent.keeps)
+    return `Sent ${size} to ${worker}: the project’s history with the task’s changes. It keeps the history, so later sends carry only what’s new.`
+  return `Sent ${size} to ${worker}: the task’s whole history with its changes. Update the worker so later sends carry only what’s new.`
+}
+
+/** What a send to a worker may leave out and how large it may be (`WorkerHistory` in the worker protocol). */
+export interface WorkerSendLimits {
+  readonly maxBytes: number
+  /** The worker keeps the project's history: it took a send that carries only what its copy lacks. */
+  readonly keeps?: boolean
+  /** Commits its copy holds, with all their history: the send leaves those out. */
+  readonly known?: ReadonlyArray<string>
+}
+
+/** Of `commits`, those this repository has, so a bundle can leave them out: asked of git on its input, never as arguments. */
+const commitsHere = (worktree: string, commits: ReadonlyArray<string>) => {
+  const asked = commits.filter((commit) => /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(commit))
+  if (asked.length === 0) return Effect.succeed([] as ReadonlyArray<string>)
+  return gitWithInput(worktree, asked.map((commit) => `${commit}^{commit}\n`).join(''), 'cat-file', '--batch-check=%(objectname)').pipe(
+    Effect.map((output) => {
+      const found = new Set(output.split('\n').map((line) => line.trim()))
+      return asked.filter((commit) => found.has(commit))
+    }),
+    Effect.orElseSucceed(() => [] as ReadonlyArray<string>),
+  )
+}
+
+/** The files the task changed and hasn't committed, by size: their total, and the largest. */
+const uncommittedSizes = (worktree: string, head: string, snapshot: string) =>
+  Effect.gen(function* () {
+    const raw = yield* gitExactly(worktree, 'diff-tree', '-r', '-z', '--no-renames', '--diff-filter=AMT', head, snapshot)
+    // `:<mode> <mode> <old> <new> <status>` then the path, each ending in NUL.
+    const fields = raw.split('\0')
+    const changed: Array<{ readonly path: string; readonly blob: string }> = []
+    for (let at = 0; at + 1 < fields.length; at += 2) {
+      const blob = fields[at]?.split(' ')[3]
+      const path = fields[at + 1]
+      if (blob !== undefined && path !== undefined && /^[0-9a-f]{40,64}$/.test(blob)) changed.push({ path, blob })
+    }
+    if (changed.length === 0) return { total: 0, largest: undefined }
+    const sizes = (yield* gitWithInput(
+      worktree,
+      changed.map(({ blob }) => blob + '\n').join(''),
+      'cat-file',
+      '--batch-check=%(objectsize)',
+    ))
+      .split('\n')
+      .map(Number)
+    let total = 0
+    let largest: { readonly path: string; readonly size: number } | undefined
+    changed.forEach(({ path }, at) => {
+      const size = sizes[at] ?? 0
+      if (!Number.isFinite(size)) return
+      total += size
+      if (largest === undefined || size > largest.size) largest = { path, size }
+    })
+    return { total, largest }
+  }).pipe(Effect.orElseSucceed(() => ({ total: 0, largest: undefined })))
+
+/** Why a send is too large for the worker, and what to do: the file that makes it so, an update, or running it on the home. */
+export const tooLargeWords = (
+  size: number,
+  limits: WorkerSendLimits,
+  uncommitted: { readonly total: number; readonly largest: { readonly path: string; readonly size: number } | undefined },
+): string => {
+  const said = `The task’s Git history and changes come to ${sendSizeWords(size)}; the worker takes at most ${sendSizeWords(limits.maxBytes)} in one send.`
+  const { largest } = uncommitted
+  if (largest !== undefined && uncommitted.total * 2 >= size)
+    return `${said} Most of it is ${largest.path} (${sendSizeWords(largest.size)}), which isn’t committed or ignored: add it to .gitignore, or move it out of the task’s folder.`
+  if (limits.keeps !== true)
+    return `${said} Update the worker: it then keeps the project’s history, takes up to 4 GB the first time, and later sends carry only what’s new.`
+  return `${said} Run this task on the home instead.`
+}
+
 /**
  * Build a portable Git view of one task worktree. The synthetic commit has
  * the current HEAD as its parent and carries tracked and unignored changes.
  * A private bare repository gives it a bundle ref without changing any of
- * the task's own refs, index, configuration or working files.
+ * the task's own refs, index, configuration or working files. A worker that
+ * keeps the project's history gets only what its copy lacks (`limits.known`).
  */
-export const prepareWorkerWorkspace = (worktree: string, maxBytes: number, saveIndex = false, verifiedIndex?: string) => {
+export const prepareWorkerWorkspace = (worktree: string, limits: WorkerSendLimits, saveIndex = false, verifiedIndex?: string) => {
+  const { maxBytes } = limits
   const failed = (reason: string) =>
     new GitFailed({
       args: ['bundle', 'create'],
@@ -59,11 +157,21 @@ export const prepareWorkerWorkspace = (worktree: string, maxBytes: number, saveI
       const staged = yield* commitTree(worktree, index, head, 'Althar workspace index')
       yield* git(target, 'update-ref', INDEX_REF, staged)
     }
-    yield* git(target, 'bundle', 'create', bundle, SNAPSHOT_REF, ...(index === undefined ? [] : [INDEX_REF]))
+    // What the worker's copy holds goes no further: its commits and all before them.
+    const basis = yield* commitsHere(worktree, limits.known ?? [])
+    yield* gitWithin(
+      BUNDLE_TIMEOUT_MS,
+      target,
+      'bundle',
+      'create',
+      bundle,
+      SNAPSHOT_REF,
+      ...(index === undefined ? [] : [INDEX_REF]),
+      ...basis.map((commit) => '^' + commit),
+    )
     const { size } = yield* io(() => stat(bundle), 'The worker bundle was not written.')
-    if (size > maxBytes || size === 0) {
-      return yield* failed('The task’s Git history and changes exceed the worker bundle size limit.')
-    }
+    if (size === 0) return yield* failed('The worker bundle was not written.')
+    if (size > maxBytes) return yield* failed(tooLargeWords(size, limits, yield* uncommittedSizes(worktree, head, snapshot)))
     const sha256 = yield* Effect.tryPromise({
       try: async (signal) => {
         const hash = createHash('sha256')
@@ -88,7 +196,17 @@ export const prepareWorkerWorkspace = (worktree: string, maxBytes: number, saveI
           await file.close()
         }
       }, 'Could not read the prepared workspace.')
-    return { size, sha256, head, tree, index, contents: (signal: AbortSignal) => createReadStream(bundle, { signal }), range }
+    return {
+      size,
+      sha256,
+      head,
+      tree,
+      index,
+      /** It leaves out history the worker holds: it carries only what's new to it. */
+      thin: basis.length > 0,
+      contents: (signal: AbortSignal) => createReadStream(bundle, { signal }),
+      range,
+    }
   })
 }
 

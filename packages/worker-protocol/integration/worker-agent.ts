@@ -163,6 +163,8 @@ const hello = (
     release: '',
     reserveBeforeTransfer: false,
     updatesOnRequest: false,
+    keepsHistory: false,
+    histories: [],
     workerId: id,
     version: 1,
     journalId: journal,

@@ -40,6 +40,18 @@ export interface WorkerExecution {
   readonly skillsPath?: string
   readonly localMcp?: ReadonlyArray<WorkerLocalMcpCommand>
   readonly checkpoint: Effect.Effect<void, AgentRequestFailed>
+  /**
+   * What the home sent the worker of the task's repositories, all together: its size, and whether it carried only what the
+   * worker's copy of the history lacked (`thin`) or the history too. None where it sent no checkout.
+   */
+  readonly sent?: WorkerSent
+}
+
+export interface WorkerSent {
+  readonly bytes: number
+  readonly thin: boolean
+  /** The worker keeps the history it was sent, so its next send carries only what's new. */
+  readonly keeps: boolean
 }
 
 export interface AssignedCommand extends WorkerManagedCommand {

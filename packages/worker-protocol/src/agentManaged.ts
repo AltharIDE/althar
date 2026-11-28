@@ -13,7 +13,7 @@ import {
 } from './gen/althar/worker/v1/control_pb.ts'
 import { validWorkerProtocolId } from './handshake.ts'
 import { deferred, type Deferred } from './deferred.ts'
-import { sourceOf, validCheckout, type WorkerCheckout } from './agentCheckout.ts'
+import { MAX_WORKER_BUNDLE_BYTES, sourceOf, transferMsOf, validCheckout, type WorkerCheckout } from './agentCheckout.ts'
 import { workerSkillBundle, type WorkerSkillFile } from './agentSkillFiles.ts'
 
 const MAX_COMMANDS = 8
@@ -72,6 +72,8 @@ export const makeManagedCommands = (
     readonly open: (commandId: string, port: number, active: () => boolean, signal?: AbortSignal) => Promise<Duplex>
     readonly close: (commandId: string) => void
   },
+  /** The most one checkout sent to it may be: more where the worker keeps the project's history (agentCheckout.ts). */
+  checkoutLimit = MAX_WORKER_BUNDLE_BYTES,
 ) => {
   const active = new Map<string, Command>()
   const expired = () => invalid('The worker did not confirm the managed command in time.')
@@ -95,7 +97,8 @@ export const makeManagedCommands = (
       (!helper && (Buffer.byteLength(input.command) > MAX_CHUNK || !input.command.trim() || input.command.includes('\0')))
     )
       return Promise.reject(new Error('This command is too large or has an invalid workspace folder.'))
-    if (checkout !== undefined && !validCheckout(checkout)) throw new Error('The helper’s checkout is too large or incomplete.')
+    if (checkout !== undefined && !validCheckout(checkout, checkoutLimit))
+      throw new Error('The helper’s checkout is too large or incomplete.')
     const assets = helper && input.skills !== undefined ? workerSkillBundle(input.skills) : undefined
     const transfer = checkout !== undefined || assets !== undefined
     const managed = create(AgentManagedRefSchema, { runId, commandId: input.id })
@@ -141,7 +144,7 @@ export const makeManagedCommands = (
       uploads = uploads
         .then(async () => {
           if (!ownsRun() || active.get(input.id) !== record || record.phase !== 'starting') return
-          record.timeout = setTimeout(expired, HELPER_UPLOAD_TIMEOUT).unref()
+          record.timeout = setTimeout(expired, HELPER_UPLOAD_TIMEOUT + transferMsOf(checkout?.size ?? 0)).unref()
           await send({
             case: 'helperStart',
             value: create(AgentHelperStartSchema, {

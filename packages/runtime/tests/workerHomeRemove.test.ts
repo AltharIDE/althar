@@ -33,6 +33,8 @@ const hello = (workerId: string): AgentWorkerHello => ({
   signedIn: [],
   release: '',
   reserveBeforeTransfer: false,
+  keepsHistory: false,
+  histories: [],
   updatesOnRequest: false,
   version: 1,
   workerId,

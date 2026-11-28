@@ -36,6 +36,8 @@ const hello = (workerId: string, release: string, updatesOnRequest = true): Agen
   release,
   updatesOnRequest,
   reserveBeforeTransfer: false,
+  keepsHistory: false,
+  histories: [],
   version: 1,
   workerId,
   journalId,

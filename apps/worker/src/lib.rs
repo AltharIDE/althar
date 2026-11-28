@@ -9,6 +9,8 @@ pub mod agent;
 mod agent_capacity;
 #[cfg(target_os = "linux")]
 mod agent_files;
+#[cfg(any(target_os = "linux", test))]
+mod agent_history;
 #[cfg(target_os = "linux")]
 mod agent_managed;
 #[cfg(target_os = "linux")]

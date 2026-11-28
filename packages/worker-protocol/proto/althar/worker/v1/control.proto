@@ -88,6 +88,19 @@ message AgentWorkerHello {
   // It updates when its home asks (AgentWorkerUpdate): it has its updater's
   // service. An older worker, or one set up by hand, doesn't.
   bool updates_on_request = 12;
+  // It keeps a copy of each project's Git history and takes a send that
+  // carries only what that copy lacks: a bundle whose prerequisites are among
+  // `histories`, up to 4 GiB each. An older worker takes whole bundles of at
+  // most 128 MiB.
+  bool keeps_history = 13;
+  // The commits its copies hold, with all their history, for each project.
+  repeated AgentWorkerHistory histories = 14;
+}
+
+// The newest commits a worker's copy of a project's history holds.
+message AgentWorkerHistory {
+  string project_id = 1;
+  repeated string commits = 2;
 }
 
 // A worker's check of itself, as its setup and its hourly timer run it: whether
@@ -216,7 +229,8 @@ message AgentRepositorySetup {
   repeated string commands = 3;
 }
 
-// A single Git bundle with one scoped snapshot ref, staged before launch.
+// A single Git bundle with one scoped snapshot ref, staged before launch. To a
+// worker that keeps history, its prerequisites are commits it said it holds.
 message AgentWorkspaceSource {
   uint32 size = 1;
   bytes sha256 = 2;

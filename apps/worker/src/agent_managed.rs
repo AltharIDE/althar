@@ -194,7 +194,8 @@ impl<'a> ManagedCommands<'a> {
                     .parent()
                     .ok_or_else(|| io::Error::other("No helper workspace root"))?;
                 let destination = site.join(&scope);
-                let transfer = WorkspaceTransfer::create(destination.clone(), &scope, &source)?;
+                let transfer =
+                    WorkspaceTransfer::create(destination.clone(), &scope, &source, site)?;
                 Ok::<_, io::Error>(CheckoutUpload {
                     destination,
                     source,

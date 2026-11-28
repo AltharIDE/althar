@@ -25,7 +25,7 @@ The home keeps task and approval authority. An operator grants an enrolled worke
 
 A separate mutual TLS stream carries the workspace, agent session and execution lease. The home reserves the worker and workspace in its private ledger before sending a start. The worker records the systemd control group before letting the provider run. After a disconnect, the same worker journal must confirm that group has stopped before the home releases the reservation.
 
-The home sends a Git bundle of an isolated task worktree. Before a turn finishes or an Althar tool acts, the home checks its current Git tree and receives the worker’s new commits and working files. The tool bridge reaches the session’s loopback MCP endpoint using its existing role token. A checkout that needs recovery stays on the worker.
+The home sends a Git bundle of an isolated task worktree, leaving out the history the worker’s copy of the project already holds (`apps/worker/src/agent_history.rs`). Before a turn finishes or an Althar tool acts, the home checks its current Git tree and receives the worker’s new commits and working files. The tool bridge reaches the session’s loopback MCP endpoint using its existing role token. A checkout that needs recovery stays on the worker.
 
 The standalone service and the Desktop utility process use the same worker
 listener, enrollment ledger and execution adapter in the runtime. Each
