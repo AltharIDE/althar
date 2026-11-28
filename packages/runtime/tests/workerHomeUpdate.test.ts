@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { assert, it } from '@effect/vitest'
 import { until } from '@althar/testing/effect'
 import { AgentRunOutcome, AgentWorkerUpdateOutcome, type AgentWorkerHello } from '@althar/worker-protocol'
-import { WORKER_UPDATE_UNSUPPORTED } from '@althar/worker-protocol/agent-runs'
+import { isWorkerBusy, WORKER_UPDATE_LOST, WORKER_UPDATE_UNSUPPORTED, withWorkerUpdateTiming } from '@althar/worker-protocol/agent-runs'
 import { Effect } from 'effect'
 
 import { testAgentWorker } from '../../worker-protocol/integration/worker-agent-client'
@@ -115,11 +115,19 @@ it.live('asks an idle worker at once, keeps work off it while it updates, and is
 
       yield* home.update!(workerId)
       assert.strictEqual((yield* Effect.promise(() => worker.read()))?.case, 'update')
-      // Asked, it takes no task until it says how its update went.
-      assert.deepInclude(standing(), { busy: true, update: { state: 'asked' } })
+      // Told, it takes no task until it says how its update went: not offered, and a start there is refused as busy.
+      assert.deepInclude(standing(), { busy: true, update: { state: 'started' } })
       assert.isTrue(listener.agentWorkers.list(projectId)[0]?.busy)
-      // Asked again meanwhile, it isn't asked twice.
+      const refused = yield* Effect.promise(() =>
+        listener.agentWorkers.start(workerId, { projectId, workspaceId, providerId: 'codex' }).then(
+          () => undefined,
+          (error: unknown) => error,
+        ),
+      )
+      assert.isTrue(isWorkerBusy(refused))
+      // Asked again meanwhile, it isn't told twice; and told, it can't be taken back.
       yield* home.update!(workerId)
+      assert.strictEqual(yield* Effect.flip(home.cancelUpdate!(workerId)), 'Its update has started already, or wasn’t asked for.')
 
       worker.send(said(AgentWorkerUpdateOutcome.STARTED))
       yield* until(Effect.sync(standing), (one) => one?.update?.state === 'started')
@@ -147,6 +155,10 @@ it.live('asks a worker at work once its run ends, on its next stream, and says w
       // At work: asked, but nothing reaches it on this stream; the run ends it.
       yield* home.update!(workerId)
       assert.deepInclude(standing(), { busy: true, update: { state: 'asked' } })
+      // Not told yet, it can still be taken back; asked again, it is.
+      yield* home.cancelUpdate!(workerId)
+      assert.notProperty(standing(), 'update')
+      yield* home.update!(workerId)
       worker.send({
         case: 'exit',
         value: {
@@ -167,16 +179,78 @@ it.live('asks a worker at work once its run ends, on its next stream, and says w
       const current = yield* until(Effect.sync(standing), (one) => one?.update?.state === 'current')
       assert.deepInclude(current, { busy: false, update: { state: 'current', version: '0.3.0' } })
 
-      // Asked again, its updater fails, in its own words; then something of its own runs, and it's asked again later.
+      // Asked again, its updater fails, in its own words.
       yield* home.update!(workerId)
       assert.strictEqual((yield* Effect.promise(() => next.read()))?.case, 'update')
       next.send(said(AgentWorkerUpdateOutcome.FAILED, { message: '  No space left on device  ' }))
       const failed = yield* until(Effect.sync(standing), (one) => one?.update?.state === 'failed')
       assert.deepInclude(failed, { busy: false, update: { state: 'failed', message: 'No space left on device' } })
+    }),
+  ),
+)
+
+it.live('asks one waiting on its own work again on the same healthy stream, sooner the first times', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      yield* Effect.acquireRelease(
+        Effect.sync(() => withWorkerUpdateTiming({ retryMs: 40, retryMaxMs: 60 })),
+        (restore) => Effect.sync(restore),
+      )
+      const { workerId, home, connect, standing } = yield* aHome
+      const worker = yield* connect()
+      assert.strictEqual((yield* Effect.promise(() => worker.hello(hello(workerId, '0.3.0'))))?.case, 'hello')
       yield* home.update!(workerId)
-      assert.strictEqual((yield* Effect.promise(() => next.read()))?.case, 'update')
-      next.send(said(AgentWorkerUpdateOutcome.WAITING))
-      yield* until(Effect.sync(standing), (one) => one?.update?.state === 'asked' && !one.busy)
+      assert.strictEqual((yield* Effect.promise(() => worker.read()))?.case, 'update')
+      // Something of its own runs: waiting, free for the home's tasks meanwhile, and said so for the window.
+      worker.send(said(AgentWorkerUpdateOutcome.WAITING, { version: '0.3.1' }))
+      const waiting = yield* until(Effect.sync(standing), (one) => one?.update?.state === 'waiting')
+      assert.deepInclude(waiting, { connected: true, busy: false })
+      // Nothing else happens on its stream, and still it's told again.
+      assert.strictEqual((yield* Effect.promise(() => worker.read()))?.case, 'update')
+      worker.send(said(AgentWorkerUpdateOutcome.WAITING))
+      assert.strictEqual((yield* Effect.promise(() => worker.read()))?.case, 'update')
+      worker.send(said(AgentWorkerUpdateOutcome.CURRENT, { version: '0.3.0' }))
+      yield* until(Effect.sync(standing), (one) => one?.update?.state === 'current')
+    }),
+  ),
+)
+
+it.live('tells no worker the home holds for a task, until it lets go of it', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { workerId, home, connect, standing } = yield* aHome
+      const worker = yield* connect()
+      assert.strictEqual((yield* Effect.promise(() => worker.hello(hello(workerId, '0.3.0'))))?.case, 'hello')
+      // Reserved for a start, its workspace on its way: asked, not told.
+      const release = home.reserve!(workerId, workspaceId)
+      if (release === undefined) return yield* Effect.die('The worker could not be reserved')
+      yield* home.update!(workerId)
+      assert.deepInclude(standing(), { update: { state: 'asked' } })
+      // Let go without a run: told now.
+      release()
+      assert.strictEqual((yield* Effect.promise(() => worker.read()))?.case, 'update')
+      assert.deepInclude(standing(), { busy: true, update: { state: 'started' } })
+    }),
+  ),
+)
+
+it.live('fails one told to update that never comes back, once its time is up', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      yield* Effect.acquireRelease(
+        Effect.sync(() => withWorkerUpdateTiming({ returnMs: 30 })),
+        (restore) => Effect.sync(restore),
+      )
+      const { workerId, home, connect, standing } = yield* aHome
+      const worker = yield* connect()
+      assert.strictEqual((yield* Effect.promise(() => worker.hello(hello(workerId, '0.3.0'))))?.case, 'hello')
+      yield* home.update!(workerId)
+      assert.strictEqual((yield* Effect.promise(() => worker.read()))?.case, 'update')
+      worker.send(said(AgentWorkerUpdateOutcome.STARTED))
+      worker.close()
+      yield* until(Effect.sync(standing), (one) => one?.connected === false)
+      const lost = yield* until(Effect.sync(standing), (one) => one?.update?.state === 'failed')
+      assert.deepInclude(lost, { update: { state: 'failed', message: WORKER_UPDATE_LOST } })
     }),
   ),
 )

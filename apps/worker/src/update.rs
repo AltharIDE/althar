@@ -243,7 +243,13 @@ async fn watch(tools: &Tools) -> io::Result<Outcome> {
     let mut seen = before.running();
     loop {
         tokio::time::sleep(tools.every).await;
-        let now = show(tools).await?;
+        if since.elapsed() >= tools.limit {
+            return Ok(stop(tools).await);
+        }
+        // Not read this time: looked at again, never taken for ended while it may still run.
+        let Ok(now) = show(tools).await else {
+            continue;
+        };
         if now.running() {
             seen = true;
         } else if seen || (!now.invocation.is_empty() && now.invocation != before.invocation) {
@@ -261,13 +267,24 @@ async fn watch(tools: &Tools) -> io::Result<Outcome> {
             };
             return Ok(outcome(&journal, &now.result));
         }
-        if since.elapsed() >= tools.limit {
-            return Ok(Outcome::Failed {
+    }
+}
+
+/// Past its time: its update stopped, and seen stopped, before it's said to have failed. Until then it runs nothing new,
+/// as its home holds it: an updater left going could restart the worker under a task.
+async fn stop(tools: &Tools) -> Outcome {
+    let _ = output(&tools.systemctl, &["--user", "stop", UNIT]).await;
+    loop {
+        if let Ok(now) = show(tools).await
+            && !now.running()
+        {
+            return Outcome::Failed {
                 message: format!(
-                    "Its update is taking too long. `journalctl --user -u {UNIT}` on the worker says where it is."
+                    "Its update took too long, so it was stopped. `journalctl --user -u {UNIT}` on the worker says where it got to."
                 ),
-            });
+            };
         }
+        tokio::time::sleep(tools.every).await;
     }
 }
 
@@ -378,8 +395,10 @@ mod tests {
             format!(
                 r#"echo "$*" >> {d}/calls
 case "$2" in
-  show) n=$(cat {d}/n 2>/dev/null || echo 0); f={d}/state$n; [ -f "$f" ] || f={d}/state{last}; cat "$f"; echo $((n + 1)) > {d}/n ;;
+  show) if [ -f {d}/stopped ]; then printf 'ActiveState=inactive\nResult=exit-code\nInvocationID=new\n'; exit 0; fi
+        n=$(cat {d}/n 2>/dev/null || echo 0); f={d}/state$n; [ -f "$f" ] || f={d}/state{last}; cat "$f"; echo $((n + 1)) > {d}/n ;;
   start) {start} ;;
+  stop) touch {d}/stopped ;;
 esac
 "#,
                 last = states.len() - 1,
@@ -474,13 +493,16 @@ esac
             true,
             "",
         );
+        // It outlives its time: stopped, and seen stopped, before it's said to have failed.
         assert_eq!(
             run(&tools).await,
             Outcome::Failed {
                 message: format!(
-                    "Its update is taking too long. `journalctl --user -u {UNIT}` on the worker says where it is."
+                    "Its update took too long, so it was stopped. `journalctl --user -u {UNIT}` on the worker says where it got to."
                 )
             }
         );
+        let calls = fs::read_to_string(dir.path().join("calls")).unwrap();
+        assert!(calls.contains(&format!("--user stop {UNIT}")));
     }
 }

@@ -66,6 +66,7 @@ it.live('keeps each repository’s own baseline and sends commands to the select
         update: () => false,
         cancelUpdate: () => false,
         updateOf: () => undefined,
+        retryUpdate: () => undefined,
         stopRun: () => false,
         list: () => [
           {
@@ -345,6 +346,7 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
       update: () => false,
       cancelUpdate: () => false,
       updateOf: () => undefined,
+      retryUpdate: () => undefined,
       // What the worker is asked to stop that no lead here holds any more.
       stopRun: (id) => {
         orphans.push(id)
@@ -486,6 +488,7 @@ it.live('lists the home’s enrolled workers, connected or not, and takes one ou
         },
       ],
       updateOf: () => undefined,
+      retryUpdate: () => undefined,
     } as unknown as AgentWorkerPool
     let enrolled = [
       { workerId: online, projectIds: ['proj_a', 'proj_b'] },

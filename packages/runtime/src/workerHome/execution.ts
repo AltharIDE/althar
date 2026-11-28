@@ -104,7 +104,10 @@ export const workerExecution = (
       if (working(workerId)) return
       reserved.set(workerId, workspaceId)
       return () => {
-        if (reserved.get(workerId) === workspaceId) reserved.delete(workerId)
+        if (reserved.get(workerId) !== workspaceId) return
+        reserved.delete(workerId)
+        // Held no longer, and not run after all: an update asked meanwhile goes now.
+        if (readying(workerId) === undefined) active()?.retryUpdate(workerId)
       }
     },
     settle: (workerId) => {
@@ -188,7 +191,8 @@ export const workerExecution = (
           const listing = ledger?.()
           if (pool === undefined || listing === undefined) throw new Error('This home takes no workers.')
           if (!listing.workers().some((one) => one.workerId === workerId)) throw new Error('This home has no such worker.')
-          if (!pool.update(workerId)) throw new Error(WORKER_UPDATE_UNSUPPORTED)
+          // Not while the home readies it for a task: told once that's let go, or after the run, between runs.
+          if (!pool.update(workerId, undefined, (id) => readying(id) !== undefined)) throw new Error(WORKER_UPDATE_UNSUPPORTED)
         },
         catch: (error) => (error instanceof Error ? error.message : 'Could not ask the worker to update.'),
       }),
@@ -383,7 +387,12 @@ export const workerExecution = (
                 preparing.set(workerId, workspaceId)
                 return Effect.void
               }),
-              () => Effect.sync(() => void preparing.delete(workerId)),
+              () =>
+                Effect.sync(() => {
+                  preparing.delete(workerId)
+                  // Readied, or let go: an update asked meanwhile goes where nothing runs there now.
+                  if (readying(workerId) === undefined) active()?.retryUpdate(workerId)
+                }),
             )
             const entries = yield* Effect.forEach(
               repositories ?? [{ workspaceId, directory: '', worktree }],

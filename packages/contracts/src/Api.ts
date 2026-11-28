@@ -2682,13 +2682,15 @@ export type ProjectWorker = typeof ProjectWorker.Type
 export type WorkerCapacity = typeof WorkerCapacity.Type
 
 /**
- * Where an update the person asked of a worker stands on its home: asked (until the worker is between runs, or
- * connects), started (its updater runs), or how it ended: on a new release (`done`), with nothing newer it trusts
+ * Where an update the person asked of a worker stands on its home: asked (until the worker is between runs and held for
+ * no task, or connects), started (told to the worker, so no longer taken back), waiting (the worker said something of
+ * its own runs: it's asked again before long), or how it ended: on a new release (`done`), with nothing newer it trusts
  * (`current`), or failed, and why. One that ended is said for a while, then not at all.
  */
 export const WorkerUpdate = Schema.Union([
   Schema.Struct({ state: Schema.Literal('asked') }),
   Schema.Struct({ state: Schema.Literal('started') }),
+  Schema.Struct({ state: Schema.Literal('waiting') }),
   Schema.Struct({ state: Schema.Literal('done'), version: Schema.String }),
   Schema.Struct({ state: Schema.Literal('current'), version: Schema.optionalKey(Schema.String) }),
   Schema.Struct({ state: Schema.Literal('failed'), message: Schema.String }),

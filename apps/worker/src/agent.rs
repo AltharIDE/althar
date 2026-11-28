@@ -1205,7 +1205,9 @@ pub async fn watch_agent_slot(
             // Only ever sent between runs: the home refuses to remove a worker at work.
             HomeMessage::Removed(_) => return Ok(SlotEnd::Removed),
             _ => {
-                return Err(invalid("Expected an agent run or reconciliation from the home").into());
+                return Err(
+                    invalid("Expected an agent run or reconciliation from the home").into(),
+                );
             }
         };
     };
