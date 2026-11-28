@@ -196,7 +196,18 @@ export const workerSetups = (
     operation: string,
     args: ReadonlyArray<string>,
     signal: AbortSignal,
-    { verbose = false, timeout = 60_000, event }: { verbose?: boolean; timeout?: number; event?: (event: Event) => void } = {},
+    {
+      verbose = false,
+      timeout = 60_000,
+      event,
+      late,
+    }: {
+      verbose?: boolean
+      timeout?: number
+      event?: (event: Event) => void
+      /** What it stopping at its deadline means, where that isn't the connection's failure. */
+      late?: () => Stopped
+    } = {},
   ) => {
     const ran = await system.run('ssh', [...workerSshArgs(target, verbose), `sh -s -- ${[operation, ...args].map(quote).join(' ')}`], {
       input: script,
@@ -224,6 +235,8 @@ export const workerSetups = (
         stderr: forTheLog(ran.stderr),
       })
     else log.info('Worker SSH call done', { operation, target: sshAddressOf(target) })
+    // Its deadline, before what SSH exits with when stopped (255, as for a connection that failed).
+    if (ran.timedOut === true && late !== undefined && !events.some((one) => one.state === 'failed')) throw late()
     if (ran.code === 255 && !events.some((one) => one.state === 'failed')) {
       const words = lastWords(ran.stderr)
       if (/HOST IDENTIFICATION HAS CHANGED/i.test(ran.stderr)) throw new Stopped('HostKeyChanged', STEP.reach, words)
@@ -363,14 +376,14 @@ export const workerSetups = (
       const total = method === 'download' && base !== undefined ? base.bytes : release.bytes
       const ran = await bootstrap(target, 'worker-install', [method, ...asked, source, ...trust], signal, {
         timeout: transferTime(total),
+        // Still downloading at its deadline: sent from here instead.
+        ...(method === 'download' ? { late: () => new Stopped('CannotDownload', STEP.get) } : {}),
         event: (one) => {
           if (one.step === 'get' && typeof one.bytes === 'number' && typeof one.totalBytes === 'number')
             set({ progress: { bytes: one.bytes, total: one.totalBytes } })
         },
       })
       const key = ran.events.find((one) => one.step === 'key' && one.state === 'done')
-      // Stopped at its deadline, still downloading: sent from here instead.
-      if (typeof key?.publicKey !== 'string' && ran.code === null && method === 'download') throw new Stopped('CannotDownload', STEP.get)
       if (typeof key?.publicKey !== 'string') throw new Stopped('NoWorker', STEP.get)
       say(`althar-worker ${release.version}: checked against Althar’s release key`)
       return key.publicKey

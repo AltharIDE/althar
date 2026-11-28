@@ -315,10 +315,11 @@ private_dir "$root" || fail get UnsafeState
     if [ "$method" = download ]; then
       case "$source" in https://*) ;; *) fail get InvalidRequest ;; esac
       command -v curl >/dev/null || fail get CannotDownload
+      # Three minutes, and as long as it takes at 128 KiB/s, as the release's own downloads have (updates/network.ts).
       (
         ulimit -f "$(( (bytes + 511) / 512 ))"
         exec curl --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' \
-          --connect-timeout 15 --max-time 180 --max-filesize "$bytes" --output "$archive" -- "$source"
+          --connect-timeout 15 --max-time "$(( 180 + bytes / 131072 ))" --max-filesize "$bytes" --output "$archive" -- "$source"
       ) 2>>"$root/transfer.log" &
       pid=$!
       last=0

@@ -2,7 +2,7 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { expect, it, vi } from 'vitest'
 
 import { findRelease, findWorkerRelease, workerRelease } from '../src/main/homes/release'
-import type { Ran, RunOptions, SetupSystem } from '../src/main/homes/setup'
+import { runProgram, type Ran, type RunOptions, type SetupSystem } from '../src/main/homes/setup'
 import { forTheLog, transferTime, workerSetups, type WorkerLog } from '../src/main/homes/workerSetup'
 import type { WorkerSetup } from '../src/workers'
 
@@ -423,11 +423,24 @@ it('downloads a release in parts on the machine by its base, and sends the whole
 })
 
 it('sends the whole release where downloading on the machine outran its time, and stops at Get where a part won’t fit', async () => {
-  // Stopped at its deadline: no word from the machine, no key.
-  const slow = await addingInParts({ code: null })
+  // Stopped at its deadline: OpenSSH exits 255 when stopped, as for a connection that failed; no word from the machine.
+  const slow = await addingInParts({ code: 255, timedOut: true })
   expect(slow.installs.map((one) => one.args[0])).toEqual(['download', 'upload'])
   expect(slow.told.at(-1)?.phase).toBe('enroll')
+  // A connection that failed is still that.
+  const gone = await addingInParts({ code: 255, stderr: 'ssh: connect to host box port 22: Connection refused' })
+  expect(gone.installs).toHaveLength(1)
+  expect(gone.told.at(-1)).toMatchObject({ phase: 'failed', problem: { code: 'Unreachable' } })
   const full = await addingInParts({ stdout: slow.event('get', 'failed', { code: 'NotEnoughDisk' }) })
   expect(full.installs).toHaveLength(1)
   expect(full.told.at(-1)).toMatchObject({ phase: 'failed', at: 2, problem: { code: 'NotEnoughDisk' } })
+})
+
+it('says a program it ran was stopped at its deadline, whatever it exited with then', async () => {
+  const signal = new AbortController().signal
+  const late = await runProgram('/bin/sh', ['-c', 'trap "exit 255" TERM; sleep 5 & wait'], { signal, timeout: 200 })
+  expect(late).toMatchObject({ code: 255, timedOut: true })
+  const done = await runProgram('/bin/sh', ['-c', 'exit 3'], { signal, timeout: 5_000 })
+  expect(done.code).toBe(3)
+  expect(done.timedOut).toBeUndefined()
 })
