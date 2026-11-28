@@ -5,7 +5,9 @@ import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, posix } from 'node:path'
-import { bundledProblem, claudeProgram, codexProgram } from './bundledPrograms'
+import { bundledProblem, claudeFits, claudeProgram, codexFits, codexProgram } from './bundledPrograms'
+import type { PinnedPackage } from './pinnedLock'
+import { PINNED_PROGRAMS } from './pinnedPrograms'
 import { claudeHolding, codexHolding, type HeldSkill, openCodeHolding } from './heldSkills'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt, upToRepository } from './ownTools'
 import { SECRET_PLACES, secretReadRules } from './secrets'
@@ -542,11 +544,30 @@ export interface AgentCli {
   readonly drivenBy?: string
   /** Where Althar can download it. */
   readonly download?: AgentDownload
+  /**
+   * Whether a copy of the person's own, at this path, is one its adapter can drive: read from where it is installed,
+   * without running it (bundledPrograms.ts `programFits`). One that doesn't fit is passed over for Althar's copy.
+   * Without it, any copy of theirs runs, as for an agent that speaks ACP itself.
+   */
+  readonly fits?: (path: string) => boolean
   /** Its maker's page on installing it, for a person who installs it themselves: https only. */
   readonly guide?: string
 }
 
-export type AgentDownload = GitHubDownload | PinnedDownload
+export type AgentDownload = GitHubDownload | PinnedDownload | NpmDownload
+
+/**
+ * The exact npm package the adapter's lockfile names for this platform (Claude Code's and Codex's programs), checked by
+ * the sha512 integrity npm publishes and the lockfile pins: the program its adapter was built for, downloaded rather
+ * than shipped (pinnedLock.ts). The whole package is kept, as what it holds runs together.
+ */
+export interface NpmDownload {
+  readonly npm: true
+  /** The release its adapter needs. */
+  readonly version: string
+  /** Each `platform-arch[-musl]`'s package. */
+  readonly assets: Readonly<Record<string, PinnedPackage>>
+}
 
 /** An agent's latest release on GitHub, each file with the sha256 GitHub gives it; the command alone is kept. */
 export interface GitHubDownload {
@@ -1165,8 +1186,18 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
     },
     /* From claude-agent-acp's permissions/options/shared.js. Rejecting skips the action and Claude carries on. */
     version: () => ({ command: 'claude', args: ['--version'] }),
-    /* Its sign-in, status and version run `claude`: the person's own, else the copy its sessions run on, which ships with Althar. */
-    cli: { name: 'claude', bundled: () => bundledClaude() },
+    /*
+     * Its sessions drive the program its SDK names: the person's own where it is that release or newer, else the one
+     * Althar downloads, the package the lockfile pins, else (from a build that ships it) the one beside the adapter.
+     * Its sign-in, status and version run the same.
+     */
+    cli: {
+      name: 'claude',
+      bundled: () => bundledClaude(),
+      drivenBy: 'CLAUDE_CODE_EXECUTABLE',
+      download: { npm: true, ...PINNED_PROGRAMS['claude-code'] },
+      fits: claudeFits,
+    },
     permissions: {
       rejectAndContinue: ['reject'],
       rejectAndStop: [],
@@ -1346,8 +1377,11 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
     ],
     cli: {
       name: 'codex',
-      // The person's own Codex (a patched or wrapped build too) is what sessions drive, where they have one.
+      // The person's own Codex, where its adapter can drive it (codex-acp's range), is what sessions drive; else the
+      // package the lockfile pins, downloaded.
       drivenBy: 'CODEX_PATH',
+      download: { npm: true, ...PINNED_PROGRAMS.codex },
+      fits: codexFits,
       // In a Flatpak sessions use the host's Codex bridge too; reporting the
       // bundled CLI here would show an unrelated sign-in state.
       ...(process.env.FLATPAK_ID === undefined ? { bundled: () => bundledCodex() } : {}),

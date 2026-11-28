@@ -265,7 +265,11 @@ describe('an agent Althar can download, through the API', () => {
         const { client } = yield* connected({ agents: downloadable })
         const status = yield* client.Status({})
         const opencode = status.agents.find((agent) => agent.id === 'opencode')
-        assert.deepStrictEqual(opencode?.download, { size: registry.opencode.cli?.download?.size ?? '', installing: false, pinned: null })
+        assert.deepStrictEqual(opencode?.download, {
+          size: (registry.opencode.cli?.download as { size?: string } | undefined)?.size ?? '',
+          installing: false,
+          pinned: null,
+        })
         assert.isFalse(opencode?.kept)
         // One without a command of its own to download offers none.
         assert.isNull(status.agents.find((agent) => agent.id === 'codex')?.download)

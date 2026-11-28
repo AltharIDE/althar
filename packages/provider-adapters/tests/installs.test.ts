@@ -137,7 +137,7 @@ describe('finding an agent’s command', () => {
     expect(codex.signIn.login).toBe('/device/codex login')
   })
 
-  it('has Codex’s adapter drive the person’s own Codex where they have one, and its own copy where they don’t', () => {
+  it('has Codex’s adapter drive the person’s own Codex where they have one, else the one Althar downloaded, else its own', () => {
     let found: Located | null = { command: '/home/me/.local/bin/codex', whose: 'theirs' }
     const codex = usingLocated(agents.codex, () => found)
     expect(codex.launch('node')).toMatchObject({ command: 'node', env: { CODEX_PATH: '/home/me/.local/bin/codex' } })
@@ -147,7 +147,7 @@ describe('finding an agent’s command', () => {
     found = { command: '/bundled/codex', whose: 'bundled' }
     expect(codex.launch('node').env?.CODEX_PATH).toBeUndefined()
     found = { command: '/kept/codex', whose: 'althar' }
-    expect(codex.launch('node').env?.CODEX_PATH).toBeUndefined()
+    expect(codex.launch('node').env?.CODEX_PATH).toBe('/kept/codex')
     found = null
     expect(codex.launch('node').env?.CODEX_PATH).toBeUndefined()
     // Out on the device (a Flatpak's host), it is reached its own way.

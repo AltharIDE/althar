@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { type AgentDefinition, agents, agyServer, type LaunchSpec, usingLocated } from '@althar/provider-adapters'
+import { type AgentDefinition, agents, agyServer, type LaunchSpec, usingLocated, type PinnedDownload } from '@althar/provider-adapters'
 import { assert, describe, expect, it } from '@effect/vitest'
 import { Deferred, Effect, Exit, Fiber } from 'effect'
 import { TestClock } from 'effect/testing'
@@ -405,28 +405,39 @@ describe('downloading an agent', () => {
     expect(Exit.isSuccess(both) ? both.value[1].second : '').toContain('already downloading')
   })
 
-  it('runs Claude Code from the copy that ships with Althar where the person has none, and theirs where they do', async () => {
-    // The SDK ships the build for the computer the tests run on.
+  it('runs Claude Code from the copy beside its adapter where the person has none that fits, and theirs where it does', async () => {
+    // The SDK installs the build for the computer the tests run on, in this repository.
     const { run } = using({ platform: process.platform, arch: process.arch })
     const shipped = await run(Effect.map(Installs, (installs) => installs.locate(agents['claude-code'])))
     assert.isTrue(
       Exit.isSuccess(shipped) && shipped.value?.whose === 'bundled' && /[/\\]claude(\.exe)?$/.test(shipped.value.command),
       JSON.stringify(shipped),
     )
+    // Where no build ships it, the package the lockfile pins is what Althar downloads.
     const state = await run(Effect.flatMap(Installs, (installs) => installs.state(agents['claude-code'])))
-    assert.isTrue(Exit.isSuccess(state) && !state.value.downloadable)
-    const theirs = mkdtempSync(join(tmpdir(), 'althar-claude-'))
-    // A program, as Windows names one.
-    const mine = join(theirs, process.platform === 'win32' ? 'claude.exe' : 'claude')
-    writeFileSync(mine, '#!/bin/sh\necho mine\n')
-    chmodSync(mine, 0o755)
-    const own = using({ platform: process.platform, arch: process.arch, search: { env: { PATH: theirs }, dirs: [] } })
-    const found = await own.run(Effect.map(Installs, (installs) => installs.locate(agents['claude-code'])))
+    assert.isTrue(Exit.isSuccess(state) && state.value.downloadable && state.value.pinned === '0.3.331', JSON.stringify(state))
+    const program = process.platform === 'win32' ? 'claude.exe' : 'claude'
+    const theirs = (folder: string) => {
+      mkdirSync(folder, { recursive: true })
+      const mine = join(folder, program)
+      writeFileSync(mine, '#!/bin/sh\necho mine\n')
+      chmodSync(mine, 0o755)
+      return mine
+    }
+    const found = async (folder: string) => {
+      const own = using({ platform: process.platform, arch: process.arch, search: { env: { PATH: folder }, dirs: [] } })
+      const located = await own.run(Effect.map(Installs, (installs) => installs.locate(agents['claude-code'])))
+      return Exit.isSuccess(located) ? located.value : null
+    }
+    // A Claude Code of theirs whose version can't be read isn't one its adapter is known to drive: passed over.
+    const unknown = mkdtempSync(join(tmpdir(), 'althar-claude-'))
+    theirs(unknown)
+    assert.strictEqual((await found(unknown))?.whose, 'bundled')
+    // One its installer keeps by version, at or past the release its SDK names, is the one that runs.
+    const versions = join(mkdtempSync(join(tmpdir(), 'althar-claude-')), 'claude', 'versions', '2.1.999')
+    const mine = theirs(versions)
     // Named bare, as the shell finds it; on Windows by the path it was found at, as a launch there needs.
-    assert.deepStrictEqual(Exit.isSuccess(found) ? found.value : null, {
-      command: process.platform === 'win32' ? mine : 'claude',
-      whose: 'theirs',
-    })
+    assert.deepStrictEqual(await found(versions), { command: process.platform === 'win32' ? mine : 'claude', whose: 'theirs' })
   })
 
   // Not on Windows: the release it downloads is a shell script, which Althar runs (--version) to check it.
@@ -454,7 +465,7 @@ describe('downloading a pinned agent', () => {
   /** A zip of what it holds, and Antigravity with it pinned: its own sha256 and its files', unless told otherwise. */
   const pinnedTo = (held: Readonly<Record<string, string>>, pins: { zip?: string; files?: Readonly<Record<string, string>> } = {}) => {
     const zip = zipSync(Object.fromEntries(Object.entries(held).map(([name, body]) => [name, text(body)])))
-    const download = agents.antigravity.cli?.download
+    const download = agents.antigravity.cli?.download as PinnedDownload | undefined
     if (download === undefined || !('version' in download)) throw new Error('Antigravity has a pinned download')
     const agent: AgentDefinition = {
       ...agents.antigravity,
@@ -558,7 +569,7 @@ describe('downloading a pinned agent', () => {
   })
 
   it('keeps Windows’ server and harness, `.exe`s, together, and runs the server from them', async () => {
-    const pins = agents.antigravity.cli?.download
+    const pins = agents.antigravity.cli?.download as PinnedDownload | undefined
     if (pins === undefined || !('version' in pins)) throw new Error('Antigravity has a pinned download')
     // The names Google's Windows zip holds, as the registry pins them.
     assert.deepStrictEqual(Object.keys(pins.assets['win32-x64']?.files ?? {}).toSorted(), [

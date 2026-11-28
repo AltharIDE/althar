@@ -17,6 +17,7 @@ import {
   connect,
   inFlatpakSandbox,
   skillsIn,
+  type AgentDefinition,
 } from '@althar/provider-adapters'
 import { Cause, Clock, Data, Deferred, Duration, Effect, Exit, Option, Queue, type Schema, Scope, Semaphore, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
@@ -66,6 +67,7 @@ import { blockGoalAfterDisconnect } from './threadGoals'
 import { addItem, betweenTurns, recorder } from './threads'
 import type { ToolServer } from './ToolServer'
 import { ToolRefused } from './toolErrors'
+import type { InstallFailed } from './Installs'
 import { taskWorker, type WorkerExecution } from './workerExecution'
 import { WorkerTaken } from './workerWait'
 import { workerSkillFiles } from './workerSkills'
@@ -93,6 +95,11 @@ export interface SessionConnectionsDependencies {
   readonly questions: Questions['Service']
   /** Forgets what Althar holds of an agent, its sign-in as last checked and the models it offers, so both are read again. */
   readonly refreshAgent: (agentId: string) => Effect.Effect<void>
+  /**
+   * Downloads the agent's own program where Althar can (`Installs.install`): at its first use, a session's start, where
+   * it isn't on this computer yet. True once it is there; false where nothing here downloads programs.
+   */
+  readonly install?: (definition: AgentDefinition) => Effect.Effect<boolean, InstallFailed>
   readonly quietFor: Duration.Duration
   readonly run: <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.Effect<A, E>
   readonly runtimeConfig: RuntimeOptions
@@ -165,6 +172,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     questions,
     quietFor,
     refreshAgent,
+    install,
     run,
     runtimeConfig,
     sessionFact,
@@ -1004,6 +1012,19 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     connectOnce(thread, sessionId, entry, account, model, effort, true).pipe(
       Effect.catchTag('ProgramArriving', ({ check }) =>
         Effect.gen(function* () {
+          // Its first use: its own program, where Althar downloads it, brought now, before it starts. One already on its
+          // way (another session's start, Settings' Download) is waited for below.
+          if (install !== undefined && entry.definition.cli?.download !== undefined) {
+            yield* Effect.logInfo('Downloading the agent’s own program, at its first use').pipe(
+              Effect.annotateLogs({ agent: entry.definition.id, session: sessionId }),
+            )
+            const brought = yield* Effect.exit(install(entry.definition))
+            if (brought._tag === 'Failure')
+              yield* Effect.logWarning('The agent’s own program couldn’t be downloaded', brought.cause).pipe(
+                Effect.annotateLogs({ agent: entry.definition.id, session: sessionId }),
+              )
+            else yield* refreshAgent(entry.definition.id)
+          }
           const { every, within } = runtimeConfig.programWait ?? PROGRAM_WAIT
           yield* Effect.logInfo('Waiting for the agent’s own program, which isn’t there yet').pipe(
             Effect.annotateLogs({ agent: entry.definition.id, session: sessionId, problem: check() ?? '' }),

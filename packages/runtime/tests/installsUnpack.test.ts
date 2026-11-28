@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { type AgentDefinition, agents } from '@althar/provider-adapters'
+import { type AgentDefinition, agents, type PinnedDownload } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Exit } from 'effect'
 import { zipSync } from 'fflate'
@@ -22,7 +22,7 @@ const sum = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('he
 
 /** Antigravity pinned to a zip for Linux, of the files it holds, each pinned as given, installed under `root`. */
 const install = (root: string, zip: Uint8Array, files: Readonly<Record<string, string>>) => {
-  const download = agents.antigravity.cli?.download
+  const download = agents.antigravity.cli?.download as PinnedDownload | undefined
   if (download === undefined || !('version' in download)) throw new Error('Antigravity has a pinned download')
   const agent: AgentDefinition = {
     ...agents.antigravity,

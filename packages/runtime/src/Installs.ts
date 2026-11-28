@@ -1,8 +1,10 @@
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
+import { once } from 'node:events'
 import {
   chmodSync,
   closeSync,
+  createWriteStream,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -27,6 +29,7 @@ import {
   type LaunchSpec,
   locate,
   type Located,
+  type NpmDownload,
   type PinnedDownload,
   programName,
   removeFully,
@@ -121,7 +124,17 @@ interface Release {
 }
 
 /** A download from its maker's own address, pinned, rather than a GitHub release. */
-const pinned = (download: AgentDownload): download is PinnedDownload => 'version' in download
+const pinned = (download: AgentDownload): download is PinnedDownload => 'version' in download && !('npm' in download)
+
+/** The exact npm package the lockfile pins (Claude Code's and Codex's programs). */
+const fromNpm = (download: AgentDownload): download is NpmDownload => 'npm' in download
+
+/** About how big a download is, as the person reads it. */
+const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`
+
+/** Ten minutes, or as long as the download takes at 128 KiB/s where that's longer: a slow line still gets it. */
+const downloadWithin = (bytes: number | undefined) =>
+  bytes === undefined ? DOWNLOAD_WITHIN : Duration.max(DOWNLOAD_WITHIN, Duration.seconds(Math.ceil(bytes / 131_072)))
 
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 
@@ -263,15 +276,26 @@ export class Installs extends Context.Service<
             }),
           )
 
-        /** Where Althar's downloaded copy of the agent's command is, whether or not it is there. */
-        const kept = (definition: AgentDefinition, name: string) =>
-          root === undefined ? null : join(root, definition.id, 'current', programName(name, platform))
+        /**
+         * Where Althar's downloaded copy of the agent's command is, whether or not it is there: in a package it keeps
+         * whole, where the package has it.
+         */
+        const kept = (definition: AgentDefinition, name: string) => {
+          if (root === undefined) return null
+          const spec = definition.cli?.download
+          if (spec !== undefined && fromNpm(spec)) {
+            const asset = assetOf(spec.assets)
+            return asset === undefined ? null : join(root, definition.id, 'current', ...asset.program.split('/'))
+          }
+          return join(root, definition.id, 'current', programName(name, platform))
+        }
 
         const locateOf = (definition: AgentDefinition): Located | null => {
           const cli = definition.cli
           if (cli === undefined) return null
           if (cli.managed === true)
             return locate(cli.name, { bundled: cli.bundled?.() ?? null, kept: kept(definition, cli.name) }, { platform, env: {}, dirs: [] })
+          const fits = cli.fits === undefined ? {} : { fits: cli.fits }
           const onDevice = options.onDevice
           const outThere = (command: string): Located =>
             onDevice === undefined
@@ -285,11 +309,12 @@ export class Installs extends Context.Service<
               keptCopy === null ? null : locate(cli.name, { bundled: null, kept: keptCopy }, { platform, env: {}, dirs: [] })
             if (downloaded !== null) return downloaded
             const there = onDevice.where(cli.name)
-            if (there !== null) return outThere(there)
+            if (there !== null && (cli.fits === undefined || cli.fits(there))) return outThere(there)
           }
           const copies = { bundled: cli.bundled?.() ?? null, kept: keptCopy }
           const here = locate(cli.name, copies, {
             platform,
+            ...fits,
             ...(options.search === undefined ? {} : { env: options.search.env, dirs: options.search.dirs }),
           })
           if (here !== null || onDevice === undefined || onDevice.reachable) return here
@@ -298,7 +323,7 @@ export class Installs extends Context.Service<
         }
 
         /** The agent's latest release, or the newest on its line, and its file for this device with the digest GitHub gives it. */
-        const latest = (definition: AgentDefinition, install: Exclude<AgentDownload, PinnedDownload>) =>
+        const latest = (definition: AgentDefinition, install: Exclude<AgentDownload, PinnedDownload | NpmDownload>) =>
           Effect.gen(function* () {
             const asset = assetOf(install.assets)
             if (asset === undefined) return yield* fail(definition.id, `There's no ${definition.name} for this computer to download.`)
@@ -363,8 +388,69 @@ export class Installs extends Context.Service<
             : Effect.succeed({ tag: install.version, url: asset.url, digest: asset.sha256 } satisfies Release)
         }
 
+        /**
+         * The package the lockfile pins for this platform, streamed to disk as its sha512 is taken, so a large one is
+         * never whole in memory; kept only where that is the integrity pinned; unpacked whole, what never runs
+         * removed, and its program asked its version, so one that doesn't run here is never kept.
+         */
+        const npmPackage = (definition: AgentDefinition, install: NpmDownload, folder: string) =>
+          Effect.gen(function* () {
+            const asset = assetOf(install.assets)
+            if (asset === undefined) return yield* fail(definition.id, `There's no ${definition.name} for this computer to download.`)
+            const archive = join(folder, 'package.tgz')
+            const integrity = yield* within(
+              Effect.tryPromise({
+                try: async (signal) => {
+                  const response = await fetch(asset.tarball, { headers: { 'User-Agent': 'Althar' }, signal })
+                  if (!response.ok || response.body === null)
+                    throw fail(definition.id, `${definition.name} couldn't be downloaded.`, response.status)
+                  const hash = createHash('sha512')
+                  const out = createWriteStream(archive, { mode: 0o600 })
+                  try {
+                    for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+                      hash.update(chunk)
+                      if (!out.write(chunk)) await once(out, 'drain')
+                    }
+                  } catch (error) {
+                    out.destroy()
+                    throw fail(definition.id, `${definition.name}'s download stopped part-way.`, error)
+                  }
+                  await new Promise<void>((done, failed) => out.end((error?: Error | null) => (error ? failed(error) : done())))
+                  return `sha512-${hash.digest('base64')}`
+                },
+                catch: (error) =>
+                  error instanceof InstallFailed ? error : fail(definition.id, `${definition.name} couldn't be downloaded.`, error),
+              }),
+              downloadWithin(asset.bytes),
+              fail(definition.id, `Downloading ${definition.name} took too long. Try again.`),
+            )
+            // Nothing in it runs unless it is exactly the package the adapter's lockfile pins.
+            if (integrity !== asset.integrity)
+              return yield* fail(definition.id, `${definition.name}'s download didn't match the one Althar pins, so Althar didn't keep it.`)
+            const unpacked = join(folder, 'unpacked')
+            mkdirSync(unpacked)
+            yield* run(tarHere, ['-xzf', archive, '-C', unpacked], 300_000).pipe(
+              Effect.mapError((error) => fail(definition.id, `${definition.name}'s download couldn't be unpacked.`, error)),
+            )
+            // npm packs a package under `package/`.
+            const whole = join(unpacked, 'package')
+            for (const part of asset.prune)
+              yield* removeFully(join(whole, ...part.split('/'))).pipe(
+                Effect.mapError((failed) => fail(definition.id, `${definition.name} couldn't be kept on this computer.`, failed.reason)),
+              )
+            const command = join(whole, ...asset.program.split('/'))
+            if (!existsSync(command) || lstatSync(command).isSymbolicLink())
+              return yield* fail(definition.id, `${definition.name}'s download has no ${asset.program} in it.`)
+            chmodSync(command, 0o755)
+            yield* run(command, ['--version'], 60_000).pipe(
+              Effect.mapError((error) => fail(definition.id, `The downloaded ${definition.name} wouldn't run on this computer.`, error)),
+            )
+            return { release: { tag: asset.version, url: asset.tarball, digest: asset.integrity } satisfies Release, command, whole }
+          })
+
         const download = (definition: AgentDefinition, name: string, install: AgentDownload, folder: string) =>
           Effect.gen(function* () {
+            if (fromNpm(install)) return yield* npmPackage(definition, install, folder)
             const release = pinned(install) ? yield* pinnedRelease(definition, install) : yield* latest(definition, install)
             const bytes = yield* within(
               Effect.tryPromise({
@@ -469,6 +555,14 @@ export class Installs extends Context.Service<
             )
           })
 
+        /** How big its download is here: a pinned package's own size, else what its maker's release is about. */
+        const sizeOf = (spec: AgentDownload | undefined): string | null => {
+          if (spec === undefined) return null
+          if (!fromNpm(spec)) return spec.size
+          const bytes = assetOf(spec.assets)?.bytes
+          return bytes === undefined ? null : megabytes(bytes)
+        }
+
         return Installs.of({
           locate: locateOf,
           version,
@@ -479,8 +573,11 @@ export class Installs extends Context.Service<
                 definition.cli?.download !== undefined &&
                 root !== undefined &&
                 assetOf<unknown>(definition.cli.download.assets) !== undefined,
-              size: definition.cli?.download?.size ?? null,
-              pinned: definition.cli?.download !== undefined && pinned(definition.cli.download) ? definition.cli.download.version : null,
+              size: sizeOf(definition.cli?.download),
+              pinned:
+                definition.cli?.download !== undefined && (pinned(definition.cli.download) || fromNpm(definition.cli.download))
+                  ? definition.cli.download.version
+                  : null,
               installing: now.has(definition.id),
               noBuild:
                 definition.cli?.download !== undefined &&

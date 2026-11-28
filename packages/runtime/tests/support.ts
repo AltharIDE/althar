@@ -369,6 +369,10 @@ export const runtime = (
     readonly betweenAgents?: Duration.Duration
     /** How a start waits for an agent's own program that isn't there yet: a moment unless a test says. */
     readonly programWait?: { readonly every: Duration.Duration; readonly within: Duration.Duration }
+    /** Where Althar keeps the agents it downloads; none unless a test says. */
+    readonly agentsRoot?: string
+    /** What Althar's own downloads reach (an agent's program); nothing unless a test says. */
+    readonly download?: Fetch
     /** How long cards are kept between reads at most, until their task moves: none unless a test says, as most write the store by hand. */
     readonly keptFor?: Duration.Duration
     readonly each?: Readonly<Record<string, FakeAgentOptions>>
@@ -453,6 +457,8 @@ export const runtime = (
     ...(more.agentConfigs === undefined ? {} : { agentConfigs: more.agentConfigs }),
     betweenAgents: more.betweenAgents ?? Duration.zero,
     programWait: more.programWait ?? { every: Duration.millis(10), within: Duration.millis(100) },
+    ...(more.agentsRoot === undefined ? {} : { agentsRoot: more.agentsRoot }),
+    ...(more.download === undefined ? {} : { fetch: more.download }),
     // Cards worked out afresh on every read, as most tests write the store by hand; `ALTHAR_TEST_KEEP_CARDS=1` keeps them as
     // Althar does, to run any test on the cache production reads through.
     keptFor: more.keptFor ?? (process.env.ALTHAR_TEST_KEEP_CARDS === '1' ? KEPT_FOR : Duration.zero),
