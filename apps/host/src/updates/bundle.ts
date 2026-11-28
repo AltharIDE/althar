@@ -209,8 +209,11 @@ export const assembleBundle = async (source: BundleSource, destination: string) 
  * The packages that bring the agents' own programs for this system, as their adapters find them: nearly all of a worker's
  * release, and each a part of its own (parts.ts).
  */
-const agentPrograms = (platform: string = process.platform, arch: string = process.arch) =>
-  new Set([...claudeProgram(platform, arch, false).platforms, ...(codexProgram(platform, arch)?.platforms ?? [])])
+const agentPrograms = (platform: string = process.platform, arch: string = process.arch): ReadonlyMap<string, WorkerAgentId> =>
+  new Map([
+    ...claudeProgram(platform, arch, false).platforms.map((name) => [name, 'claude-code'] as const),
+    ...(codexProgram(platform, arch)?.platforms ?? []).map((name) => [name, 'codex'] as const),
+  ])
 
 /**
  * What Codex's package brings that a worker never runs: its voice, a program and the GStreamer libraries it plays sound
@@ -223,9 +226,26 @@ const pruneCodex = async (folder: string) => {
 }
 
 /**
- * A worker's own release: its native program, Node, its setup's commands (`dist/althar-worker.js`), the agents it runs
- * and its sandbox's tools. None of the home: no runtime, store or pictures. Says where its agents' own programs are, the
- * release's parts.
+ * The sandbox's bubblewrap and ripgrep, from Codex's package, where every worker has them: in the release's own
+ * `tools/bin`, beside socat, so its sandbox starts whichever agents it has, Codex or not.
+ */
+const sandboxFromCodex = async (folder: string, destination: string) => {
+  const vendor = join(folder, 'vendor')
+  for (const target of await fs.readdir(vendor).catch(() => [] as string[]))
+    for (const [from, name] of [
+      [join(vendor, target, 'codex-resources', 'bwrap'), 'bwrap'],
+      [join(vendor, target, 'codex-path', 'rg'), 'rg'],
+    ] as const) {
+      const to = join(destination, 'tools', 'bin', name)
+      await fs.copyFile(from, to, constants.COPYFILE_EXCL)
+      await fs.chmod(to, 0o700)
+    }
+}
+
+/**
+ * A worker's own release: its native program, Node, its setup's commands (`dist/althar-worker.js`), the agents' adapters
+ * and their own programs, and its sandbox's tools. None of the home: no runtime, store or pictures. Says where its agents'
+ * own programs are: the release's parts, which a worker downloads only for the agents signed in on it (parts.ts).
  */
 export const assembleWorkerBundle = async (
   source: BundleSource,
@@ -240,15 +260,27 @@ export const assembleWorkerBundle = async (
   const placed = await copyDependencies(source.entry, destination, AGENT_ADAPTERS)
   await copyWorker(source, destination)
   const programs = agentPrograms()
-  const parts = placed.filter((one) => programs.has(one.name))
-  for (const part of parts) if (part.name.startsWith('@openai/codex-')) await pruneCodex(join(destination, part.path))
-  return { parts: parts.map((part) => ({ name: part.name.replace(/^@[^/]+\//u, ''), path: part.path })) }
+  const parts: WorkerPart[] = []
+  for (const one of placed) {
+    const agent = programs.get(one.name)
+    if (agent === undefined) continue
+    if (agent === 'codex') {
+      await pruneCodex(join(destination, one.path))
+      await sandboxFromCodex(join(destination, one.path), destination)
+    }
+    parts.push({ name: one.name.replace(/^@[^/]+\//u, ''), path: one.path, agent })
+  }
+  return { parts }
 }
 
-/** An agent's own program in a worker's release: its name, as its archive says it, and its folder there. */
+/** The agents a worker runs. */
+export type WorkerAgentId = 'claude-code' | 'codex'
+
+/** An agent's own program in a worker's release: its name, as its archive says it, its folder there, and whose it is. */
 export interface WorkerPart {
   readonly name: string
   readonly path: string
+  readonly agent: WorkerAgentId
 }
 
 /** Publicly readable is fine; another user must not be able to change the selected trust anchor. */

@@ -349,7 +349,7 @@ it('takes a worker release in parts by its base, and leaves a malformed or homeâ
   })
   expect(await findWorkerRelease('x64', own({ parts }), signal)).toMatchObject({
     url: 'https://example.test/a.tar.gz',
-    base: { url: 'https://x.test/base.tar.gz', sha256: 'e'.repeat(64), bytes: 50, unpackedBytes: 500, totalBytes: 120 },
+    base: { url: 'https://x.test/base.tar.gz', sha256: 'e'.repeat(64), bytes: 50, unpackedBytes: 500 },
   })
   expect((await findWorkerRelease('x64', own({}), signal)).base).toBeUndefined()
   await expect(
@@ -401,7 +401,6 @@ const addingInParts = async (first: Partial<Ran>) => {
       sha256: 'e'.repeat(64),
       bytes: 60_000_000,
       unpackedBytes: 200_000_000,
-      totalBytes: 320_000_000,
     },
   })
   vi.mocked(system.scratch).mockResolvedValue({ path: '/scratch', remove: async () => {} })
@@ -415,10 +414,10 @@ const addingInParts = async (first: Partial<Ran>) => {
 it('downloads a release in parts on the machine by its base, and sends the whole one where the machine canâ€™t download', async () => {
   const event = (step: string, state: string, more: Record<string, unknown> = {}) => JSON.stringify({ protocol: 1, step, state, ...more })
   const { installs, system } = await addingInParts({ stdout: event('get', 'failed', { code: 'CannotDownload' }) })
-  // On the machine, the base, with the time all its parts take; sent from here, the whole release, which needs nothing more.
+  // On the machine, the base, with the time it takes; sent from here, the whole release, which needs nothing more.
   expect(installs[0]?.args).toEqual(['download', 'e'.repeat(64), '60000000', '200000000', 'https://x.test/base.tar.gz'])
-  expect(installs[0]?.timeout).toBe(transferTime(320_000_000))
-  expect(transferTime(320_000_000)).toBeGreaterThan(40 * 60_000)
+  expect(installs[0]?.timeout).toBe(transferTime(60_000_000))
+  expect(transferTime(400_000_000)).toBeGreaterThan(60 * 60_000)
   expect(installs[1]?.args).toEqual(['upload', 'a'.repeat(64), '400000000', '1000000000', 'abcdefgh'])
   expect(vi.mocked(system.fetchArchive).mock.calls[0]?.[0]).toMatchObject({ url: 'https://x.test/whole.tar.gz', sha256: 'a'.repeat(64) })
 })

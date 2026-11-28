@@ -149,6 +149,7 @@ export const packageRelease = async (options: HostOptions, dependencies: Publish
           of.push({
             name: part.name,
             path: part.path,
+            agent: part.agent,
             tree: await treeDigest(at),
             url: new URL(name, base).href,
             sha256: packed.sha256,

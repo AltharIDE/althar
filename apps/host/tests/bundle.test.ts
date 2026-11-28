@@ -134,8 +134,9 @@ describe('locked host dependency bundles', () => {
     pkg(root, '@openai/codex', { [`@openai/codex-${system}`]: '1' })
     writeFileSync(join(pkg(root, `@anthropic-ai/claude-agent-sdk-${system}`), 'claude'), 'Claude Code')
     const codex = join(pkg(root, `@openai/codex-${system}`), 'vendor', 'target')
-    for (const folder of ['bin', 'codex-resources/voice/bin']) mkdirSync(join(codex, folder), { recursive: true })
+    for (const folder of ['bin', 'codex-path', 'codex-resources/voice/bin']) mkdirSync(join(codex, folder), { recursive: true })
     writeFileSync(join(codex, 'bin', 'codex'), 'Codex')
+    writeFileSync(join(codex, 'codex-path', 'rg'), 'ripgrep')
     writeFileSync(join(codex, 'codex-resources', 'bwrap'), 'bubblewrap')
     writeFileSync(join(codex, 'codex-resources', 'voice', 'bin', 'codex-voice-host'), 'voice')
     pkg(root, 'sharp')
@@ -157,8 +158,8 @@ describe('locked host dependency bundles', () => {
     // runs, and with the bubblewrap its sandbox does.
     expect(parts).toEqual(
       expect.arrayContaining([
-        { name: `claude-agent-sdk-${system}`, path: `node_modules/@anthropic-ai/claude-agent-sdk-${system}` },
-        { name: `codex-${system}`, path: `node_modules/@openai/codex-${system}` },
+        { name: `claude-agent-sdk-${system}`, path: `node_modules/@anthropic-ai/claude-agent-sdk-${system}`, agent: 'claude-code' },
+        { name: `codex-${system}`, path: `node_modules/@openai/codex-${system}`, agent: 'codex' },
       ]),
     )
     expect(parts).toHaveLength(2)
@@ -168,6 +169,10 @@ describe('locked host dependency bundles', () => {
     const shipped = join(destination, `node_modules/@openai/codex-${system}/vendor/target`)
     expect(readFileSync(join(shipped, 'codex-resources', 'bwrap'), 'utf8')).toBe('bubblewrap')
     expect(existsSync(join(shipped, 'codex-resources', 'voice'))).toBe(false)
+    // Its sandbox's bubblewrap and ripgrep are the release's own too, so it starts on a worker without Codex.
+    expect(readFileSync(join(destination, 'tools/bin/bwrap'), 'utf8')).toBe('bubblewrap')
+    expect(readFileSync(join(destination, 'tools/bin/rg'), 'utf8')).toBe('ripgrep')
+    expect(statSync(join(destination, 'tools/bin/bwrap')).mode & 0o777).toBe(0o700)
     expect(existsSync(join(root, `node_modules/@openai/codex-${system}/vendor/target/codex-resources/voice`))).toBe(true)
     expect(readFileSync(join(destination, 'dist/althar-worker.js'), 'utf8')).toBe('worker commands')
     expect(readFileSync(join(destination, 'THIRD_PARTY_NOTICES.txt'), 'utf8')).toBe('Worker notices')

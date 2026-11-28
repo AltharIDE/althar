@@ -649,6 +649,12 @@
   font-size: 12px;
   color: var(--t-3);
 }
+/* Fixed width, so the line stays put as it counts. */
+.percent {
+  min-width: 4ch;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
 .codeWay .waiting {
   display: flex;
   gap: 12px;

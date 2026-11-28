@@ -36,16 +36,14 @@ export interface HostRelease {
   readonly bytes: number
   readonly unpackedBytes: number
   /**
-   * A worker's release in parts: its base, without its agents' own programs, which the release's install downloads on the
-   * machine (apps/host/src/updates/parts.ts); `totalBytes`, the base's and the parts' archives together. The whole
-   * archive above is what goes where the machine can't download.
+   * A worker's release in parts: its base, without its agents' own programs, which the worker downloads each with its
+   * agent's sign-in (apps/host/src/updates/parts.ts). The whole archive above is what goes where the machine can't download.
    */
   readonly base?: {
     readonly url: string
     readonly sha256: string
     readonly bytes: number
     readonly unpackedBytes: number
-    readonly totalBytes: number
   }
 }
 
@@ -157,19 +155,12 @@ const baseOf = (value: unknown, https: (value: unknown) => URL): Pick<HostReleas
   if (typeof base !== 'object' || base === null || !Array.isArray(of) || of.length === 0) return {}
   const fields = base as Record<string, unknown>
   if (typeof fields.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(fields.sha256)) throw rejected()
-  let parts = 0
-  for (const part of of as ReadonlyArray<unknown>) {
-    if (typeof part !== 'object' || part === null) throw rejected()
-    parts += natural((part as Record<string, unknown>).bytes, MAX_ARCHIVE_BYTES)
-  }
-  const bytes = natural(fields.bytes, MAX_ARCHIVE_BYTES)
   return {
     base: {
       url: https(fields.url).href,
       sha256: fields.sha256,
-      bytes,
+      bytes: natural(fields.bytes, MAX_ARCHIVE_BYTES),
       unpackedBytes: natural(fields.unpackedBytes, MAX_UNPACKED_BYTES),
-      totalBytes: bytes + parts,
     },
   }
 }

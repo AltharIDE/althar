@@ -130,6 +130,8 @@ export interface ComputersText {
     send: string
     cancel: string
     starting: string
+    /** The agent's own program, downloading to the worker first: how far, in whole percent. */
+    getting: string
   }
   /** How many of the home's workers are connected. */
   connected: (connected: number, all: number) => string
@@ -214,6 +216,7 @@ export const computersText: ComputersText = {
     send: 'Continue',
     cancel: 'Cancel',
     starting: 'Starting its sign-in…',
+    getting: 'Downloading to the worker',
   },
   connected: (connected, all) => `${connected} of ${all} connected`,
   noWorkers: 'None',
@@ -696,6 +699,8 @@ export interface WorkerSignInView {
   agent: string
   step:
     | { kind: 'starting' }
+    /** Its own program, downloading to the worker before its sign-in starts. */
+    | { kind: 'getting'; percent: number }
     | { kind: 'code'; code: string; page: string }
     | { kind: 'browser'; link: string | null; paste: boolean; refused?: string | null | undefined }
     | { kind: 'failed'; message: string }
@@ -746,6 +751,13 @@ function Agents({
                   <span className={s.making}>
                     <Spinner size="small" />
                     {t.signInSteps.starting}
+                  </span>
+                )}
+                {signing.step.kind === 'getting' && (
+                  <span className={s.making}>
+                    <Spinner size="small" />
+                    {t.signInSteps.getting}
+                    <span className={s.percent}>{`${signing.step.percent}%`}</span>
                   </span>
                 )}
                 {signing.step.kind === 'code' && (

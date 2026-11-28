@@ -26,6 +26,8 @@ export const ReleasePart = Schema.Struct({
   path: Schema.String.check(Schema.isPattern(PACKAGE_FOLDER), Schema.isMaxLength(512)),
   /** What it holds, whatever archive brought it (parts.ts `treeDigest`): a release that has it already lends it. */
   tree: Hash,
+  /** The agent whose own program it is: a worker has it only where that agent is signed in on it. */
+  agent: Schema.optional(Schema.Literals(['claude-code', 'codex'])),
   ...Counted,
 })
 export type ReleasePart = typeof ReleasePart.Type

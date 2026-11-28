@@ -254,6 +254,25 @@ export const WorkerSigningIn: Story = {
   },
 }
 
+/** Signing Codex in on a worker that hasn't its program yet: it downloads to the worker first. */
+export const WorkerAgentDownloading: Story = {
+  args: {
+    opened: ADDED.id,
+    workers: { enabled: true, list: [{ ...ADDED, projects: ['meridian'], projectIds: ['proj_meridian'] }] },
+    allProjects: PROJECTS,
+    onProjects: fn(),
+    onSignIn: fn(),
+    onCancelSignIn: fn(),
+    onOpenLink: fn(),
+    signingIn: { workerId: ADDED.id, agent: 'codex', step: { kind: 'getting', percent: 42 } },
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Downloading to the worker')).toBeInTheDocument()
+    await expect(c.getByText('42%')).toBeInTheDocument()
+  },
+}
+
 /** A worker added with a code whose check found newer Ubuntu keeps its sandbox from starting: what to run there, to copy. */
 export const WorkerNotReady: Story = {
   args: {

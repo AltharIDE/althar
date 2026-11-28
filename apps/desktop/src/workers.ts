@@ -83,6 +83,8 @@ export type WorkerSetupAction =
 /** An agent's sign-in on a worker, as its steps come: the sign-in flow's own, and a page to open in the browser here. */
 export type WorkerSignInEvent =
   | { readonly kind: 'browser'; readonly link: string | null; readonly paste: boolean }
+  /** The agent's own program, downloading to the worker before its sign-in starts. */
+  | { readonly kind: 'getting'; readonly bytes: number; readonly totalBytes: number }
   | { readonly kind: 'device'; readonly code: string; readonly page: string; readonly minutes: number }
   | { readonly kind: 'open'; readonly url: string }
   | { readonly kind: 'refused'; readonly message: string }

@@ -160,7 +160,7 @@ describe('signed host release production', () => {
         mkdirSync(join(folder, program, '..'), { recursive: true })
         writeFileSync(join(folder, program), 'Codex '.repeat(1000), { mode: 0o700 })
         writeFileSync(join(folder, 'node_modules/@openai/codex-test/package.json'), '{}', { mode: 0o600 })
-        return { parts: [{ name: 'codex-test', path: 'node_modules/@openai/codex-test' }] }
+        return { parts: [{ name: 'codex-test', path: 'node_modules/@openai/codex-test', agent: 'codex' as const }] }
       },
       execute: async (_: string, args: ReadonlyArray<string>) =>
         args.includes('version')

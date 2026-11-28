@@ -94,6 +94,8 @@ export interface Completed {
   readonly lent: ReadonlyArray<string>
   /** The parts downloaded, by name, and their archives' bytes in all. */
   readonly downloaded: ReadonlyArray<string>
+  /** The parts left out, by name, where only lending was asked for. */
+  readonly missing: ReadonlyArray<string>
   readonly bytes: number
 }
 
@@ -109,15 +111,18 @@ export const completeRelease = async (
   options: {
     readonly donors: ReadonlyArray<string>
     readonly scratch: string
-    readonly fetcher?: UpdateFetch
+    readonly fetcher?: UpdateFetch | undefined
     readonly signal?: AbortSignal
     readonly progress?: (bytes: number) => void
     /** The bytes free on the disk a folder is on. */
     readonly free?: (folder: string) => Promise<number>
+    /** Only what a donor lends: a part none has is left out, and said in `missing`. */
+    readonly lendOnly?: boolean
   },
 ): Promise<Completed> => {
   const lent: string[] = []
   const downloaded: string[] = []
+  const missing: string[] = []
   let bytes = 0
   for (const [index, part] of parts.entries()) {
     const at = join(release, part.path)
@@ -139,6 +144,9 @@ export const completeRelease = async (
     if (donor !== undefined) {
       await lend(donor, staged)
       lent.push(part.name)
+    } else if (options.lendOnly === true) {
+      missing.push(part.name)
+      continue
     } else {
       const file = join(options.scratch, `part-${index}.archive`)
       await fs.rm(file, { force: true })
@@ -159,5 +167,5 @@ export const completeRelease = async (
     }
     await fs.rename(staged, at)
   }
-  return { lent, downloaded, bytes }
+  return { lent, downloaded, missing, bytes }
 }

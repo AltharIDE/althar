@@ -238,6 +238,14 @@ export const useWorkerSignIn = (): WorkerSignInModel => {
         setSigningIn((was) => {
           if (was === null) return was
           switch (event.kind) {
+            case 'getting':
+              return {
+                ...was,
+                step: {
+                  kind: 'getting',
+                  percent: event.totalBytes > 0 ? Math.min(100, Math.floor((event.bytes / event.totalBytes) * 100)) : 0,
+                },
+              }
             case 'device':
               return { ...was, step: { kind: 'code', code: event.code, page: event.page } }
             case 'browser':
