@@ -797,7 +797,7 @@ export interface Client {
   /** Merges the task's pull request at the head the person saw, as they said to; a draft is marked ready first. */
   readonly merge: (taskId: string, head: string, url?: string, how?: 'review' | 'now', bypassQueue?: boolean) => Promise<void>
   /** Merge when checks pass: the pull request at `url`, at the head the person saw, merges once its checks pass. */
-  readonly mergeWhenGreen: (taskId: string, url: string, head: string) => Promise<void>
+  readonly mergeWhenGreen: (taskId: string, url: string, head: string, press: string) => Promise<void>
   /** Don't merge: takes one waiting to merge when its checks pass out again. */
   readonly leaveMergeLine: (taskId: string, url: string) => Promise<void>
   /** Merges a task without a pull request into its repositories' default branches on this Mac, up to the commit the person saw in each. */
@@ -1473,7 +1473,7 @@ export const connect = async (
           ...(bypassQueue === true ? { bypassQueue: true } : {}),
         }),
       ),
-    mergeWhenGreen: (taskId, url, head) => command((commandId) => api.MergeWhenGreen({ commandId, taskId, url, head })),
+    mergeWhenGreen: (taskId, url, head, press) => command((commandId) => api.MergeWhenGreen({ commandId, taskId, url, head, press })),
     leaveMergeLine: (taskId, url) => command((commandId) => api.LeaveMergeLine({ commandId, taskId, url })),
     mergeHere: (taskId, heads) => command((commandId) => api.MergeHere({ commandId, taskId, heads })),
     pushHere: (taskId) => command((commandId) => api.PushHere({ commandId, taskId })),

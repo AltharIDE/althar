@@ -151,6 +151,8 @@ export const CALLED_OFF = 'The person called it off.'
 
 /** What a press's errand's message id starts with: kept from a press in the window, not a message (`keepPressed`). */
 export const PRESSED = 'press:'
+/** Where the merge line notes a pull request's presses, by its address, which its card reads. */
+export const pressSubject = (url: string) => `press ${url.toLowerCase()}`
 const isPressed = (row: Pick<ErrandRow, 'messageId'>) => row.messageId.startsWith(PRESSED)
 
 type Store = SqlClient.SqlClient | Ledger | Instance | Crypto.Crypto

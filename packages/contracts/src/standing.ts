@@ -206,6 +206,8 @@ export const isBlocked = (standing: ChangeStanding): boolean =>
  */
 export const mergesWhenGreen = (change: ChangeSummary, standing: ChangeStanding = standingOf(change)): boolean =>
   change.state === 'open' &&
+  // Bitbucket Cloud's merge can't be held to a head, so a merge scheduled there could take a push nobody saw.
+  change.product !== 'bitbucket_cloud' &&
   !change.draft &&
   change.queued !== true &&
   standing.blockers.length === 1 &&

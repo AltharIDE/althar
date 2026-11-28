@@ -4,7 +4,7 @@ import { checkFailuresIn } from '@althar/contracts'
 import { type ChangeRequest, type CodeHost, ConnectorFailed, MergeMethod, type MergeWays, type Repository } from '@althar/connectors'
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
-import { Cause, Clock, Context, Crypto, Duration, Effect, Layer, Option, Queue, Schema } from 'effect'
+import { Cause, Clock, Context, Crypto, Duration, Effect, Layer, Option, Queue, Schema, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { keepUpdate } from './branchUpdates'
@@ -17,7 +17,16 @@ import { Connections } from './Connections'
 import { Coordinator } from './Coordinator'
 import { hostedOf, hostSays, placeOf } from './coordinatorPullRequests'
 import { envelope } from './envelope'
-import { type AskedAction, type AskedResult, type ErrandStep, Errands, type FreshAction, PRESSED } from './Errands'
+import {
+  type AskedAction,
+  type AskedResult,
+  CALLED_OFF,
+  type ErrandStep,
+  Errands,
+  type FreshAction,
+  PRESSED,
+  pressSubject,
+} from './Errands'
 import { contained } from './Failures'
 import { Instance } from './Instance'
 import { errandTaskPull } from './errandTask'
@@ -118,7 +127,20 @@ interface Entry {
 /** What a fresh read says of a step: for Errands, and for the line, what comes next and why. */
 interface Look {
   readonly fresh: FreshAction
-  readonly next: 'merge' | 'auto' | 'enqueue' | 'update' | 'wait' | 'red' | 'held' | 'conflict' | 'stuck' | 'behind' | 'settle'
+  readonly next:
+    | 'merge'
+    | 'auto'
+    | 'enqueue'
+    | 'update'
+    | 'wait'
+    | 'red'
+    | 'held'
+    | 'conflict'
+    | 'stuck'
+    | 'behind'
+    | 'settle'
+    /** A press's merge the host has already (in its queue, or auto-merge on) that must come out: pushed to, or red, since. */
+    | 'withdraw'
   readonly why: string
   readonly name: string
   readonly host: CodeHost
@@ -240,6 +262,8 @@ const rowOf = (seen: Look): Pick<CardRow, 'state' | 'reason'> => {
       return { state: 'waiting', reason: withoutName(seen.fresh.reason ?? seen.why, seen.name) }
     case 'conflict':
       return { state: 'conflict', reason: 'Its task’s lead settles it.' }
+    case 'withdraw':
+      return { state: 'sent_back', reason: seen.why }
     case 'stuck':
       return {
         state: 'sent_back',
@@ -411,6 +435,8 @@ export class MergeLine extends Context.Service<
       const instance = yield* Instance
       const locks = makeKeyedLock()
       const poke = yield* Queue.sliding<true>(1)
+      // What a press does behind it, with the host, lives as long as the line.
+      const scope = yield* Scope.Scope
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const viaHost = <A, R>(effect: Effect.Effect<A, ConnectorFailed, R>) => Effect.mapError(effect, hostSays)
 
@@ -526,6 +552,25 @@ export class MergeLine extends Context.Service<
             return said({ state: 'ended', ...at, reason }, 'settle', reason)
           }
           const merging = yield* inFlight(entry)
+          // A press's merge the host holds already, in its queue or by auto-merge, still merges only the head the person saw,
+          // green: a push or a red check since takes it out of the host's hands and sends it back, whatever the host says.
+          if (entry.pressed && merging !== undefined && (change.queued === true || change.autoMerge === true)) {
+            const pushed = by === 'other' || by === 'lead'
+            const red =
+              !pushed &&
+              change.headSha !== null &&
+              (yield* Effect.gen(function* () {
+                const sum = checksOf(change.headSha!, yield* viaHost(host.checks(repository, change.headSha!)))
+                if (sum.outcome !== 'failed') return false
+                const rules =
+                  host.mergeRules === undefined ? null : yield* host.mergeRules(repository, change).pipe(Effect.orElseSucceed(() => null))
+                return checkFailuresIn(sum, rules?.requiredChecks).outcome === 'failed'
+              }))
+            if (pushed || red) {
+              const why = pushed ? sentBack.pushed : sentBack.failed
+              return said({ state: 'waiting', ...at, ...moved, reason: why }, 'withdraw', why)
+            }
+          }
           // An accepted merge occupies its slot until the host says how it ended. A timeout is not proof that a write
           // did not happen: neither an old check nor a newly reordered entry can free the slot underneath it.
           if (way.queue === null && merging !== undefined) {
@@ -785,10 +830,14 @@ export class MergeLine extends Context.Service<
             return yield* refused(`${hostName(seen.host)} didn’t answer: ${error.message}. It is read back before another try.`)
           yield* note(projectId, stepOf(entry), 'refused', `refused:${yield* timestamp}`, { message: error.message })
           yield* forget(seen.host, seen.repository, entry.branch)
-          if (error.status === 409 || error.status === 422)
-            return yield* new ActionNotPerformed({
-              message: `${seen.name} moved on while ${hostName(seen.host)} merged it, so it wasn’t merged. Read it again.`,
-            })
+          // A stale head only where a read says it moved: a merge rule or validation refusal at the same head is the host's no.
+          if (error.status === 409 || error.status === 422) {
+            const now = yield* seen.host.change(seen.repository, seen.change.number).pipe(Effect.option)
+            if (Option.isSome(now) && now.value.headSha !== seen.change.headSha)
+              return yield* new ActionNotPerformed({
+                message: `${seen.name} moved on while ${hostName(seen.host)} merged it, so it wasn’t merged. Read it again.`,
+              })
+          }
           const now = yield* waysOf(seen.host, seen.repository, entry.branch).pipe(Effect.orElseSucceed(() => seen.ways))
           const queued = now.queue !== null || /queue|train/i.test(error.message)
           const message = `${hostName(seen.host)} refused to merge ${seen.name}: ${error.message}.${
@@ -914,8 +963,9 @@ export class MergeLine extends Context.Service<
               seen.refused !== undefined && entry.pressed
                 ? // A press's merge the host refused comes back to the person, saying so: their next press puts it back.
                   Effect.andThen(
-                    errands.callOff(
-                      entry.errandId,
+                    sendBack(
+                      access.projectId,
+                      entry,
                       `${sentBack.refused(seen.current === undefined ? 'the host' : hostName(seen.current.host))}${seen.hostSaid === undefined || seen.hostSaid === '' ? '' : `: ${seen.hostSaid.replace(/\.$/, '')}`}.`,
                     ),
                     Effect.fail(refused(seen.refused)),
@@ -952,10 +1002,139 @@ export class MergeLine extends Context.Service<
       })
 
       /**
-       * The person's Merge when checks pass, on a task's pull request at the head they saw: an errand of the merge line's,
+       * The task's own pull request at `url`, as its link keeps it: a press acts only on that, never on another of the project's
+       * named beside some task, so its Ship hold and its card are that task's.
+       */
+      const linkOf = (projectId: string, taskId: string, url: string) =>
+        provide(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const [link] = yield* sql<{ url: string; product: string; snapshot: string }>`
+              SELECT url, product, snapshot FROM external_links WHERE project_id = ${projectId} AND task_id = ${taskId}
+                AND kind = 'change' AND lower(url) = ${url.toLowerCase()} ORDER BY created_at DESC, rowid DESC LIMIT 1`
+            if (link === undefined) return yield* refused('That pull request isn’t this task’s.')
+            return link
+          }),
+        )
+
+      /** Notes where the person's last press of a pull request stands, which its card reads (`pressOf`): asked, sent back with why, or left. */
+      const pressNote = (
+        projectId: string,
+        url: string,
+        said: { readonly press: string | null; readonly state: 'asked' | 'sent_back' | 'left'; readonly reason?: string },
+      ) =>
+        provide(
+          Effect.gen(function* () {
+            yield* note(projectId, pressSubject(url), 'press', `${said.state}:${said.press ?? ''}:${yield* timestamp}`, said)
+          }),
+        )
+
+      /** The last press noted of a pull request: the one a press's errand is kept for, unless Don't merge or another came since. */
+      const lastPress = (url: string) => provide(latest(pressSubject(url), 'press'))
+
+      /**
+       * A press's errand, sent back by the line or by its host: said where its card reads it, with the errand's own reason,
+       * unless the person called it off themselves.
+       */
+      const saySentBack = (projectId: string, entry: Entry) =>
+        provide(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const [row] = yield* sql<{ state: string; reason: string | null; messageId: string }>`
+              SELECT state, reason, message_id FROM errands WHERE id = ${entry.errandId}`
+            if (row === undefined || row.state === 'open' || row.state === 'done' || row.reason === null || row.reason === CALLED_OFF)
+              return
+            yield* note(projectId, pressSubject(entry.target), 'press', `sent_back:${entry.errandId}`, {
+              press: row.messageId.slice(PRESSED.length),
+              state: 'sent_back',
+              reason: row.reason,
+            })
+            if (entry.taskId !== null) yield* touchTask(entry.taskId)
+          }),
+        )
+
+      /** Sends a press's errand back, saying why where its card reads it. */
+      const sendBack = (projectId: string, entry: Entry, reason: string) =>
+        Effect.andThen(errands.callOff(entry.errandId, reason), saySentBack(projectId, entry))
+
+      /**
+       * What a press does with the host, behind it, under the project's lock as the sweep is: the pull request read again at
+       * the head the person saw, and its merge errand kept, unless Don't merge or another press came first. Refused, the
+       * press comes back, saying why.
+       */
+      const keepPress = (input: {
+        readonly projectId: string
+        readonly taskId: string
+        readonly url: string
+        readonly head: string
+        readonly pressId: string
+      }) =>
+        locks.withLock(
+          input.projectId,
+          Effect.gen(function* () {
+            const last = yield* lastPress(input.url)
+            if (last?.press !== input.pressId || last.state !== 'asked') return
+            const place = yield* provide(placeOf(input.projectId, input.url))
+            const { host, repository } = place
+            const name = nameOf({ number: place.number, words: host.words })
+            const change = yield* viaHost(host.change(repository, place.number, { queue: true }))
+            if (change.state === 'merged') return
+            if (change.state === 'closed') return yield* refused(`Not merged: ${name} was closed.`)
+            if (change.draft) return yield* refused(`Not merged: ${name} is a draft.`)
+            if (change.headSha !== input.head) return yield* refused(sentBack.pushed)
+            // Waiting already, however it was asked for: the one errand goes on.
+            if (
+              (yield* provide(entriesOf(input.projectId))).some(
+                (entry) =>
+                  entry.state === 'open' && [change.url, input.url].some((url) => entry.target.toLowerCase() === url.toLowerCase()),
+              )
+            )
+              return
+            const [thread] = yield* provide(
+              Effect.flatMap(
+                SqlClient.SqlClient,
+                (sql) => sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${input.taskId} AND kind = 'task' LIMIT 1`,
+              ),
+            )
+            if (thread === undefined) return yield* refused('That task has no thread to keep its merge in.')
+            const way = yield* waysOf(host, repository, change.target)
+            const request: MergeRequest = {
+              repository: `${host.product}:${repository.path.join('/')}`,
+              number: place.number,
+              method: repository.merges[0] ?? 'merge',
+              now: false,
+              title: change.title,
+            }
+            yield* errands.keepPressed(input.projectId, thread.id, input.pressId, 'Merge when checks pass', [
+              {
+                key: STEP,
+                tool: MERGE_TOOL,
+                taskId: input.taskId,
+                // By the address its task follows it at, which its card reads it by: the host's own, as its link keeps it.
+                target: input.url,
+                head: input.head,
+                branch: change.target,
+                says: `Merge ${name}`,
+                request,
+                waits: [
+                  { kind: way.queue ?? 'merge_line', target: `${repository.path.join('/')} ${change.target}`, says: 'it’s its turn' },
+                  { kind: 'checks', target: input.head, says: 'its checks pass' },
+                ],
+              },
+            ])
+            yield* touchTask(input.taskId).pipe(provide)
+          }),
+        )
+
+      /**
+       * The person's Merge when checks pass, on their task's pull request at the head they saw: an errand of the merge line's,
        * kept from the press in the task's thread, which the line takes step by step as merge_pull_request's are, through the
        * host's queue, train or auto-merge where it has one and Althar's own line elsewhere, and merges once green. What would
        * step it out of line (its checks failing, a push, a conflict) sends it back instead, saying why (`sentBack`).
+       *
+       * The press is noted at once, from what Althar has kept of the pull request, and answered: the host is read and the
+       * errand kept behind it (`keepPress`), never holding the press on the line's lock or the host. Bitbucket Cloud's merge
+       * can't be held to a head, so a merge scheduled there could take a push nobody saw: it isn't offered.
        */
       const press = (input: {
         readonly projectId: string
@@ -964,93 +1143,72 @@ export class MergeLine extends Context.Service<
         readonly head: string
         readonly pressId: string
       }) =>
-        locks
-          .withLock(
-            input.projectId,
-            Effect.gen(function* () {
-              const place = yield* provide(placeOf(input.projectId, input.url))
-              const { host, repository } = place
-              const name = nameOf({ number: place.number, words: host.words })
-              const change = yield* viaHost(host.change(repository, place.number, { queue: true }))
-              if (change.state === 'merged') return
-              if (change.state === 'closed') return yield* refused(`${name} is closed.`)
-              if (change.draft) return yield* refused(`${name} is a draft: mark it ready first.`)
-              if (change.headSha !== input.head) return yield* refused(`${name} moved on since you saw it. Look again before merging.`)
-              // Waiting already, however it was asked for: the one errand goes on.
-              if (
-                (yield* provide(entriesOf(input.projectId))).some(
-                  (entry) =>
-                    entry.state === 'open' && [change.url, input.url].some((url) => entry.target.toLowerCase() === url.toLowerCase()),
-                )
-              )
-                return
-              const [thread] = yield* provide(
-                Effect.flatMap(
-                  SqlClient.SqlClient,
-                  (sql) => sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${input.taskId} AND kind = 'task' LIMIT 1`,
-                ),
-              )
-              if (thread === undefined) return yield* refused('That task has no thread to keep its merge in.')
-              const way = yield* waysOf(host, repository, change.target)
-              const request: MergeRequest = {
-                repository: `${host.product}:${repository.path.join('/')}`,
-                number: place.number,
-                method: repository.merges[0] ?? 'merge',
-                now: false,
-                title: change.title,
-              }
-              yield* errands.keepPressed(input.projectId, thread.id, input.pressId, 'Merge when checks pass', [
-                {
-                  key: STEP,
-                  tool: MERGE_TOOL,
-                  taskId: input.taskId,
-                  // By the address its task follows it at, which its card reads it by: the host's own, as its link keeps it.
-                  target: input.url,
-                  head: input.head,
-                  branch: change.target,
-                  says: `Merge ${name}`,
-                  request,
-                  waits: [
-                    { kind: way.queue ?? 'merge_line', target: `${repository.path.join('/')} ${change.target}`, says: 'it’s its turn' },
-                    { kind: 'checks', target: input.head, says: 'its checks pass' },
-                  ],
-                },
-              ])
-              yield* touchTask(input.taskId).pipe(provide)
-            }),
+        Effect.gen(function* () {
+          const link = yield* linkOf(input.projectId, input.taskId, input.url)
+          if (link.product === 'bitbucket_cloud')
+            return yield* refused('Bitbucket Cloud can’t hold a merge to the head you saw, so merge it once its checks pass.')
+          const kept = JSON.parse(link.snapshot) as { state?: string; draft?: boolean; headSha?: string | null }
+          if (kept.state !== 'open') return yield* refused('It isn’t open.')
+          if (kept.draft === true) return yield* refused('It’s a draft: mark it ready first.')
+          if (kept.headSha != null && kept.headSha !== input.head) return yield* refused('It moved on since you saw it. Look again.')
+          yield* pressNote(input.projectId, link.url, { press: input.pressId, state: 'asked' })
+          yield* touchTask(input.taskId).pipe(provide)
+          yield* Effect.forkIn(
+            keepPress({ ...input, url: link.url }).pipe(
+              Effect.catch((error: unknown) =>
+                pressNote(input.projectId, link.url, {
+                  press: input.pressId,
+                  state: 'sent_back',
+                  reason: asRefused(error).message,
+                }).pipe(Effect.andThen(touchTask(input.taskId).pipe(provide))),
+              ),
+              Effect.ensuring(Queue.offer(poke, true)),
+              Effect.catchCause((cause) => Effect.logWarning('Could not keep a press’s merge', cause)),
+            ),
+            scope,
           )
-          .pipe(Effect.mapError(asRefused), Effect.ensuring(Queue.offer(poke, true)))
+        }).pipe(Effect.mapError(asRefused))
 
       /**
-       * The person's Don't merge, on a pull request waiting to merge when its checks pass: every merge errand waiting on it is
-       * called off, by whoever it was kept, and the host's queue, train or auto-merge lets go of it, as leave_queue does.
-       * Pressing Merge when checks pass again puts it back.
+       * The person's Don't merge, on a pull request of their task's waiting to merge when its checks pass: noted, and every
+       * merge errand waiting on it called off, by whoever it was kept, at once; behind it, the host's queue, train or
+       * auto-merge lets go of it, as leave_queue does. Where the host won't, the card says so. Pressing Merge when checks pass
+       * again puts it back.
        */
       const unpress = (input: { readonly projectId: string; readonly taskId: string; readonly url: string }) =>
-        locks
-          .withLock(
-            input.projectId,
-            Effect.gen(function* () {
-              // Out of Althar's line first, which never fails on the host: by the address it was kept by, or the host's own.
-              const calledOff = (urls: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          const link = yield* linkOf(input.projectId, input.taskId, input.url)
+          yield* pressNote(input.projectId, link.url, { press: null, state: 'left' })
+          for (const entry of yield* provide(entriesOf(input.projectId)))
+            if (entry.target.toLowerCase() === link.url.toLowerCase()) yield* errands.callOff(entry.errandId, '', true)
+          yield* touchTask(input.taskId).pipe(provide)
+          yield* Effect.forkIn(
+            locks
+              .withLock(
+                input.projectId,
                 Effect.gen(function* () {
-                  const named = new Set(urls.map((url) => url.toLowerCase()))
+                  const place = yield* provide(placeOf(input.projectId, link.url))
+                  const { host, repository } = place
+                  const change = yield* viaHost(host.change(repository, place.number, { queue: true }))
                   for (const entry of yield* provide(entriesOf(input.projectId)))
-                    if (named.has(entry.target.toLowerCase())) yield* errands.callOff(entry.errandId, '', true)
-                  yield* touchTask(input.taskId).pipe(provide)
-                })
-              yield* calledOff([input.url])
-              const place = yield* provide(placeOf(input.projectId, input.url))
-              const { host, repository } = place
-              const change = yield* viaHost(host.change(repository, place.number, { queue: true }))
-              yield* calledOff([change.url])
-              if (change.state !== 'open' || (change.queued !== true && change.autoMerge !== true)) return
-              const out = yield* host.leaveQueue(repository, change).pipe(Effect.option)
-              if (Option.isNone(out) || out.value.queued === true || out.value.autoMerge === true)
-                return yield* refused(`${hostName(host)} still has it set to merge. Take it out on ${change.url}`)
-            }),
+                    if (entry.target.toLowerCase() === change.url.toLowerCase()) yield* errands.callOff(entry.errandId, '', true)
+                  if (change.state !== 'open' || (change.queued !== true && change.autoMerge !== true)) return
+                  const out = yield* host.leaveQueue(repository, change).pipe(Effect.option)
+                  if (Option.isNone(out) || out.value.queued === true || out.value.autoMerge === true)
+                    yield* pressNote(input.projectId, link.url, {
+                      press: null,
+                      state: 'sent_back',
+                      reason: `${hostName(host)} still has it set to merge: take it out on ${hostName(host)}.`,
+                    })
+                }),
+              )
+              .pipe(
+                Effect.ensuring(Queue.offer(poke, true)),
+                Effect.catchCause((cause) => Effect.logWarning('Could not take a pull request out of its queue', cause)),
+              ),
+            scope,
           )
-          .pipe(Effect.mapError(asRefused), Effect.ensuring(Queue.offer(poke, true)))
+        }).pipe(Effect.mapError(asRefused))
 
       /* ---- The tools ---- */
 
@@ -1598,6 +1756,8 @@ export class MergeLine extends Context.Service<
                   if (entry.pressed)
                     return yield* step(pressAccess(projectId, entry), entry).pipe(
                       Effect.catch((error) => Effect.logInfo(`A pressed merge of #${entry.request.number} didn’t go ahead`, error)),
+                      // Ended or refused on the way, as a push or the host can: said where its card reads it.
+                      Effect.andThen(saySentBack(projectId, entry)),
                       Effect.asVoid,
                     )
                   if (
@@ -1720,9 +1880,27 @@ export class MergeLine extends Context.Service<
                             ? sentBack.held
                             : null
                   if (back !== null) {
-                    yield* errands
-                      .callOff(entry.errandId, back)
-                      .pipe(Effect.catch((error) => Effect.logWarning('Could not send a pressed merge back', error)))
+                    yield* sendBack(projectId, entry, back).pipe(
+                      Effect.catch((error) => Effect.logWarning('Could not send a pressed merge back', error)),
+                    )
+                    continue
+                  }
+                  // Already in the host's hands, pushed to or red since: taken out there first, and only then said sent back;
+                  // where the host won't let go, said so, with where to take it out.
+                  if (seen.next === 'withdraw') {
+                    const out = yield* seen.host.leaveQueue(seen.repository, seen.change).pipe(Effect.option)
+                    const still = Option.isNone(out) || out.value.queued === true || out.value.autoMerge === true
+                    yield* note(projectId, stepOf(entry), 'flight_settled', `withdrawn:${seen.change.headSha}`, {
+                      reason: seen.why,
+                      merged: false,
+                    })
+                    yield* sendBack(
+                      projectId,
+                      entry,
+                      still
+                        ? `${seen.why} ${hostName(seen.host)} still has it set to merge: take it out on ${hostName(seen.host)}.`
+                        : seen.why,
+                    ).pipe(Effect.catch((error) => Effect.logWarning('Could not send a pressed merge back', error)))
                     continue
                   }
                   switch (seen.next) {

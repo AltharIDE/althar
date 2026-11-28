@@ -524,10 +524,12 @@ export function Outputs({
     const left = open.filter((one) => one.state === 'open')
     const at = merging === null ? -1 : open.findIndex((one) => one.url === merging)
     const refusedAt = error === null ? null : mergeRefused
+    // Merge when checks pass that came back: why, on its own stop, until it is pressed again.
+    const backOf = (one: ChangeSummary) => (one.state === 'open' ? (whenGreen?.back(one) ?? null) : null)
     const standingOf = (one: ChangeSummary, i: number): TrackStanding =>
       one.state === 'merged'
         ? 'merged'
-        : refusedAt === one.url
+        : refusedAt === one.url || backOf(one) !== null
           ? 'refused'
           : // Going into its queue, it is in it once Merge has answered the press, not when the host has.
             mergeStanding?.(one.url) === 'queued'
@@ -554,7 +556,7 @@ export function Outputs({
         ...(one.target === undefined ? {} : { target: one.target }),
         ...(one.checks == null ? {} : { checks: one.checks.list.map(checkOf) }),
         ...(one.conflicts === true ? { conflicts: true } : {}),
-        ...(refusedAt === one.url && error !== null ? { refused: error } : {}),
+        ...(refusedAt === one.url && error !== null ? { refused: error } : backOf(one) !== null ? { refused: backOf(one) ?? '' } : {}),
         files: filesIn(task.files, folder, true).map((file) => ({ ...file, path: file.path.slice(folder.length + 1) })),
         folder,
       }
@@ -562,9 +564,30 @@ export function Outputs({
     const [next] = left
     const merge = (changes: ReadonlyArray<ChangeSummary>) => onAccept(changes.map((one) => ({ head: one.head ?? '', url: one.url })))
     const bypass = () => (next === undefined ? undefined : onAccept([{ head: next.head ?? '', url: next.url, bypassQueue: true }]))
+    // The next to merge, its checks still running, is the one Merge when checks pass schedules, so they still merge in order;
+    // pressed, wherever, it waits there with Don't merge beside it, and the rest after it.
+    const green =
+      next === undefined || whenGreen === undefined ? null : whenGreen.waiting(next) ? (
+        next.queued === true ? (
+          <Button key="green" variant="quiet" onClick={() => whenGreen.onLeave(next.url)}>
+            {mergeButtonText.leave}
+          </Button>
+        ) : (
+          <MergeButton key="green" whenGreen standing="waiting" onLeave={() => whenGreen.onLeave(next.url)} />
+        )
+      ) : accepting && mergeStanding?.(next.url) == null && mergesWhenGreen(next) ? (
+        <MergeButton
+          key="green"
+          whenGreen
+          aria-label={`${mergeButtonText.whenGreen}: ${labelOf(next)}`}
+          onMerge={() => whenGreen.onPress(next.url, next.head ?? '')}
+        />
+      ) : null
     // The next to merge still in its merge queue holds the rest: nothing to press until it has landed.
     const accept =
-      accepting && next !== undefined && next.queued !== true && mergeStanding?.(next.url) == null ? (
+      green !== null ? (
+        green
+      ) : accepting && next !== undefined && next.queued !== true && mergeStanding?.(next.url) == null ? (
         left.length === 1 ? (
           <MergeButton
             key="accept"

@@ -13,7 +13,8 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
-import { fakeConnectors, HOST, hosted, runtime } from './support'
+
+import { fakeConnectors, HOST, hosted, runtime, until } from './support'
 
 /*
  * Merge when checks pass, pressed on a task's card: the press keeps a merge
@@ -69,8 +70,14 @@ const taskOf = (path: string, number: number) =>
 
 type Task = Effect.Success<ReturnType<typeof taskOf>>
 
+/** A press, as the window sends it: answered at once, its errand kept behind it, which this waits for, or its answer. */
 const press = (task: Task, head: string, pressId = 'cmd_1') =>
-  Effect.flatMap(MergeLine, (line) => line.press({ projectId: task.projectId, taskId: task.taskId, url: task.url, head, pressId }))
+  Effect.gen(function* () {
+    yield* Effect.flatMap(MergeLine, (line) => line.press({ projectId: task.projectId, taskId: task.taskId, url: task.url, head, pressId }))
+    yield* until(shown(task), (now) => now?.press === pressId && (now.state === 'sent_back' || now.head !== undefined))
+  })
+const leave = (task: Task) =>
+  Effect.flatMap(MergeLine, (line) => line.unpress({ projectId: task.projectId, taskId: task.taskId, url: task.url }))
 const sweep = (task: Task) => Effect.flatMap(MergeLine, (line) => line.tick(task.projectId))
 
 /** The press's errand: its state, and why, where it was called off. */
@@ -105,12 +112,16 @@ describe('Merge when checks pass', () => {
       checks.set(`head-${number}`, 'running')
       yield* press(task, `head-${number}`)
       assert.isTrue((yield* errandOf(task))?.messageId.startsWith('press:'))
-      assert.deepStrictEqual(yield* shown(task), { state: 'waiting', head: `head-${number}` })
+      assert.deepStrictEqual(yield* shown(task), { state: 'waiting', head: `head-${number}`, press: 'cmd_1' })
 
       yield* sweep(task)
       assert.deepStrictEqual(service.merged, [])
-      // Pressed again, as a press sent twice: the one errand goes on.
-      yield* press(task, `head-${number}`, 'cmd_2')
+      // Pressed again, as a press sent twice: the one errand goes on, the first press's.
+      yield* Effect.flatMap(MergeLine, (line) =>
+        line.press({ projectId: task.projectId, taskId: task.taskId, url: task.url, head: `head-${number}`, pressId: 'cmd_2' }),
+      )
+      yield* sweep(task)
+      assert.strictEqual((yield* shown(task))?.press, 'cmd_1')
 
       checks.set(`head-${number}`, 'passed')
       yield* sweep(task)
@@ -133,7 +144,7 @@ describe('Merge when checks pass', () => {
       checks.set(`head-${number}`, 'failed')
       yield* sweep(task)
       assert.deepStrictEqual(yield* errandOf(task), { state: 'cancelled', reason: sentBack.failed, messageId: 'press:cmd_1' })
-      assert.deepStrictEqual(yield* shown(task), { state: 'sent_back', head: `head-${number}`, reason: sentBack.failed })
+      assert.deepStrictEqual(yield* shown(task), { state: 'sent_back', reason: sentBack.failed, press: 'cmd_1' })
       // Green again, nothing merges it: it was sent back.
       checks.set(`head-${number}`, 'passed')
       yield* sweep(task)
@@ -162,7 +173,11 @@ describe('Merge when checks pass', () => {
       assert.deepStrictEqual(service.merged, [])
       assert.deepStrictEqual(yield* errandOf(task), { state: 'cancelled', reason: sentBack.pushed, messageId: 'press:cmd_1' })
 
-      const stale = yield* Effect.flip(press(task, `head-${number}`, 'cmd_2'))
+      // Its card still has the head the person saw: the press is taken, and the host's read sends it back behind it.
+      yield* press(task, `head-${number}`, 'cmd_2')
+      assert.deepStrictEqual(yield* shown(task), { state: 'sent_back', reason: sentBack.pushed, press: 'cmd_2' })
+      // One its card has moved past is refused at once.
+      const stale = yield* Effect.flip(press(task, 'head-old', 'cmd_3'))
       assert.match(stale.message, /moved on since you saw it/)
     }).pipe(Effect.provide(layer(service)))
   })
@@ -174,7 +189,7 @@ describe('Merge when checks pass', () => {
       const task = yield* taskOf(working, number)
       checks.set(`head-${number}`, 'running')
       yield* press(task, `head-${number}`)
-      yield* Effect.flatMap(MergeLine, (line) => line.unpress({ projectId: task.projectId, taskId: task.taskId, url: task.url }))
+      yield* leave(task)
       assert.deepStrictEqual(yield* errandOf(task), { state: 'cancelled', reason: CALLED_OFF, messageId: 'press:cmd_1' })
       assert.isUndefined(yield* shown(task))
       checks.set(`head-${number}`, 'passed')
@@ -199,8 +214,13 @@ describe('Merge when checks pass', () => {
         service.merged.map((one) => [one.number, one.how]),
         [[number, 'queue']],
       )
-      yield* Effect.flatMap(MergeLine, (line) => line.unpress({ projectId: task.projectId, taskId: task.taskId, url: task.url }))
+      yield* leave(task)
       assert.strictEqual((yield* errandOf(task))?.state, 'cancelled')
+      // The host lets go of it too, behind the press.
+      yield* until(
+        Effect.sync(() => service.calls),
+        (calls) => calls.includes('leaveQueue'),
+      )
       yield* sweep(task)
       assert.deepStrictEqual(yield* newsSent, [])
     }).pipe(Effect.provide(layer(service)))
@@ -219,6 +239,85 @@ describe('Merge when checks pass', () => {
         service.merged.map((one) => [one.number, one.how]),
         [[number, 'auto']],
       )
+    }).pipe(Effect.provide(layer(service)))
+  })
+  it.live('pushed to or red once the host has it set to merge, it is taken out there first, then sent back', () => {
+    const { service, checks, number } = host({ autoMerge: true })
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const task = yield* taskOf(working, number)
+      checks.set(`head-${number}`, 'running')
+      yield* press(task, `head-${number}`)
+      checks.set(`head-${number}`, 'passed')
+      yield* sweep(task)
+      assert.deepStrictEqual(
+        service.merged.map((one) => one.how),
+        ['auto'],
+      )
+      const pushed = service.pushTo(number)
+      checks.set(pushed, 'passed')
+      yield* sweep(task)
+      assert.include(service.calls, 'leaveQueue')
+      assert.deepStrictEqual(yield* errandOf(task), { state: 'cancelled', reason: sentBack.pushed, messageId: 'press:cmd_1' })
+      assert.deepStrictEqual(yield* shown(task), { state: 'sent_back', reason: sentBack.pushed, press: 'cmd_1' })
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('red once in the merge queue, it is taken out of the queue and sent back', () => {
+    const { service, checks, number } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      service.mergeQueue()
+      const task = yield* taskOf(working, number)
+      checks.set(`head-${number}`, 'running')
+      yield* press(task, `head-${number}`)
+      checks.set(`head-${number}`, 'passed')
+      yield* sweep(task)
+      checks.set(`head-${number}`, 'failed')
+      yield* sweep(task)
+      assert.include(service.calls, 'leaveQueue')
+      assert.strictEqual((yield* errandOf(task))?.reason, sentBack.failed)
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('a refusal at the head it was pressed at comes back with the host’s reason, not as a push', () => {
+    const { service, number } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const task = yield* taskOf(working, number)
+      service.failNext('merge', 'rejected', undefined, 422, { message: 'Required status check "deploy" is expected' })
+      yield* press(task, `head-${number}`)
+      yield* sweep(task)
+      assert.deepStrictEqual(service.merged, [])
+      const back = yield* shown(task)
+      assert.strictEqual(back?.state, 'sent_back')
+      assert.match(back?.reason ?? '', /^Not merged: GitHub refused it: Required status check "deploy" is expected\.$/)
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('refuses a pull request that isn’t the task’s, and one on Bitbucket Cloud', () => {
+    const { service, number } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* taskOf(working, number)
+      const other = Effect.flatMap(MergeLine, (line) =>
+        line.press({ projectId: task.projectId, taskId: task.taskId, url: `${HOST}/meridian/api/pull/99`, head: 'x', pressId: 'p' }),
+      )
+      assert.match((yield* Effect.flip(other)).message, /isn’t this task’s/)
+      assert.match(
+        (yield* Effect.flip(
+          Effect.flatMap(MergeLine, (line) =>
+            line.unpress({ projectId: task.projectId, taskId: task.taskId, url: `${HOST}/meridian/api/pull/99` }),
+          ),
+        )).message,
+        /isn’t this task’s/,
+      )
+      yield* sql`UPDATE external_links SET product = 'bitbucket_cloud' WHERE id = ${task.linkId}`
+      const cloud = Effect.flatMap(MergeLine, (line) =>
+        line.press({ projectId: task.projectId, taskId: task.taskId, url: task.url, head: `head-${number}`, pressId: 'q' }),
+      )
+      assert.match((yield* Effect.flip(cloud)).message, /Bitbucket Cloud/)
     }).pipe(Effect.provide(layer(service)))
   })
 })

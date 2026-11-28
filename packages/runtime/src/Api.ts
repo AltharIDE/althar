@@ -2758,7 +2758,7 @@ export const handlers = apiLayer(
         ),
       ClosePullRequest: ({ commandId, taskId, url, deleteBranch }) =>
         once(commandId, api(Effect.map(pullRequests.close(taskId, url, { deleteBranch }), ({ branch }) => ({ branch })))),
-      MergeWhenGreen: ({ commandId, taskId, url, head }) =>
+      MergeWhenGreen: ({ commandId, taskId, url, head, press }) =>
         once(
           commandId,
           api(
@@ -2766,7 +2766,7 @@ export const handlers = apiLayer(
               const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
               if (task === undefined) return yield* new ChangeRefused({ message: 'That task is gone.' })
               yield* mergeLine
-                .press({ projectId: task.projectId, taskId, url, head, pressId: commandId })
+                .press({ projectId: task.projectId, taskId, url, head, pressId: press })
                 .pipe(Effect.mapError((refusal) => new ChangeRefused({ message: refusal.message })))
             }),
           ),

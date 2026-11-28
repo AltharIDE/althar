@@ -1,7 +1,7 @@
 import { readGoal } from './threadGoals'
 import { standInOf } from './standIn'
 import { Limits } from './Limits'
-import { CALLED_OFF, errandRecords, PRESSED } from './Errands'
+import { errandRecords, PRESSED, pressSubject } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
 import { placingOf } from './taskPlaces'
@@ -2169,6 +2169,8 @@ export class Queries extends Context.Service<
           }
         })
 
+      /** How long a press on its way to the merge line is said to wait without its errand kept yet. */
+      const PRESS_ON_ITS_WAY = 10 * 60_000
       /**
        * Merge when checks pass, as an open pull request's card shows it: waiting while a merge errand of the line's waits on
        * it, however it was asked for; sent back where a press's came back without merging, with why, until the next press.
@@ -2176,15 +2178,28 @@ export class Queries extends Context.Service<
       const whenGreenOf = (url: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [last] = yield* sql<{ state: string; reason: string | null; head: string | null; messageId: string }>`
-            SELECT e.state, e.reason, s.head, e.message_id FROM errands e JOIN errand_steps s ON s.errand_id = e.id
-            WHERE s.tool = 'merge_pull_request' AND lower(s.target) = ${url.toLowerCase()} AND e.state <> 'done'
+          const [open] = yield* sql<{ head: string | null; messageId: string }>`
+            SELECT s.head, e.message_id FROM errands e JOIN errand_steps s ON s.errand_id = e.id
+            WHERE s.tool = 'merge_pull_request' AND lower(s.target) = ${url.toLowerCase()} AND e.state = 'open' AND s.state = 'waiting'
             ORDER BY e.created_at DESC, e.rowid DESC LIMIT 1`
-          if (last === undefined || last.head === null) return undefined
-          if (last.state === 'open') return { state: 'waiting' as const, head: last.head }
-          const pressed = last.messageId.startsWith(PRESSED)
-          if (!pressed || last.reason === null || last.reason === CALLED_OFF) return undefined
-          return { state: 'sent_back' as const, head: last.head, reason: last.reason }
+          const [said] = yield* sql<{ payload: string; observedAt: string }>`
+            SELECT payload, observed_at FROM observations WHERE subject_type = 'merge_line' AND subject_id = ${pressSubject(url)}
+              AND kind = 'press' ORDER BY rowid DESC LIMIT 1`
+          const last =
+            said === undefined ? undefined : (JSON.parse(said.payload) as { press?: string | null; state?: string; reason?: string })
+          const press = last?.press == null ? {} : { press: last.press }
+          if (open !== undefined)
+            return {
+              state: 'waiting' as const,
+              ...(open.head === null ? {} : { head: open.head }),
+              ...(open.messageId.startsWith(PRESSED) ? { press: open.messageId.slice(PRESSED.length) } : {}),
+            }
+          // A press on its way to the line, kept only so long: one a restart cut short is no longer said to wait.
+          if (last?.state === 'asked' && (yield* Clock.currentTimeMillis) - Date.parse(said?.observedAt ?? '') < PRESS_ON_ITS_WAY)
+            return { state: 'waiting' as const, ...press }
+          if (last?.state === 'sent_back' && typeof last.reason === 'string')
+            return { state: 'sent_back' as const, reason: last.reason, ...press }
+          return undefined
         })
 
       /** A task's pull requests as its card reads them, and the repositories it merged here: what the coordinator is told of them. */

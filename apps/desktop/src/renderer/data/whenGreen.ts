@@ -27,11 +27,14 @@ interface Asked {
   readonly url: string
   /** The head the person saw, for a press; none for Don't merge. */
   readonly head?: string
+  /** The press's own id, which a read that answers it names (`whenGreen.press`). */
+  readonly press?: string
 }
 
 interface Pressed {
   readonly url: string
   readonly leave: boolean
+  readonly press: string | undefined
   readonly status: 'idle' | 'pending' | 'success' | 'error'
   readonly at: number
   readonly error: unknown
@@ -42,6 +45,7 @@ const pressedOf = (mutation: Mutation<unknown, unknown, unknown>): Pressed => {
   return {
     url: asked?.url ?? '',
     leave: asked?.head === undefined,
+    press: asked?.press,
     status: mutation.state.status,
     at: mutation.state.submittedAt,
     error: mutation.state.error,
@@ -72,7 +76,7 @@ export const useWhenGreen = (): WhenGreen => {
     mutationFn: (asked: Asked) =>
       asked.head === undefined
         ? client.leaveMergeLine(asked.taskId, asked.url)
-        : client.mergeWhenGreen(asked.taskId, asked.url, asked.head),
+        : client.mergeWhenGreen(asked.taskId, asked.url, asked.head, asked.press ?? ''),
   })
   const presses = useMutationState({ filters: { mutationKey: KEY }, select: pressedOf })
   const last = useMemo(() => new Map(presses.map((one) => [one.url, one] as const)), [presses])
@@ -94,8 +98,9 @@ export const useWhenGreen = (): WhenGreen => {
       if (one === undefined || one.status === 'idle') return read(change)
       if (one.status === 'pending') return !one.leave
       if (one.status === 'error') return read(change)
-      // Gone through: as pressed until a read agrees, or a while has gone by.
-      if (read(change) === !one.leave) agreed.add(keyOf(one))
+      // Gone through: as pressed until a read answers it (this very press, waiting or sent back already; for Don't merge, no
+      // longer waiting), or a while has gone by. An older read, of before the press, never takes it back.
+      if (one.leave ? !read(change) : one.press !== undefined && change.whenGreen?.press === one.press) agreed.add(keyOf(one))
       if (agreed.has(keyOf(one)) || one.at + HOLDS_FOR <= now) return read(change)
       return !one.leave
     },
@@ -113,7 +118,7 @@ export const useWhenGreen = (): WhenGreen => {
   )
   return useMemo(
     () => ({
-      press: (taskId, url, head) => mutate({ taskId, url, head }),
+      press: (taskId, url, head) => mutate({ taskId, url, head, press: crypto.randomUUID() }),
       leave: (taskId, url) => mutate({ taskId, url }),
       waiting,
       back,
