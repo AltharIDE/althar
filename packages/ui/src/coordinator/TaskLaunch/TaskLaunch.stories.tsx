@@ -17,7 +17,13 @@ import { TaskLaunch, type LaunchPick, type LaunchPlace, type LaunchStep } from '
 /** The consumer's picker for one agent of a step: the composer's own, bordered. */
 function usePicker(steps: readonly LaunchStep[], setSteps: (s: readonly LaunchStep[]) => void) {
   const prefs = useModelPrefs()
+  // Each seat keeps its own pick; a step with one seat names it on its row too.
+  const [efforts, setEfforts] = useState<Readonly<Record<string, string | undefined>>>({})
   return ({ step, agent, k, owner, onOpenChange, skip }: LaunchPick) => {
+    const key = `${step.id}:${k}`
+    const alone = step.agents.length === 1
+    const byDefault = (alone ? step.defaultEffort : undefined) ?? effortFor(agent, prefs.efforts)
+    const set = (patch: Partial<LaunchStep>) => setSteps(steps.map((st) => (st.id === step.id ? { ...st, ...patch } : st)))
     return (
       <ModelPick
         variant="field"
@@ -25,23 +31,19 @@ function usePicker(steps: readonly LaunchStep[], setSteps: (s: readonly LaunchSt
         owner={owner}
         model={agent}
         pinned={prefs.pinned}
-        effort={step.effort ?? effortFor(agent, prefs.efforts)}
-        defaultEffort={effortFor(agent, prefs.efforts)}
-        onChange={(id) =>
-          setSteps(
-            steps.map((st) =>
-              st.id === step.id
-                ? {
-                    ...st,
-                    agents: st.agents.map((a, i) => (i === k ? model(id) : a)),
-                    effort: null,
-                    defaultEffort: effortFor(model(id), prefs.efforts),
-                  }
-                : st,
-            ),
-          )
-        }
-        onEffort={(level) => setSteps(steps.map((st) => (st.id === step.id ? { ...st, effort: level } : st)))}
+        effort={efforts[key] ?? (alone ? step.effort : undefined) ?? byDefault}
+        defaultEffort={byDefault}
+        onChange={(id) => {
+          setEfforts((was) => ({ ...was, [key]: undefined }))
+          set({
+            agents: step.agents.map((a, i) => (i === k ? model(id) : a)),
+            ...(alone ? { effort: null, defaultEffort: effortFor(model(id), prefs.efforts) } : {}),
+          })
+        }}
+        onEffort={(level) => {
+          setEfforts((was) => ({ ...was, [key]: level }))
+          if (alone) set({ effort: level })
+        }}
         onOpenChange={onOpenChange}
         /* a step with several agents can go down to one; one that can be skipped is skipped from here, as the app does */
         onRemove={

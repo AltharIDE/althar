@@ -21,7 +21,14 @@ import { useServices } from '../../data/services'
 import { openBlockers, standsOf } from '../../shared/blockers'
 import { factsOf, readyText, readyWordOf } from '../../shared/standing'
 import { externalWaitWords, holdersWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
-import { type NameModel, type NameStepEfforts, useEffortNames, useModelNames, useStepEfforts } from '../../shared/modelNames'
+import {
+  type Elsewhere,
+  type NameModel,
+  type NameStepEfforts,
+  useEffortNames,
+  useModelNames,
+  useStepEfforts,
+} from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
 import { localText } from '../../shared/local'
 import { ModelChoice } from '../../shared/ModelChoice'
@@ -149,16 +156,23 @@ const fromOf = (card: TaskCardContent): IssueRefProps | undefined => {
 /**
  * The plan's steps as the kit shows them, by model; the agent's id rides on
  * the model's runtime. A review of someone else's pull request has one, its
- * lead, which reviews.
+ * lead, which reviews. Where the lead runs on a worker, how hard it thinks is
+ * by what is known there; the review runs on the home.
  */
-const launchSteps = (plan: Plan, named: NameModel, effortsOf: NameStepEfforts, reviews: boolean): ReadonlyArray<LaunchStep> =>
+const launchSteps = (
+  plan: Plan,
+  named: NameModel,
+  effortsOf: NameStepEfforts,
+  reviews: boolean,
+  lead?: Elsewhere,
+): ReadonlyArray<LaunchStep> =>
   plan.steps.map((step) => ({
     id: step.key,
     label: text.label[reviews ? 'review' : step.key],
     agents: [named(step.agentId, step.model)],
     optional: step.key === 'review',
     skipped: step.skipped,
-    ...effortsOf(step.agentId, step.model, step.effort ?? null),
+    ...effortsOf(step.agentId, step.model, step.effort ?? null, step.key === 'implement' ? lead : undefined),
   }))
 
 /**
@@ -292,6 +306,9 @@ function PlanCard({
   // On a worker, the picker offers what its agents offer there.
   const onWorker = selected === HOME || selected === ANY ? undefined : actions.workers?.find((one) => one.workerId === selected)
   const startProblem = placement?.problem
+  // Where its lead runs, for how hard it thinks: as chosen here, or, waiting to begin, where it was placed.
+  const runs = placeable ? selected : (plan.runsOn ?? HOME)
+  const leadElsewhere = runs === HOME ? undefined : { worker: actions.workers?.find((one) => one.workerId === runs) }
   /** Shows it held until `sent` is done, where the change makes the place chosen unable to take it. */
   const holdWhile = (holds: boolean, sent: void | Promise<unknown>, request: number) => {
     if (!holds) return
@@ -324,7 +341,7 @@ function PlanCard({
       title={title}
       {...(from === undefined ? {} : { from })}
       project={actions.project}
-      steps={launchSteps({ ...plan, steps }, named, effortsOf, card.reviewing != null)}
+      steps={launchSteps({ ...plan, steps }, named, effortsOf, card.reviewing != null, leadElsewhere)}
       onStepsChange={(next) =>
         change(steps.map((step) => ({ ...step, skipped: next.find((launch) => launch.id === step.key)?.skipped ?? step.skipped })))
       }
