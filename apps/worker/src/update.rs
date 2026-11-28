@@ -48,12 +48,22 @@ pub struct UnitState {
     pub invocation: String,
 }
 
+/// What systemd says a unit's `ActiveState` is; anything else is a read it can't trust.
+const ACTIVE_STATES: [&str; 8] = [
+    "active",
+    "reloading",
+    "inactive",
+    "failed",
+    "activating",
+    "deactivating",
+    "maintenance",
+    "refreshing",
+];
+
 impl UnitState {
-    fn running(&self) -> bool {
-        matches!(
-            self.active.as_str(),
-            "activating" | "active" | "deactivating" | "reloading"
-        )
+    /// Seen to have ended: only these say it no longer runs. Every other state may still restart the worker.
+    fn ended(&self) -> bool {
+        matches!(self.active.as_str(), "inactive" | "failed")
     }
 }
 
@@ -196,8 +206,10 @@ async fn output(program: &OsString, args: &[&str]) -> io::Result<(bool, String, 
     ))
 }
 
+/// Its update's unit as systemd says it now: an error where `systemctl` failed, or said no state it knows, so a read
+/// that says nothing is never taken for the unit having ended.
 async fn show(tools: &Tools) -> io::Result<UnitState> {
-    let (_, out, _) = output(
+    let (ok, out, error) = output(
         &tools.systemctl,
         &[
             "--user",
@@ -209,7 +221,20 @@ async fn show(tools: &Tools) -> io::Result<UnitState> {
         ],
     )
     .await?;
-    Ok(unit_state(&out))
+    if !ok {
+        return Err(io::Error::other(format!(
+            "systemctl couldn't say how its update stands: {}",
+            error.trim()
+        )));
+    }
+    let state = unit_state(&out);
+    if !ACTIVE_STATES.contains(&state.active.as_str()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "systemctl said no state for its update",
+        ));
+    }
+    Ok(state)
 }
 
 /// Starts its update in its own unit and watches it to its end: what it said, or why it couldn't.
@@ -240,7 +265,7 @@ async fn watch(tools: &Tools) -> io::Result<Outcome> {
     }
     let since = Instant::now();
     // Already under way (its timer started it), the run it joined counts; else a new one, by its own invocation.
-    let mut seen = before.running();
+    let mut seen = !before.ended();
     loop {
         tokio::time::sleep(tools.every).await;
         if since.elapsed() >= tools.limit {
@@ -250,7 +275,7 @@ async fn watch(tools: &Tools) -> io::Result<Outcome> {
         let Ok(now) = show(tools).await else {
             continue;
         };
-        if now.running() {
+        if !now.ended() {
             seen = true;
         } else if seen || (!now.invocation.is_empty() && now.invocation != before.invocation) {
             let journal = if now.invocation.is_empty() {
@@ -276,7 +301,7 @@ async fn stop(tools: &Tools) -> Outcome {
     let _ = output(&tools.systemctl, &["--user", "stop", UNIT]).await;
     loop {
         if let Ok(now) = show(tools).await
-            && !now.running()
+            && now.ended()
         {
             return Outcome::Failed {
                 message: format!(
@@ -379,6 +404,17 @@ mod tests {
 
     /// A fake systemctl and journalctl: `show` answers with the next of its states, one a call; `start` succeeds or not.
     fn fakes(dir: &Path, states: &[&str], start: bool, journal: &str) -> Tools {
+        fakes_stopping(dir, states, start, journal, 0)
+    }
+
+    /// As `fakes`, its `stop` failing and its next reads failing too, `fails_after_stop` of them, where that's above 0.
+    fn fakes_stopping(
+        dir: &Path,
+        states: &[&str],
+        start: bool,
+        journal: &str,
+        fails_after_stop: usize,
+    ) -> Tools {
         for (i, state) in states.iter().enumerate() {
             fs::write(dir.join(format!("state{i}")), state.replace(';', "\n")).unwrap();
         }
@@ -395,13 +431,24 @@ mod tests {
             format!(
                 r#"echo "$*" >> {d}/calls
 case "$2" in
-  show) if [ -f {d}/stopped ]; then printf 'ActiveState=inactive\nResult=exit-code\nInvocationID=new\n'; exit 0; fi
-        n=$(cat {d}/n 2>/dev/null || echo 0); f={d}/state$n; [ -f "$f" ] || f={d}/state{last}; cat "$f"; echo $((n + 1)) > {d}/n ;;
+  show) if [ -f {d}/stopped ]; then
+          k=$(cat {d}/k 2>/dev/null || echo 0); echo $((k + 1)) > {d}/k
+          if [ "$k" -lt "$(cat {d}/stopped)" ]; then exit 1; fi
+          printf 'ActiveState=inactive\nResult=exit-code\nInvocationID=new\n'; exit 0
+        fi
+        n=$(cat {d}/n 2>/dev/null || echo 0); f={d}/state$n; [ -f "$f" ] || f={d}/state{last}; echo $((n + 1)) > {d}/n
+        if [ "$(cat "$f")" = FAIL ]; then echo 'Failed to connect to bus' >&2; exit 1; fi
+        cat "$f" ;;
   start) {start} ;;
-  stop) touch {d}/stopped ;;
+  stop) echo {fails_after_stop} > {d}/stopped; {stop} ;;
 esac
 "#,
                 last = states.len() - 1,
+                stop = if fails_after_stop > 0 {
+                    "exit 1"
+                } else {
+                    "exit 0"
+                },
                 start = if start {
                     "exit 0"
                 } else {
@@ -504,5 +551,53 @@ esac
         );
         let calls = fs::read_to_string(dir.path().join("calls")).unwrap();
         assert!(calls.contains(&format!("--user stop {UNIT}")));
+    }
+
+    #[tokio::test]
+    async fn never_takes_a_status_read_that_failed_for_the_update_having_ended() {
+        let dir = tempfile::tempdir().unwrap();
+        let tools = fakes(
+            dir.path(),
+            &[
+                "ActiveState=inactive;Result=success;InvocationID=old",
+                "ActiveState=activating;Result=success;InvocationID=new",
+                "FAIL",
+                "ActiveState=;Result=;InvocationID=",
+                "ActiveState=inactive;Result=success;InvocationID=new",
+            ],
+            true,
+            r#"{"step":"update","state":"current","version":"0.3.0"}"#,
+        );
+        // Seen running, then two reads that said nothing it can trust: still running, until it's seen to end.
+        assert_eq!(
+            run(&tools).await,
+            Outcome::Current {
+                version: "0.3.0".into()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn past_its_time_waits_to_see_it_stopped_through_a_failed_stop_and_failed_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let tools = fakes_stopping(
+            dir.path(),
+            &[
+                "ActiveState=inactive;InvocationID=old",
+                "ActiveState=activating;InvocationID=new",
+            ],
+            true,
+            "",
+            3,
+        );
+        let Outcome::Failed { message } = run(&tools).await else {
+            panic!("expected a failure")
+        };
+        assert!(message.starts_with("Its update took too long, so it was stopped."));
+        // Three reads failed after the stop, and only the fourth, seen inactive, let it go.
+        assert_eq!(
+            fs::read_to_string(dir.path().join("k")).unwrap().trim(),
+            "4"
+        );
     }
 }
