@@ -364,12 +364,14 @@ export const effortId = (catalog: Catalog, key: string, name: string): string =>
 /**
  * A model's default effort, in the words the picker shows: the person's, or
  * else the one it starts at by itself; until that is known, what its agent is
- * on, for the model it is on.
+ * on, for the model it is on. One the model doesn't offer is passed over, as
+ * the runtime passes over it when a session starts.
  */
 export const defaultEffortOf = (catalog: Catalog, info: ModelInfo): string | null => {
   const { agent, model } = offeredOf(catalog, info.id)
   const on = model !== undefined && model.id === agent?.model ? agent.effort : null
-  return effortName(catalog, info.id, catalog.defaults.get(info.id) ?? model?.effort ?? on)
+  const levels = [catalog.defaults.get(info.id), model?.effort, on]
+  return levels.reduce<string | null>((found, level) => found ?? effortName(catalog, info.id, level ?? null), null)
 }
 
 /** Until the person pins a model: each agent's current one. */

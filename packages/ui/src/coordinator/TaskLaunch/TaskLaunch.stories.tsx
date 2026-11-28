@@ -17,9 +17,7 @@ import { TaskLaunch, type LaunchPick, type LaunchPlace, type LaunchStep } from '
 /** The consumer's picker for one agent of a step: the composer's own, bordered. */
 function usePicker(steps: readonly LaunchStep[], setSteps: (s: readonly LaunchStep[]) => void) {
   const prefs = useModelPrefs()
-  const [efforts, setEfforts] = useState<Record<string, string>>({})
   return ({ step, agent, k, owner, onOpenChange, skip }: LaunchPick) => {
-    const key = `${step.id}:${k}`
     return (
       <ModelPick
         variant="field"
@@ -27,12 +25,23 @@ function usePicker(steps: readonly LaunchStep[], setSteps: (s: readonly LaunchSt
         owner={owner}
         model={agent}
         pinned={prefs.pinned}
-        effort={efforts[key] ?? effortFor(agent, prefs.efforts)}
+        effort={step.effort ?? effortFor(agent, prefs.efforts)}
         defaultEffort={effortFor(agent, prefs.efforts)}
         onChange={(id) =>
-          setSteps(steps.map((st) => (st.id === step.id ? { ...st, agents: st.agents.map((a, i) => (i === k ? model(id) : a)) } : st)))
+          setSteps(
+            steps.map((st) =>
+              st.id === step.id
+                ? {
+                    ...st,
+                    agents: st.agents.map((a, i) => (i === k ? model(id) : a)),
+                    effort: null,
+                    defaultEffort: effortFor(model(id), prefs.efforts),
+                  }
+                : st,
+            ),
+          )
         }
-        onEffort={(level) => setEfforts({ ...efforts, [key]: level })}
+        onEffort={(level) => setSteps(steps.map((st) => (st.id === step.id ? { ...st, effort: level } : st)))}
         onOpenChange={onOpenChange}
         /* a step with several agents can go down to one; one that can be skipped is skipped from here, as the app does */
         onRemove={
@@ -111,7 +120,7 @@ export const PicksAnotherPreset: Story = {
 export const APrototype: Story = {
   render: () => (
     <Launch
-      plan={[{ id: 'implement', label: 'Implement', agents: [OPUS], fixed: 'the lead' }]}
+      plan={[{ id: 'implement', label: 'Implement', agents: [OPUS], fixed: 'the lead', defaultEffort: 'High' }]}
       preset="Prototype"
       presets={PRESETS}
       hideEnd
@@ -604,9 +613,28 @@ export const AgentOut: Story = {
 
 /** A lead and one reviewer from another maker: the plan the coordinator proposes most days. */
 const PLAN_ASKED: LaunchStep[] = [
-  { id: 'impl', label: 'Implement', agents: [OPUS], fixed: 'the lead' },
-  { id: 'review', label: 'Review', agents: [CODEX], optional: true },
+  { id: 'impl', label: 'Implement', agents: [OPUS], fixed: 'the lead', defaultEffort: 'High' },
+  { id: 'review', label: 'Review', agents: [CODEX], optional: true, defaultEffort: 'High' },
 ]
+
+/** An effort set for a step, and one nobody set, which the step runs at by default: named all the same, a little dimmer. */
+export const SetAndDefaultEffort: Story = {
+  render: () => (
+    <Launch
+      plan={[
+        { id: 'impl', label: 'Implement', agents: [OPUS], fixed: 'the lead', effort: 'Extra high', defaultEffort: 'High' },
+        { id: 'review', label: 'Review', agents: [CODEX], optional: true, defaultEffort: 'Medium' },
+      ]}
+      defaultHeld
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Extra high')).toBeVisible()
+    await expect(c.getByText('Medium')).toBeVisible()
+  },
+}
+export const SetAndDefaultEffortDark: Story = { ...SetAndDefaultEffort, globals: { theme: 'dark' } }
 
 /** Where a plan comes from: what you asked, the coordinator's answer, and the plan under it. */
 export const InTheConversation: Story = {

@@ -1091,6 +1091,8 @@ describe('the Talk room', () => {
     // The lead at the coordinator's effort; the review, which it left out, at the model's own.
     expect(await screen.findByRole('button', { name: 'Lead for this task: Claude Opus High' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Review: gpt-5.2-codex Medium' })).toBeTruthy()
+    // Each row names it, and only the one no one set says so, as it shows dimmer.
+    expect(screen.getByText('by default').parentElement?.textContent).toBe(' Medium by default')
     // Skipping the review keeps it.
     // Skipping the review is in its dropdown, the whole row.
     await userEvent.click(screen.getByRole('button', { name: /^Review: / }))
