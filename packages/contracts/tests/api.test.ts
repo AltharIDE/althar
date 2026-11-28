@@ -945,6 +945,9 @@ describe('the calls a socket may make', () => {
     // A home is set up from its window: its code hosts connected and its agents signed in there.
     for (const tag of ['ConnectToken', 'StartSignIn', 'ConnectCli', 'AddAccount', 'StartAccountSignIn', 'PasteAccountSignInCode'])
       assert.include(SOCKET_CALLS, tag)
+    // A home's status line: its runs, and terminals opened there, read and typed into, the stream of what they print too.
+    for (const tag of ['ListLaunches', 'StopLaunch', 'OpenTerminal', 'ListTerminals', 'AttachTerminal', 'WriteTerminal', 'CloseTerminal'])
+      assert.include(SOCKET_CALLS, tag)
     // Putting a repository on a host, a project's tracker, and the person's word stay with the person's own window.
     for (const tag of ['PublishRepository', 'ListRepositoryOwners', 'SetProjectTracker', 'ListContainers', 'Answer'])
       assert.notInclude(SOCKET_CALLS, tag)
