@@ -956,6 +956,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           reason,
           summary,
           ...(gone !== undefined && model !== undefined ? { modelGone: model } : {}),
+          // Refused its model, whether Althar knew it listed lately or not: handing on goes past it (Sessions.ts).
+          ...(model !== undefined && !signInEnded && modelRefused(started.cause, entry.definition) ? { modelRefused: model } : {}),
         })
       }
       const { connection, agent, unavailableMcp } = started.value
@@ -1056,6 +1058,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     account: Account,
     model: string | undefined,
     effort: string | undefined,
+    /** Whether its thread was stopped since its start was asked for: a wait for its model then ends, starting nothing more. */
+    stopped: () => boolean = () => false,
   ) =>
     connectOnce(thread, sessionId, entry, account, model, effort, true).pipe(
       Effect.catchTag('ProgramArriving', ({ check }) =>
@@ -1083,7 +1087,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           )
         }),
       ),
-      Effect.catchTag('ModelMissing', () => modelReturns(thread, sessionId, entry, account, model, effort)),
+      Effect.catchTag('ModelMissing', () => modelReturns(thread, sessionId, entry, account, model, effort, stopped)),
     )
 
   /**
@@ -1100,6 +1104,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     account: Account,
     model: string | undefined,
     effort: string | undefined,
+    stopped: () => boolean,
   ) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -1131,23 +1136,35 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
             ModelMissing: (one) => (last ? Effect.die(one) : Effect.succeed(Option.none())),
           }),
         )
+      // Stopped as it waited: no agent starts again, here or elsewhere, and its session ends as one that didn't start.
+      const stoppedWords = 'Stopped while it waited for its agent to list its model again.'
+      const halt = Effect.gen(function* () {
+        yield* sql.withTransaction(
+          Effect.gen(function* () {
+            const [row] = yield* sql<{ state: string }>`SELECT state FROM provider_sessions WHERE id = ${sessionId}`
+            if (row?.state !== 'starting') return
+            const revision = yield* moveSession(sessionId, 'failed', { endedAt: yield* timestamp })
+            yield* sessionFact(thread, sessionId, revision, 'provider_session.failed', { reason: stoppedWords, stopped: true })
+          }),
+        )
+        return yield* new SessionFailed({ agentId: entry.definition.id, reason: stoppedWords, summary: stoppedWords })
+      })
+      // Called off by a stop at any point: one counted before the wait was registered is read from `stopped`, one after wakes it.
+      const off = Effect.map(Deferred.isDone(calledOff), (done) => done || stopped())
       return yield* Effect.gen(function* () {
         for (let tried = 1; ; tried++) {
+          if (yield* off) return yield* halt
           yield* refreshAgent(entry.definition.id)
           yield* Effect.raceFirst(Effect.sleep(every), Deferred.await(calledOff))
-          // Stopped as it waited: no agent starts again, here or elsewhere, and its session ends as one that didn't start.
-          if (yield* Deferred.isDone(calledOff)) {
-            const stopped = 'Stopped while it waited for its agent to list its model again.'
-            yield* sql.withTransaction(
-              Effect.gen(function* () {
-                const revision = yield* moveSession(sessionId, 'failed', { endedAt: yield* timestamp })
-                yield* sessionFact(thread, sessionId, revision, 'provider_session.failed', { reason: stopped, stopped: true })
-              }),
-            )
-            return yield* new SessionFailed({ agentId: entry.definition.id, reason: stopped, summary: stopped })
-          }
+          if (yield* off) return yield* halt
           const started = yield* once(tried >= tries)
-          if (Option.isSome(started)) return started.value
+          if (Option.isNone(started)) continue
+          // Stopped while that try started: it never takes the thread.
+          if (yield* off) {
+            yield* discard(started.value, Cause.fail(stoppedWords))
+            return yield* halt
+          }
+          return started.value
         }
       }).pipe(
         Effect.ensuring(
@@ -1167,7 +1184,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       return waits.length > 0
     })
 
-  type Connected = Effect.Success<ReturnType<typeof connectSession>>
+  // What a start gives, its retries' included: read from one try, as a wait for its model lets go of a try it was stopped during.
+  type Connected = Effect.Success<ReturnType<typeof connectOnce>>
 
   /**
    * Lets go of a session that started but never took over its thread, as

@@ -575,7 +575,7 @@ describe('the review after a merge, at its edges', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('never hands a reviewer whose agent stopped listing its model to the lead it reviews, on the lead’s agent and model', () => {
+  it.live('never hands a reviewer whose agent stopped listing its model to the lead it reviews, a failed switch of it after', () => {
     const { working, bare, github } = onGitHub()
     const sol = { id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol' }
     const large = { id: 'large', name: 'Large' }
@@ -594,6 +594,8 @@ describe('the review after a merge, at its edges', () => {
       for (const step of parameters.steps) if (step.key === 'review') Object.assign(step, { model: sol.id })
       yield* sql`UPDATE task_plans SET parameters = ${JSON.stringify(parameters)} WHERE id = ${plan?.id ?? ''}`
       yield* until((yield* Models).catalog, (all) => all.every((agent) => !agent.probing))
+      // A switch of its lead to another agent that failed: the lead it reviews is still the one on Claude Code and Sol.
+      yield* Effect.flip((yield* Sessions).switchAgent({ threadId: task.threadId, agentId: 'opencode', model: 'nowhere' }))
       // Codex stops listing Sol before the review after merge starts.
       each['codex@usual'] = { models: [large] }
       yield* mergeIt(bare, github, task.taskId)

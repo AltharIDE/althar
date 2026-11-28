@@ -213,6 +213,113 @@ describe('a step on a model its agent stops listing', () => {
     }).pipe(Effect.provide(withQueries(':memory:', {}, { each, modelWait: { every: Duration.millis(100), within: Duration.seconds(1) } })))
   })
 
+  it.live('goes on past a first agent whose list Althar held from before, to a third that starts on the model', () => {
+    const each = offering()
+    return Effect.gen(function* () {
+      // OpenCode was asked once and said Sol, but its sessions no longer list it; Claude Code's do.
+      const opencode: FakeAgentOptions = {
+        get models() {
+          return launches.at(-1)?.env.ALTHAR_WORKER === undefined ? [SOL, SMALL] : [SMALL]
+        },
+      }
+      each['opencode@usual'] = opencode
+      each['claude-code@usual'] = { models: [SMALL, SOL] }
+      yield* catalogRead
+      each['codex@usual'] = { models: [LUNA] }
+      const task = yield* reviewedOnSol
+      const thread = yield* reviewThread(task.taskId)
+      assert.deepStrictEqual(yield* reviewerOn(task.taskId), { agentId: 'claude-code', model: SOL.id })
+      assert.include(yield* titles(thread), 'Fake codex stopped listing GPT-6.2 Sol: it carries on through Fake claude-code.')
+      // OpenCode, first in line, was tried and passed over.
+      const sql = yield* SqlClient.SqlClient
+      const tried = yield* sql<{ agentId: string }>`
+        SELECT DISTINCT s.agent_id FROM provider_sessions s WHERE s.thread_id = ${thread} ORDER BY s.agent_id`
+      assert.deepStrictEqual(tried, [{ agentId: 'claude-code' }, { agentId: 'codex' }, { agentId: 'opencode' }])
+      assert.deepStrictEqual(yield* openCalls(task.taskId), [])
+    }).pipe(Effect.provide(withQueries(':memory:', {}, { each })))
+  })
+
+  it.live('refuses a model the agent never listed with its kind, so handing on can tell it from another failure', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      yield* catalogRead
+      const { task: made } = yield* task()
+      const failed = yield* Effect.flip(sessions.start({ threadId: made.threadId, agentId: 'codex', model: 'nowhere' }))
+      assert.deepInclude(failed, { summary: "The agent doesn't offer nowhere.", modelRefused: 'nowhere' })
+      assert.notProperty(failed, 'modelGone')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  // A try held as it starts, as an agent slow to start is: the stop comes while it is under way.
+  const heldTry = (models: ReadonlyArray<{ readonly id: string; readonly name: string }>) => {
+    let release = () => {}
+    const gate = new Promise<void>((done) => (release = done))
+    const held = { entered: false, release: () => release() }
+    const options: FakeAgentOptions = {
+      models,
+      // A models probe goes through at once.
+      get beforeNewSession() {
+        const session = launches.at(-1)?.env.ALTHAR_WORKER !== undefined
+        return async () => {
+          if (!session) return
+          held.entered = true
+          await gate
+        }
+      },
+    }
+    return { held, options }
+  }
+
+  for (const [back, words] of [
+    [true, 'its agent lists the model again'],
+    [false, 'the model is still missing, and another agent offers it'],
+  ] as const)
+    it.live(`stops on a stop during a try under way, where ${words}: nothing takes the thread, here or elsewhere`, () => {
+      const each = offering()
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions
+        each['claude-code@usual'] = { models: [SMALL, SOL] }
+        yield* catalogRead
+        each['codex@usual'] = { models: [LUNA] }
+        const { task: made } = yield* task()
+        const starting = yield* Effect.forkChild(Effect.flip(sessions.start({ threadId: made.threadId, agentId: 'codex', model: SOL.id })))
+        yield* until(titles(made.threadId), (said) => said.some((title) => title.includes('just now')))
+        const { held, options } = heldTry(back ? [SOL, LUNA] : [LUNA])
+        each['codex@usual'] = options
+        yield* until(
+          Effect.sync(() => held.entered),
+          (entered) => entered,
+        )
+        const stopping = yield* Effect.forkChild(sessions.stop(made.threadId))
+        yield* Effect.sleep(Duration.millis(100))
+        held.release()
+        yield* Fiber.join(stopping).pipe(Effect.timeout(Duration.seconds(10)))
+        const failed = yield* Fiber.join(starting)
+        const said = 'summary' in failed ? String(failed.summary) : ''
+        // Back on its list, the try that started is let go; still missing, it says so, and nothing is handed on.
+        if (back) assert.strictEqual(said, 'Stopped while it waited for its agent to list its model again.')
+        else assert.include(said, 'It stopped listing GPT-6.2 Sol')
+        assert.isTrue(Option.isNone(yield* sessions.running(made.threadId)))
+        // Nothing was handed on to Claude Code.
+        const sql = yield* SqlClient.SqlClient
+        const on = yield* sql<{ agentId: string }>`SELECT DISTINCT agent_id FROM provider_sessions WHERE thread_id = ${made.threadId}`
+        assert.deepStrictEqual(on, [{ agentId: 'codex' }])
+      }).pipe(
+        Effect.provide(
+          withQueries(
+            ':memory:',
+            {},
+            {
+              each,
+              modelWait: back
+                ? { every: Duration.millis(300), within: Duration.seconds(30) }
+                : { every: Duration.millis(300), within: Duration.millis(300) },
+            },
+          ),
+        ),
+      )
+    })
+
   it.live('stops waiting at once where its thread is stopped, starting nothing more here or elsewhere', () => {
     const each = offering()
     return Effect.gen(function* () {
