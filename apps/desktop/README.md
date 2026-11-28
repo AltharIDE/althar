@@ -179,22 +179,23 @@ The app is packaged for macOS on Apple silicon and on Intel, x86_64 Linux and x6
 
 #### Cutting a release
 
-[`release.yml`](../../.github/workflows/release.yml) runs on a tag `v<version>` pushed on a commit on main. It checks the tag against `package.json`'s version, waits for a reviewer to approve the `release` environment, builds macOS, Linux and Windows packages in platform jobs, and leaves one draft GitHub Release with each platform's files. It never runs on a pull request, and it is the only workflow that publishes a desktop release; `post-merge.yml` checks Linux and Windows packages after merge, and `windows-installer.yml` the Windows installer on a pull request that changes packaging, but neither publishes them.
+[`release.yml`](../../.github/workflows/release.yml) runs on a tag `v<version>` pushed on a commit on main, or, for a patch, on its version's release branch (`release/0.10` for 0.10.1; [Release branches](../../DEVELOPMENT.md#release-branches)). It checks the tag against `package.json`'s version, waits (up to two hours) for `post-merge` to pass on the commit if it is still running, waits for a reviewer to approve the `release` environment, builds macOS, Linux and Windows packages in platform jobs, and leaves one draft GitHub Release with each platform's files. It never runs on a pull request, and it is the only workflow that publishes a desktop release; `post-merge.yml` checks Linux and Windows packages after merge, and `windows-installer.yml` the Windows installer on a pull request that changes packaging, but neither publishes them.
 
-1. On main: raise `version` in `apps/desktop/package.json`, and write a few plain lines for testers in `apps/desktop/release-notes/<version>.md`, under the headings New, Improved and Fixed (leave out one with nothing in it), as [release-notes/README.md](release-notes/README.md) says. No commit dump.
+1. On main, or for a patch on its release branch: raise `version` in `apps/desktop/package.json`, and write a few plain lines for testers in `apps/desktop/release-notes/<version>.md`, under the headings New, Improved and Fixed (leave out one with nothing in it), as [release-notes/README.md](release-notes/README.md) says. No commit dump.
 2. Tag that commit and push the tag: `git tag v0.1.1 && git push origin v0.1.1`.
 3. In Actions, open the release run and approve it (Review deployments). Notarizing takes from a few minutes to an hour.
 4. In Releases, open the draft, download its dmgs, and try each on its Mac (the run has opened both already, Intel's under Rosetta): it should open with only the usual "downloaded from the internet" question. Try its Windows installer on a Windows machine: SmartScreen warns while it is unsigned (More info → Run anyway).
-5. Publish the draft. Then the updater and the site's Download see it.
+5. Publish the draft. Then the updater and the site's Download see it. A patch to an older line, once a newer one is out, is drafted as not the latest: publish it with "Set as the latest release" unticked, so they stay on the newest line.
+6. For a new minor or major, cut its release branch at the tag through the cascade: `gh workflow run cascade.yml -f cut=release/0.11 -f at=v0.11.0` ([Release branches](../../DEVELOPMENT.md#release-branches)).
 
-Run by hand (Actions → release → Run workflow, on main), it makes the same draft without a tag; publishing it makes the tag. Run again, a release's run brings its draft up to date, and never touches a published release. Where notarizing fails, the run's `notary-logs` artifact names each file Apple found wrong.
+Run by hand (Actions → release → Run workflow, on main, or on the release branch for a patch), it makes the same draft without a tag; publishing it makes the tag. Run again, a release's run brings its draft up to date, and never touches a published release. Where notarizing fails, the run's `notary-logs` artifact names each file Apple found wrong.
 
 #### The release environment (once)
 
 In the repository's Settings → Environments, make an environment named `release`:
 
 - **Required reviewers:** the people who may let a release use the certificate (Balazs, Taari). Turn on "Prevent self-review" if a second person should always approve.
-- **Deployment branches and tags:** Selected branches and tags; add a tag rule `v*`, and add the branch `main` only if releases may also be run by hand. Nothing else can reach the secrets.
+- **Deployment branches and tags:** Selected branches and tags; add a tag rule `v*`, and add the branch `main` (and `release/*`, for patches) only if releases may also be run by hand. Nothing else can reach the secrets.
 - **Secrets,** in the environment, not the repository. Keep each file and password in Bitwarden too, and delete the copies on the Mac once they are set.
 
 | Secret | What it is | How to make it |
