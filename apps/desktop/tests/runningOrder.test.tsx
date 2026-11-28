@@ -118,14 +118,27 @@ describe('Running’s order', () => {
   })
 
   it('sorts from the menu on Running’s head at once, and keeps the pick for the next board', async () => {
-    const view = () => <BoardView lanes={lanesOf(board())} agents={agents} now={NOW} onOpen={vi.fn()} />
+    const mixed: BoardSnapshot = {
+      ...board(),
+      tasks: [
+        task('checks-a', { step: 'checks_running' }),
+        task('review-a', { step: 'review' }),
+        task('implement-a'),
+        task('checks-b', { step: 'checks_running' }),
+        task('review-b', { step: 'review' }),
+        task('implement-b'),
+      ],
+    }
+    const view = () => <BoardView lanes={lanesOf(mixed)} agents={agents} now={NOW} onOpen={vi.fn()} />
+    const shown = (...ids: string[]) => ids.map((id) => expect.stringContaining(`Task ${id}`))
+    const byStatus = shown('implement-a', 'implement-b', 'review-a', 'review-b', 'checks-a', 'checks-b')
     const { unmount } = withServices(view(), fakeClient().client)
-    expect(titles()[0]).toContain('Task paused')
+    expect(titles()).toEqual(shown('checks-a', 'review-a', 'implement-a', 'checks-b', 'review-b', 'implement-b'))
     await userEvent.click(screen.getByRole('button', { name: 'Sort Running' }))
     await userEvent.click(screen.getByRole('menuitemradio', { name: 'Status' }))
-    expect(titles()).toEqual(['first', 'second', 'outside', 'paused'].map((id) => expect.stringContaining(`Task ${id}`)))
+    expect(titles()).toEqual(byStatus)
     unmount()
     withServices(view(), fakeClient().client)
-    expect(titles().at(-1)).toContain('Task paused')
+    expect(titles()).toEqual(byStatus)
   })
 })
