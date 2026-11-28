@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, normalize } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { afterEach, assert, describe, it } from '@effect/vitest'
 
@@ -128,8 +128,8 @@ describe('finding an agent’s program, where the person’s own must fit', () =
       whose: 'theirs',
     })
     assert.deepStrictEqual(locate('claude', { bundled: null, kept }, { ...options, fits: () => false }), { command: kept, whose: 'althar' })
-    // Compared as paths: on Windows, the Linux lookup joins its PATH with `/`, where `theirs` was joined with `\`.
-    assert.isNull(locate('claude', { bundled: null, kept: null }, { ...options, fits: (path) => normalize(path) !== normalize(theirs) }))
+    // Theirs the only copy, and it doesn't fit: none. (No path compared: on Windows, the Linux lookup splits D:\ at its colon.)
+    assert.isNull(locate('claude', { bundled: null, kept: null }, { ...options, fits: () => false }))
     // Its adapter drives Althar's download, or the person's own, by the variable it reads; the copy beside it, as before.
     const claude = agents['claude-code']
     const launched = (found: Parameters<typeof usingLocated>[1]) => usingLocated(claude, found).launch('/node').env ?? {}
