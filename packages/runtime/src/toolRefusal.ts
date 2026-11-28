@@ -1,4 +1,4 @@
-import { redact } from './diagnostics'
+import { redact, redactCredentials } from './diagnostics'
 import { ToolRefused } from './toolErrors'
 import { sentence, words } from './words'
 
@@ -14,7 +14,8 @@ const NO_WORDS = "Althar's runtime couldn't do that"
 const ownMessage = (error: unknown): string | undefined => {
   const message =
     typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string' ? error.message.trim() : ''
-  return message === '' ? undefined : message
+  // An error's own message is the runtime's raw text, not words Althar chose: every kind of credential comes out of it.
+  return message === '' ? undefined : redact(message)
 }
 
 /**
@@ -22,7 +23,7 @@ const ownMessage = (error: unknown): string | undefined => {
  * whichever it is, with any credential in it taken out (diagnostics.ts), as it goes to the agent and its transcript.
  * `failed` says what didn't happen, where the tool says it its own way ("Althar could not run the setup").
  */
-export const refusalWords = (error: unknown, failed = 'Althar could not do that'): string => redact(worded(error, failed))
+export const refusalWords = (error: unknown, failed = 'Althar could not do that'): string => redactCredentials(worded(error, failed))
 
 /** The same, before secrets are taken out of it: a refusal's and a formatted error's words can carry a service's own text. */
 const worded = (error: unknown, failed: string): string => {

@@ -12,7 +12,7 @@ import { Errands, type AskedAction, type TurnWord } from './Errands'
 import { errandTools } from './errandTools'
 import { ToolRefused } from './toolErrors'
 import { refusalWords } from './toolRefusal'
-import { redact } from './diagnostics'
+import { redactCredentials } from './diagnostics'
 import { singleTypes } from './toolSchemas'
 import { workerMcpMounts, WORKER_MCP_PATH } from './workerMcp'
 export { ActionNotPerformed, ToolRefused } from './toolErrors'
@@ -177,10 +177,10 @@ export class ToolServer extends Context.Service<
           if (tool === undefined)
             return {
               isError: true,
-              content: [{ type: 'text' as const, text: redact(`Althar has no tool called ${request.params.name}.`) }],
+              content: [{ type: 'text' as const, text: redactCredentials(`Althar has no tool called ${request.params.name}.`) }],
             }
           const guarded = await refusal(tool)
-          if (guarded !== null) return { isError: true, content: [{ type: 'text' as const, text: redact(guarded) }] }
+          if (guarded !== null) return { isError: true, content: [{ type: 'text' as const, text: redactCredentials(guarded) }] }
           const input = request.params.arguments ?? {}
           const controller = tool.cancelWithRequest ? new AbortController() : undefined
           if (controller !== undefined) res.once('close', () => controller.abort())

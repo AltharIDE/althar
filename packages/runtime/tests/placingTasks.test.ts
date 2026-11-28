@@ -530,6 +530,12 @@ describe('what a failed tool tells its agent (toolRefusal.ts)', () => {
           { name: 'fails_silently', description: 'Fails.', input: { type: 'object' }, call: () => Effect.die('gone') },
           { name: 'fails_leaking', description: 'Fails.', input: { type: 'object' }, call: () => Effect.fail(leaky as never) },
           { name: 'refuses_leaking', description: 'Fails.', input: { type: 'object' }, call: () => Effect.fail(refusedLeaky) },
+          {
+            name: 'refuses_naming_a_file',
+            description: 'Fails.',
+            input: { type: 'object' },
+            call: () => Effect.fail(new ToolRefused({ message: '../../etc/passwd:1 isn’t in the pull request’s code.' })),
+          },
         ])
         const said = (name: string) => callToolWhole(coordinator, name, {}).pipe(Effect.provideContext(context))
         const failed = yield* said('fails_in_runtime')
@@ -540,6 +546,10 @@ describe('what a failed tool tells its agent (toolRefusal.ts)', () => {
         ])
         assert.deepStrictEqual((yield* said('fails_leaking')).content, [{ type: 'text', text: 'The host said: token [REDACTED] is bad.' }])
         assert.deepStrictEqual((yield* said('refuses_leaking')).content, [{ type: 'text', text: 'Connect with Bearer [REDACTED] again.' }])
+        // Words Althar wrote that name a file and line keep them: only what has a credential's shape comes out.
+        assert.deepStrictEqual((yield* said('refuses_naming_a_file')).content, [
+          { type: 'text', text: '../../etc/passwd:1 isn’t in the pull request’s code.' },
+        ])
         // A guard's refusal, which answers before the tool runs, is taken out of too.
         const toolServer = Context.get(context, ToolServer)
         yield* toolServer.serve('coordinator', [
