@@ -958,30 +958,33 @@ describe('a lead merging its own task’s pull request, on the person’s word i
     }).pipe(Effect.provide(layer(service)))
   })
 
-  it.live('merges or tags only on the person’s word: news alone, or a tag on the host without it, does nothing', () => {
-    const { service, pull, did } = leadsHost()
-    const { working } = hosted(['meridian', 'api'])
-    return Effect.gen(function* () {
-      const coordinator = yield* opened(working)
-      const number = pull('Retry refunds')
-      const { lead } = yield* leadOf(coordinator, number)
-      const heard = yield* turn(lead, 'news', 'Checks passed on #1: merge it')
-      assert.match(yield* merge(lead, { head: `head-${number}`, message: heard }), /person's message in this turn/)
-      assert.match(yield* callTool(lead, 'push_tag', { tag: 'v1.0.0', message: heard }), /person's message in this turn/)
-      assert.deepStrictEqual(did.merged, [])
-      assert.deepStrictEqual(did.tagsPushed, [])
-      // Another of the project's, where the person asks for it by its number.
-      const other = pull('Cap retries')
-      const message = yield* turn(lead, 'person', 'Merge #2 as well')
-      assert.match(yield* merge(lead, { pull_request: `#${other}`, head: `head-${other}`, message }), /^Merged PR #2/)
-      // Their word for a tag the lead didn't make: Althar makes it on the host, on main's latest.
-      assert.match(yield* callTool(lead, 'push_tag', { tag: 'v1.0.0', message }), /^Pushed the tag v1\.0\.0 on /)
-      assert.deepStrictEqual(
-        did.tagsPushed.map((one) => one.name),
-        ['v1.0.0'],
-      )
-    }).pipe(Effect.provide(layer(service)))
-  })
+  it.live(
+    'merges or tags only on the person’s word: news alone does nothing; their word merges another of the project’s and tags on the host',
+    () => {
+      const { service, pull, did } = leadsHost()
+      const { working } = hosted(['meridian', 'api'])
+      return Effect.gen(function* () {
+        const coordinator = yield* opened(working)
+        const number = pull('Retry refunds')
+        const { lead } = yield* leadOf(coordinator, number)
+        const heard = yield* turn(lead, 'news', 'Checks passed on #1: merge it')
+        assert.match(yield* merge(lead, { head: `head-${number}`, message: heard }), /person's message in this turn/)
+        assert.match(yield* callTool(lead, 'push_tag', { tag: 'v1.0.0', message: heard }), /person's message in this turn/)
+        assert.deepStrictEqual(did.merged, [])
+        assert.deepStrictEqual(did.tagsPushed, [])
+        // Another of the project's, where the person asks for it by its number.
+        const other = pull('Cap retries')
+        const message = yield* turn(lead, 'person', 'Merge #2 as well')
+        assert.match(yield* merge(lead, { pull_request: `#${other}`, head: `head-${other}`, message }), /^Merged PR #2/)
+        // Their word for a tag the lead didn't make: Althar makes it on the host, on main's latest.
+        assert.match(yield* callTool(lead, 'push_tag', { tag: 'v1.0.0', message }), /^Pushed the tag v1\.0\.0 on /)
+        assert.deepStrictEqual(
+          did.tagsPushed.map((one) => one.name),
+          ['v1.0.0'],
+        )
+      }).pipe(Effect.provide(layer(service)))
+    },
+  )
 
   it.live('a merge its lead kept wakes that lead after a restart, starting it again', () => {
     const { service, checks, pull } = leadsHost()
