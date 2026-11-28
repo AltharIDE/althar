@@ -3,7 +3,7 @@ import { generateKeyPairSync, sign } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { isoAfter } from '@althar/testing'
 
-import { releaseIdentity, verifyRelease, type ReleaseManifest } from '../src/updates/release'
+import { authenticateRelease, compareVersions, releaseIdentity, verifyRelease, type ReleaseManifest } from '../src/updates/release'
 
 const pair = generateKeyPairSync('ed25519')
 const publicKey = pair.publicKey.export({ format: 'pem', type: 'spki' }).toString()
@@ -107,5 +107,57 @@ describe('authenticated host releases', () => {
     expect(() =>
       releaseIdentity(generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ format: 'pem', type: 'spki' }).toString()),
     ).toThrow()
+  })
+})
+
+describe('a worker release in parts', () => {
+  const part = (name: string, path: string, url = `https://releases.example/${name}.tar.zst`) => ({
+    name,
+    path,
+    agent: 'codex' as const,
+    tree: 'c'.repeat(64),
+    url,
+    sha256: 'd'.repeat(64),
+    bytes: 10,
+    files: 1,
+    unpackedBytes: 20,
+  })
+  const base = { url: 'https://releases.example/base.tar.gz', sha256: 'e'.repeat(64), bytes: 10, files: 1, unpackedBytes: 20 }
+  const inParts = (of: ReadonlyArray<ReturnType<typeof part>>, first = base) => signed({ ...manifest, parts: { base: first, of } })
+
+  it('takes its parts where each has a place of its own in node_modules, over HTTPS', () => {
+    const verified = verify(inParts([part('codex', 'node_modules/@openai/codex-x'), part('claude', 'node_modules/@anthropic-ai/claude-x')]))
+    expect(verified.manifest.parts?.of.map((one) => one.name)).toEqual(['codex', 'claude'])
+  })
+
+  it('refuses parts inside one another, twice in a place or by a name, outside node_modules, or over plain HTTP', () => {
+    for (const of of [
+      [part('codex', 'node_modules/@openai/codex-x'), part('rg', 'node_modules/@openai/codex-x/node_modules/rg')],
+      [part('codex', 'node_modules/@openai/codex-x'), part('again', 'node_modules/@openai/codex-x')],
+      [part('codex', 'node_modules/@openai/codex-x'), part('codex', 'node_modules/@openai/codex-y')],
+      [part('codex', 'dist/codex')],
+      [part('codex', 'node_modules/@openai/../../etc')],
+      [part('codex', 'node_modules/@openai/codex-x', 'http://releases.example/codex.tar.zst')],
+    ])
+      expect(() => verify(inParts(of))).toThrow()
+    expect(() =>
+      verify(inParts([part('codex', 'node_modules/@openai/codex-x')], { ...base, url: 'http://releases.example/base.tar.gz' })),
+    ).toThrow()
+    expect(() => verify(inParts([]))).toThrow()
+  })
+})
+
+describe('versions and envelopes, at their edges', () => {
+  it('reads a version missing its patch as .0, either side', () => {
+    expect(compareVersions('1.2', '1.2.0')).toBe(0)
+    expect(compareVersions('1.2.1', '1.2')).toBe(1)
+    expect(compareVersions('1.1', '1.2.0')).toBe(-1)
+  })
+
+  it('refuses a signature that isn’t written exactly as base64url', () => {
+    const envelope = JSON.parse(signed().toString()) as { signature: string }
+    const padded = Buffer.from(JSON.stringify({ ...envelope, signature: `${envelope.signature}==` }))
+    expect(() => authenticateRelease(padded, [publicKey], 'x64')).toThrow()
+    expect(authenticateRelease(signed(), [publicKey], 'x64').manifest.version).toBe(manifest.version)
   })
 })

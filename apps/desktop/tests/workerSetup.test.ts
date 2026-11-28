@@ -438,9 +438,12 @@ it('sends the whole release where downloading on the machine outran its time, an
 
 it('says a program it ran was stopped at its deadline, whatever it exited with then', async () => {
   const signal = new AbortController().signal
-  const late = await runProgram('/bin/sh', ['-c', 'trap "exit 255" TERM; sleep 5 & wait'], { signal, timeout: 200 })
-  expect(late).toMatchObject({ code: 255, timedOut: true })
-  const done = await runProgram('/bin/sh', ['-c', 'exit 3'], { signal, timeout: 5_000 })
+  // Node, which every computer the tests run on has; where a stop is a signal it can catch, it exits 255 as OpenSSH does.
+  const node = (script: string, timeout: number) => runProgram(process.execPath, ['-e', script], { signal, timeout })
+  const late = await node('process.on("SIGTERM", () => process.exit(255)); setTimeout(() => undefined, 20_000)', 500)
+  expect(late.timedOut).toBe(true)
+  if (process.platform !== 'win32') expect(late.code).toBe(255)
+  const done = await node('process.exit(3)', 20_000)
   expect(done.code).toBe(3)
   expect(done.timedOut).toBeUndefined()
 })

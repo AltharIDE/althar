@@ -131,3 +131,39 @@ describe('host command configuration', () => {
     assert.throws(() => parse(['serve', '--encrypted-credential', '/private/host.cred']))
   })
 })
+
+describe('host command configuration, at its edges', () => {
+  it('takes a managed service’s credential, its program folder, and a page of devices after one', () => {
+    const service = parse(['install-service', '--encrypted-credential', 'key.cred', '--installation', 'program'])
+    assert.equal(service.encryptedCredential, resolve('key.cred'))
+    assert.equal(service.installation, resolve('program'))
+    assert.equal(service.updateRoot, resolve('program'))
+    const plain = parse(['install-service'])
+    assert.equal(plain.encryptedCredential, undefined)
+    assert.equal(plain.installation, undefined)
+    const device = `dev_${'c'.repeat(32)}`
+    assert.equal(parse(['devices', '--after', device]).deviceAfter, device)
+    assert.equal(parse(['devices']).deviceAfter, undefined)
+    // Setup from a signed manifest and its key, or resumed.
+    assert.equal(parse(['setup', '--manifest', 'm.json', '--release-key', 'a.pub']).command, 'setup')
+    assert.equal(parse(['setup', '--resume']).command, 'setup')
+  })
+
+  it('refuses a switch twice, setup’s options without setup, and options for another command', () => {
+    for (const args of [
+      ['status', '--json', '--json'],
+      ['serve', '--resume'],
+      ['serve', '--controller-pid', '12'],
+      ['worker-run'],
+      ['status', '--after', `dev_${'c'.repeat(32)}`],
+      ['devices', '--after', 'dev_short'],
+      ['serve', '--profile', ''],
+      // Setup: resumed and run at once, a manifest without its key or with two, a key without a manifest.
+      ['setup', '--resume', '--run-setup'],
+      ['setup', '--manifest', 'm.json'],
+      ['setup', '--manifest', 'm.json', '--release-key', 'a.pub', '--release-key', 'b.pub'],
+      ['setup', '--release-key', 'a.pub'],
+    ])
+      assert.throws(() => parse(args))
+  })
+})

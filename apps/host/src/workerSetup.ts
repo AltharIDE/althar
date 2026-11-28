@@ -72,6 +72,9 @@ export const programFolder = (env: NodeJS.ProcessEnv = process.env) => join(data
 const unitsFolder = (env: NodeJS.ProcessEnv = process.env) => join(env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'systemd', 'user')
 const SERVICE = 'althar-worker.service'
 
+/** The system's processor, as releases name it. */
+const ARCH = process.arch === 'arm64' ? 'arm64' : 'x64'
+
 const say = (out: (text: string) => void, value: Record<string, unknown>) => out(`${JSON.stringify({ protocol: 1, ...value })}\n`)
 
 /** An agent a worker can run from its release: its ACP adapter, and where its own program is, there or to come. */
@@ -87,10 +90,7 @@ export interface ShippedAgent {
 const partsOf = (release: string): ReadonlyArray<ReleasePart> => {
   try {
     const key = readFileSync(join(release, '.release-key'), 'utf8').trim()
-    return (
-      authenticateRelease(readFileSync(join(release, '.manifest')), [key], process.arch === 'arm64' ? 'arm64' : 'x64').manifest.parts?.of ??
-      []
-    )
+    return authenticateRelease(readFileSync(join(release, '.manifest')), [key], ARCH).manifest.parts?.of ?? []
   } catch {
     return []
   }
@@ -100,7 +100,7 @@ const partsOf = (release: string): ReadonlyArray<ReleasePart> => {
  * The agents a worker runs from `release` (the one this runs from unless said): each one's adapter, which every release
  * carries, and its own program, which a release in parts has only for the agents signed in on it (`bringAgent`).
  */
-const shipped = (release: string = running()): ReadonlyArray<ShippedAgent> => {
+export const shipped = (release: string = running()): ReadonlyArray<ShippedAgent> => {
   const parts = partsOf(release)
   const here = release === running()
   return (
@@ -631,7 +631,7 @@ export const update = async (out: (text: string) => void, fetcher: typeof fetch 
   const program = programFolder()
   const current = await fs.realpath(join(program, 'current'))
   const keys = [(await fs.readFile(join(current, '.release-key'), 'utf8')).trim()]
-  const installed = authenticateRelease(await fs.readFile(join(current, '.manifest')), keys, process.arch === 'arm64' ? 'arm64' : 'x64')
+  const installed = authenticateRelease(await fs.readFile(join(current, '.manifest')), keys, ARCH)
   const moving = (installed.manifest.product ?? 'host') === 'host'
   const feed = (await readPrivate(join(workerFolder(), 'update-feed'), 2048))?.toString('utf8').trim()
   const bytes = feed === undefined || feed === '' ? await latestManifest(fetcher) : await getUpdateBytes(feed, 262_144, fetcher)
@@ -734,7 +734,7 @@ const completeInstalled = async (release: string) => {
     fs.readFile(join(release, '.release-key'), 'utf8').catch(() => undefined),
   ])
   if (manifest === undefined || key === undefined) return
-  const parts = authenticateRelease(manifest, [key.trim()], process.arch === 'arm64' ? 'arm64' : 'x64').manifest.parts
+  const parts = authenticateRelease(manifest, [key.trim()], ARCH).manifest.parts
   if (parts === undefined || basename(release) !== `bundle-${parts.base.sha256}`) return
   const scratch = join(dirname(release), `.install-${process.pid}`)
   await fs.rm(scratch, { recursive: true, force: true })
@@ -758,7 +758,7 @@ const completeInstalled = async (release: string) => {
 }
 
 const latestManifest = async (fetcher: typeof fetch) => {
-  const asset = `althar-worker-linux-${process.arch === 'arm64' ? 'arm64' : 'x64'}.json`
+  const asset = `althar-worker-linux-${ARCH}.json`
   const listed = JSON.parse(
     new TextDecoder().decode(
       await getUpdateBytes('https://api.github.com/repos/AltharIDE/althar/releases?per_page=30', 2_097_152, fetcher),
@@ -817,7 +817,7 @@ export const workerMain = async (args: ReadonlyArray<string>, out: (text: string
         return 0
       case 'version':
         // What a release says it is, for its packaging to check against what it signs (updates/publish.ts).
-        say(out, { step: 'version', state: 'done', version: HOST_VERSION, arch: process.arch === 'arm64' ? 'arm64' : 'x64' })
+        say(out, { step: 'version', state: 'done', version: HOST_VERSION, arch: ARCH })
         return 0
       case 'sandbox':
         await allowSandbox(out)

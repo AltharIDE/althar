@@ -130,7 +130,6 @@ export const completeRelease = async (
       if ((await treeDigest(at)) === part.tree) continue
       await fs.rm(at, { recursive: true, force: true })
     }
-    await fs.mkdir(dirname(at), { recursive: true, mode: 0o700 })
     let donor: string | undefined
     for (const other of options.donors) {
       const from = join(other, part.path)
@@ -165,6 +164,7 @@ export const completeRelease = async (
       options.progress?.(bytes)
       downloaded.push(part.name)
     }
+    await fs.mkdir(dirname(at), { recursive: true, mode: 0o700 })
     await fs.rename(staged, at)
   }
   return { lent, downloaded, missing, bytes }

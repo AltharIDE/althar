@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
@@ -194,6 +194,63 @@ describe('signed host release production', () => {
     const payload = Buffer.from(JSON.parse(envelope.toString()).payload, 'base64url').toString()
     expect(payload.indexOf('"parts"')).toBeLessThan(payload.indexOf('"archive"'))
     expect(/.*"sha256":"([a-f0-9]+)"/u.exec(payload)?.[1]).toBe(manifest.archive.sha256)
+  })
+
+  it('signs no release with a link in it, nor a worker release missing what it runs on or saying nothing of itself', async () => {
+    const root = temporary()
+    const signingKey = generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
+    let out = 0
+    const options = () =>
+      parseOptions(
+        [
+          'package-release',
+          '--release-base-url',
+          'https://releases.example/v/',
+          '--release-sequence',
+          '6',
+          '--output',
+          join(root, `out-${out++}`),
+        ],
+        {},
+        root,
+      )
+    const source = {
+      node: '/fixture/node',
+      entry: '/fixture/entry',
+      version: releaseInfo().version,
+      worker: '/fixture/althar-worker',
+      workerTools: '/fixture/tools',
+      workerEntry: '/fixture/worker/althar-worker.js',
+    }
+    const worker = (folder: string) => {
+      fixtureFiles(folder)
+      writeFileSync(join(folder, 'dist/althar-worker.js'), 'worker commands', { mode: 0o600 })
+      writeFileSync(join(folder, 'althar-worker'), 'worker', { mode: 0o700 })
+    }
+    const packaging = (assembleWorker: (folder: string) => void, says = JSON.stringify(releaseInfo())) =>
+      packageRelease(options(), {
+        source,
+        signingKey,
+        now: NOW,
+        assemble: async (_: unknown, folder: string) => fixtureFiles(folder),
+        assembleWorker: async (_: unknown, folder: string) => assembleWorker(folder),
+        execute: async (_: string, args: ReadonlyArray<string>) => (args.includes('version') ? says : JSON.stringify(releaseInfo())),
+      })
+    await expect(
+      packaging((folder) => {
+        worker(folder)
+        symlinkSync('/etc/passwd', join(folder, 'dist', 'passwd'))
+      }),
+    ).rejects.toMatchObject({ code: 'ReleaseRejected' })
+    await expect(
+      packaging((folder) => {
+        worker(folder)
+        // A folder where a file it runs on should be.
+        rmSync(join(folder, 'node/LICENSE'))
+        mkdirSync(join(folder, 'node/LICENSE'), { mode: 0o700 })
+      }),
+    ).rejects.toThrow('missing a file it runs on')
+    await expect(packaging(worker, 'null')).rejects.toThrow('does not say the version')
   })
 
   it('requires a protected Ed25519 signing key and explicit release metadata', async () => {

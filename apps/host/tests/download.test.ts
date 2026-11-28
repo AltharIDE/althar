@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { downloadRelease, getUpdateBytes, type UpdateFetch, type UpdatePause } from '../src/updates/network'
+import { downloadRelease, downloadTime, getUpdateBytes, type UpdateFetch, type UpdatePause } from '../src/updates/network'
 import { digest } from '../src/updates/release'
 import { temporary } from './support'
 
@@ -168,5 +168,61 @@ describe('bounded release downloads', () => {
     expect(asked).toBe(2)
     expect(readFileSync(file)).toEqual(data)
     journal.mockRestore()
+  })
+
+  it('gives a large release the time it takes on a slow line, and says how far it has come', async () => {
+    expect(downloadTime(1_000)).toBe(180_000)
+    // 143 MB, Claude Code's program, at 128 KiB/s: over 18 minutes, not three.
+    expect(downloadTime(143_000_000)).toBe(1_092_000)
+    const data = Buffer.alloc(200_000, 7)
+    const archive = { url: 'https://updates.example/part', bytes: data.length, sha256: digest(data) }
+    const said: number[] = []
+    await downloadRelease(
+      archive,
+      join(temporary(), 'part'),
+      async () => new Response(data),
+      undefined,
+      now,
+      (bytes) => said.push(bytes),
+    )
+    expect(said.at(-1)).toBe(data.length)
+    expect(said.every((bytes, at) => at === 0 || bytes > (said[at - 1] ?? 0))).toBe(true)
+  })
+
+  it('says a server’s own words for a status, a body that stalled, and what isn’t an error as it was thrown', async () => {
+    const journal = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    const url = 'https://updates.example/feed'
+    const failing = (fetcher: UpdateFetch) =>
+      getUpdateBytes(url, 100, fetcher, undefined, now).catch((caught: unknown) =>
+        caught instanceof Error ? caught.message : String(caught),
+      )
+    expect(await failing(async () => new Response('gone', { status: 410, statusText: 'Gone' }))).toBe(
+      'updates.example answered with HTTP 410. The installed release is unchanged.',
+    )
+    expect(journal).toHaveBeenLastCalledWith('Host update: https://updates.example/feed: HTTP 410 Gone from https://updates.example/feed\n')
+    const stalled = Object.assign(new TypeError('terminated'), {
+      cause: Object.assign(new Error('body timeout'), { code: 'UND_ERR_BODY_TIMEOUT' }),
+    })
+    expect(await failing(async () => Promise.reject(stalled))).toBe(
+      'updates.example took too long to answer. The installed release is unchanged.',
+    )
+    expect(await failing(async () => Promise.reject('a plain string'))).toBe(
+      'Couldn’t connect to updates.example. The installed release is unchanged.',
+    )
+    expect(journal).toHaveBeenLastCalledWith('Host update: https://updates.example/feed: a plain string\n')
+    journal.mockRestore()
+  })
+
+  it('tries again under the caller’s own signal, and stops at once where it is aborted', async () => {
+    const control = new AbortController()
+    let asked = 0
+    const flaky: UpdateFetch = async () => (++asked === 1 ? new Response('busy', { status: 503 }) : new Response('ok'))
+    expect((await getUpdateBytes('https://updates.example/feed', 100, flaky, control.signal, now)).toString()).toBe('ok')
+    expect(asked).toBe(2)
+    control.abort()
+    await expect(getUpdateBytes('https://updates.example/feed', 100, flaky, control.signal, now)).rejects.toMatchObject({
+      code: 'UpdateUnavailable',
+      message: 'The update was stopped. The installed release is unchanged.',
+    })
   })
 })

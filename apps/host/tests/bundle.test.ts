@@ -186,6 +186,34 @@ describe('locked host dependency bundles', () => {
     // Without its native program, its commands or its tools, it isn't a worker's release.
     for (const missing of ['worker', 'workerTools', 'workerEntry'] as const)
       await expect(assembleWorkerBundle({ ...source, [missing]: undefined }, join(temporary(), 'release'))).rejects.toThrow()
+    // Nor with a sandbox tool that isn't a plain file of a plain name.
+    for (const odd of ['.hidden', 'folder']) {
+      const tools = join(temporary(), 'tools')
+      for (const part of ['bin', 'licenses']) mkdirSync(join(tools, part), { recursive: true })
+      if (odd === 'folder') mkdirSync(join(tools, 'bin', odd))
+      else writeFileSync(join(tools, 'bin', odd), 'odd')
+      await expect(assembleWorkerBundle({ ...source, workerTools: tools }, join(temporary(), 'release'))).rejects.toThrow()
+    }
+  })
+  it('passes over an optional peer that isn’t installed, and refuses a required dependency that isn’t', async () => {
+    const root = temporary()
+    const folder = pkg(root, 'host-app')
+    writeFileSync(
+      join(folder, 'package.json'),
+      JSON.stringify({
+        name: 'host-app',
+        version: '1.0.0',
+        peerDependencies: { 'optional-peer': '1' },
+        peerDependenciesMeta: { 'optional-peer': { optional: true } },
+      }),
+    )
+    const destination = join(temporary(), 'release')
+    mkdirSync(destination)
+    expect((await copyDependencies(join(root, 'package.json'), destination, ['host-app'])).map((one) => one.name)).toEqual(['host-app'])
+    writeFileSync(join(folder, 'package.json'), JSON.stringify({ name: 'host-app', version: '1.0.0', dependencies: { missing: '1' } }))
+    const again = join(temporary(), 'release')
+    mkdirSync(again)
+    await expect(copyDependencies(join(root, 'package.json'), again, ['host-app'])).rejects.toThrow()
   })
   it('retains native optional dependencies and omits unavailable or other-platform variants', async () => {
     const root = temporary()

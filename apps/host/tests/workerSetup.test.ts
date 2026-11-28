@@ -1,5 +1,16 @@
 import { createHash, generateKeyPairSync, sign, X509Certificate } from 'node:crypto'
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { createServer } from 'node:https'
 import { join } from 'node:path'
 
@@ -16,6 +27,7 @@ import { releaseIdentity } from '../src/updates/release'
 import {
   bringAgent,
   enroll,
+  shipped,
   install,
   join_,
   listAgents,
@@ -307,6 +319,12 @@ describe('updating itself', () => {
     writeFileSync(join(data, 'althar-worker', 'update-feed'), 'https://updates.example/manifest.json', { mode: 0o600 })
     await update(out, answer(installed.envelope))
     expect(said.findLast((one) => one.step === 'update')).toMatchObject({ step: 'update', state: 'current', version: HOST_VERSION })
+    // While a task runs, not even its check: that starts its agents.
+    const checked = said.filter((one) => one.step === 'check').length
+    busy = 'althar-agent-war_1.service loaded active running'
+    await update(out, answer(installed.envelope))
+    expect(said.filter((one) => one.step === 'check')).toHaveLength(checked)
+    busy = ''
     // A newer one, signed by the same key, while a task runs: it waits for the next check.
     const [major, minor, patch] = HOST_VERSION.split('.').map(Number)
     const newer = JSON.parse(Buffer.from(JSON.parse(installed.envelope).payload, 'base64url').toString('utf8')) as Record<string, unknown>
@@ -454,6 +472,71 @@ describe('its command line, at work', () => {
 })
 
 describe('its command line, at its edges', () => {
+  it('asks to be set up again where it has no key to enroll with', async () => {
+    const someone = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+      .publicKey.export({ type: 'spki', format: 'der' })
+      .toString('base64url')
+    expect(await workerMain(['enroll', '--grant', Buffer.from(JSON.stringify(await grantFor(someone))).toString('base64url')], out)).toBe(1)
+    expect(said.at(-1)).toMatchObject({ step: 'enroll', state: 'failed', code: 'NoKey' })
+  })
+
+  it('says it couldn’t be set up where its service manager fails without words, and goes on where only its check can’t run', async () => {
+    const machine = (systemctl: () => Promise<string>, run: CheckSystem['run']) => {
+      restore()
+      restore = withWorkerSystem({
+        systemctl,
+        signedIn: async () => false,
+        agents: () => [],
+        check: { ...checking, run },
+        shipped: () => ({}),
+        sudo: async () => false,
+      })
+    }
+    machine(async () => Promise.reject('dbus is gone'), checking.run)
+    await install(release(), out)
+    const grant = Buffer.from(JSON.stringify(await grantFor(keyOf()))).toString('base64url')
+    expect(await workerMain(['enroll', '--grant', grant], out)).toBe(1)
+    expect(said.at(-1)).toMatchObject({ step: 'enroll', state: 'failed', code: 'Failed', message: 'The worker couldn’t be set up.' })
+    machine(
+      async () => '',
+      async () => Promise.reject('no processes left'),
+    )
+    said = []
+    expect(await workerMain(['enroll', '--grant', grant], out)).toBe(0)
+    expect(said.at(-1)).toMatchObject({ step: 'check', state: 'failed', code: 'Failed', message: 'The check couldn’t run.' })
+  })
+
+  it('says why a signed-in agent didn’t start in its check, in its words', async () => {
+    restore()
+    restore = withWorkerSystem({
+      systemctl: async () => '',
+      signedIn: async () => true,
+      agents: () => [{ id: 'codex', definition: agents.codex, program: '/opt/codex' }],
+      check: { ...checking, startAgent: async () => Promise.reject(new Error('Codex’s program crashed')) },
+      shipped: () => ({}),
+      sudo: async () => false,
+    })
+    await install(release(), out)
+    expect(await workerMain(['check'], out)).toBe(0)
+    expect(said.at(-1)).toMatchObject({
+      step: 'check',
+      state: 'done',
+      agents: [{ id: 'codex', signedIn: true, started: false, message: expect.any(String) }],
+    })
+  })
+
+  it('says the release it is and the system it’s for, and refuses an enrollment with no grant', async () => {
+    expect(await workerMain(['version'], out)).toBe(0)
+    expect(said.at(-1)).toMatchObject({
+      step: 'version',
+      state: 'done',
+      version: HOST_VERSION,
+      arch: process.arch === 'arm64' ? 'arm64' : 'x64',
+    })
+    expect(await workerMain(['enroll'], out)).toBe(1)
+    expect(said.at(-1)).toMatchObject({ step: 'enroll', state: 'failed' })
+  })
+
   it('reads a missing flag as nothing, and says a failure that has no code of its own', async () => {
     expect(await workerMain(['install'], out)).toBe(1)
     expect(await workerMain(['join'], out)).toBe(1)
@@ -987,6 +1070,7 @@ describe('a release in parts', () => {
     expect(newer.asked).toEqual([])
     expect(existsSync(join(folder, claude))).toBe(false)
     expect(existsSync(join(folder, codex))).toBe(false)
+    expect(existsSync(join(folder, 'node_modules'))).toBe(false)
     const back = fromParts()
     try {
       await listAgents(out)
@@ -1134,5 +1218,75 @@ describe('a release in parts', () => {
     } finally {
       back()
     }
+  })
+
+  it('lists each agent from a release in parts where its part puts its program, there or still to come', async () => {
+    const newer = await published()
+    const folder = unpacked(newer)
+    const listed = shipped(folder)
+    expect(listed.map((one) => [one.id, one.installed])).toEqual([
+      ['claude-code', false],
+      ['codex', false],
+    ])
+    expect(listed.find((one) => one.id === 'codex')?.program.startsWith(join(folder, codex))).toBe(true)
+    // Its program there, it's installed, and the launch Althar gives it starts that program.
+    const program = listed.find((one) => one.id === 'claude-code')?.program ?? ''
+    tree(folder, { [program.slice(folder.length + 1)]: 'Claude Code' })
+    expect(shipped(folder).find((one) => one.id === 'claude-code')).toMatchObject({ installed: true, program })
+    // A release from before parts, not the one this runs: no agent it can say where to find.
+    expect(shipped(release('bundle-plain'))).toEqual([])
+    // The one this runs, from its own packages.
+    for (const agent of shipped()) expect(agent.installed).toBe(existsSync(agent.program))
+  })
+
+  it('brings no program for an agent it doesn’t list, and says where its release has none to download', async () => {
+    const back = fromParts()
+    try {
+      const folder = release()
+      await install(folder, out)
+      await expect(bringAgent('codex', out)).rejects.toMatchObject({ code: 'NoAgent', step: 'sign-in' })
+      said = []
+      await bringAgent('gemini', out)
+      expect(said).toEqual([])
+    } finally {
+      back()
+    }
+  })
+
+  it('says what stopped a sign-in’s download where it isn’t the download’s, in the system’s words', async () => {
+    const back = fromParts()
+    try {
+      const newer = await published()
+      const folder = unpacked(newer)
+      await install(folder, out)
+      // A file where Codex's scope folder goes: nothing can be put there.
+      mkdirSync(join(folder, 'node_modules'), { recursive: true })
+      writeFileSync(join(folder, 'node_modules', '@openai'), 'in the way')
+      const stopped: unknown = await bringAgent('codex', out, newer.fetcher).catch((error: unknown) => error)
+      expect(['ENOTDIR', 'EEXIST']).toContain((stopped as { code?: string }).code)
+      // Nothing of it stays.
+      expect(readdirSync(join(data, 'althar-worker-program')).filter((name) => name.startsWith('.'))).toEqual([])
+    } finally {
+      back()
+    }
+  })
+
+  it('removes a release it couldn’t make whole as it installs it, and never the one the worker runs', async () => {
+    const newer = await published()
+    const broken = () => {
+      const folder = unpacked(newer)
+      // What sits where a part goes holds a link: it can't be checked, so the install stops there.
+      mkdirSync(join(folder, codex), { recursive: true })
+      symlinkSync('/etc/passwd', join(folder, codex, 'escape'))
+      return folder
+    }
+    const folder = broken()
+    await expect(install(folder, out)).rejects.toMatchObject({ code: 'ReleaseRejected', step: 'get' })
+    expect(existsSync(folder)).toBe(false)
+    const running = broken()
+    symlinkSync(running, join(data, 'althar-worker-program', 'current'))
+    expect(await workerMain(['install', '--program', running], out)).toBe(1)
+    expect(said.at(-1)).toMatchObject({ step: 'get', state: 'failed', code: 'ReleaseRejected' })
+    expect(existsSync(join(running, 'althar-worker'))).toBe(true)
   })
 })
