@@ -632,8 +632,10 @@ export const SetAndDefaultEffort: Story = {
   ),
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('Extra high')).toBeVisible()
-    await expect(c.getByText('Medium')).toBeVisible()
+    // What the rows say, not the pickers lying over them, which name the effort too.
+    const row = { ignore: 'button, button *' }
+    await expect(c.getByText('Extra high', row)).toBeVisible()
+    await expect(c.getByText('Medium', row)).toHaveTextContent('Medium by default')
   },
 }
 export const SetAndDefaultEffortDark: Story = { ...SetAndDefaultEffort, globals: { theme: 'dark' } }
