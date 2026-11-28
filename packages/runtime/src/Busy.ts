@@ -79,6 +79,16 @@ import { PressureAdmission } from './resourcePressure'
  * one is free, else the one beyond it; past that it waits as any task does,
  * for either. Only tasks planned small stand before it for that place. A
  * card counts it as any work beyond the number: "4 of 4 busy, and 1 more".
+ *
+ * A task whose accepted plan placed it on one of the home's workers runs its
+ * lead there, and its lead's helpers with it: they take none of this
+ * computer's places, and neither the number nor this computer's memory or CPU
+ * holds them back. A worker runs one task at a time (its agent stream holds
+ * one run), so that is what limits them instead: a task's lead waits while
+ * another task's agent is at work on its worker, or the worker still holds
+ * another task's workspace, and says it waits for that worker
+ * (`waitsForWorker`); what waits for the same worker goes in Up next's order.
+ * Its reviewer runs on the home and takes a place here as any does.
  */
 
 /** The settings key the person's own number is kept under; none is kept for the default. */
@@ -142,6 +152,8 @@ export interface Holder extends Agent {
   /** Its step and turns are done: what it left running, which is at work, is what keeps its place. */
   readonly kept: boolean
   readonly reason: 'starting' | 'turn' | 'background'
+  /** The home's worker it runs on, by id, which it holds rather than a place here; none on this computer. */
+  readonly workerId?: string
 }
 
 /** How many of a task's helpers are at work at once (ADR-087); more wait for a place, up to ten (Helpers.ts). */
@@ -235,7 +247,10 @@ export class Busy extends Context.Service<
     readonly atOnce: Effect.Effect<AtOnce, SqlError.SqlError>
     /** Sets the person's own number, or, null, goes back to the default. It takes effect at once: what waits starts if there is room. */
     set(count: number | null): Effect.Effect<void, SqlError.SqlError>
-    /** How many agents are at work now, and how many may be. */
+    /**
+     * How many agents are at work now on this computer, and how many may be. `holders` are every agent at work, those on
+     * the home's workers too, each saying which (`workerId`); `busy` counts only this computer's.
+     */
     readonly now: Effect.Effect<
       {
         readonly busy: number
@@ -256,6 +271,11 @@ export class Busy extends Context.Service<
      * memory or CPU lets fewer agents work (`PressureAdmission`). As the queue was last looked at; none while all may work.
      */
     readonly held: Effect.Effect<ReadonlyMap<string, PlacesWhy>>
+    /**
+     * The tasks whose leads wait for the home's worker their plans placed them on, each with that worker's id: it runs
+     * another task now. As the queue was last looked at.
+     */
+    readonly waitsForWorker: Effect.Effect<ReadonlyMap<string, string>>
     /**
      * Starts a task's work that waits for a place now, as the person's own start, which never waits (ADR-037): their Start
      * anyway on a task held back. False, and nothing changes, where nothing of the task waits.
@@ -316,7 +336,8 @@ export class Busy extends Context.Service<
       const sessions = yield* Sessions
       const live = yield* Live
       const connectivity = yield* Connectivity
-      const options = (yield* RuntimeConfig).busy ?? {}
+      const config = yield* RuntimeConfig
+      const options = config.busy ?? {}
       const pressure = new PressureAdmission()
       const every = options.every ?? Duration.seconds(5)
       const sampleEvery = options.sample ?? Duration.seconds(2)
@@ -346,6 +367,79 @@ export class Busy extends Context.Service<
       /** The most at work that leaves room for an agent: the number, and for a small task's lead the quick lane beyond it. */
       const roomUpTo = (most: number, agent: Agent, small: ReadonlySet<string>) =>
         agent.review !== true && agent.helper === undefined && small.has(agent.taskId) ? most + quickLane : most
+      /**
+       * The home's worker each of these tasks' accepted plans placed it on, by task; a task on this computer isn't in it.
+       * None where it can't be read, so each waits for a place here as it would.
+       */
+      const placedOf = (taskIds: Iterable<string>) => {
+        const ids = [...new Set(taskIds)]
+        return ids.length === 0
+          ? Effect.succeed(new Map<string, string>() as ReadonlyMap<string, string>)
+          : sql<{ taskId: string; workerId: string | null }>`
+              SELECT k.id AS task_id, (
+                SELECT json_extract(tp.parameters, '$.workerId') FROM task_plans tp WHERE tp.task_id = k.id
+                  AND tp.state = 'accepted' ORDER BY tp.decided_at DESC, tp.rowid DESC LIMIT 1
+              ) AS worker_id
+              FROM tasks k WHERE k.id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`.pipe(
+              Effect.map(
+                (rows) =>
+                  new Map(rows.flatMap((row) => (row.workerId === null ? [] : [[row.taskId, row.workerId] as const]))) as ReadonlyMap<
+                    string,
+                    string
+                  >,
+              ),
+              Effect.catchCause((cause) =>
+                Effect.as(
+                  Effect.logWarning('Could not read which tasks run on workers', cause),
+                  new Map<string, string>() as ReadonlyMap<string, string>,
+                ),
+              ),
+            )
+      }
+      /** The worker an agent runs on: a task's lead, and its lead's helpers, where its plan placed it; its reviewer, here. */
+      const workerOf = (agent: Agent, placed: ReadonlyMap<string, string>) => (agent.review === true ? undefined : placed.get(agent.taskId))
+      /** How many of the agents at work are on this computer: those on the home's workers take none of its places. */
+      const here = (at: ReadonlySet<string>, placed: ReadonlyMap<string, string>) =>
+        [...at].filter((key) => workerOf(agentOf(key), placed) === undefined).length
+      /**
+       * The task each of the home's workers holds the workspace of, by worker, as the worker says: it runs one task at a
+       * time, and stays that task's until its run ends, between turns too. None where it can't be read.
+       */
+      const occupied = Effect.gen(function* () {
+        const held = (config.workers?.enrolled?.() ?? []).flatMap((worker) =>
+          worker.busy && worker.workspaceId !== undefined ? [[worker.workerId, worker.workspaceId] as const] : [],
+        )
+        if (held.length === 0) return new Map<string, string>() as ReadonlyMap<string, string>
+        const rows = yield* sql<{ id: string; taskId: string }>`
+          SELECT id, task_id FROM workspaces WHERE id IN (SELECT value FROM json_each(${JSON.stringify(held.map(([, id]) => id))}))`
+        const taskOf = new Map(rows.map((row) => [row.id, row.taskId]))
+        return new Map(
+          held.flatMap(([workerId, workspaceId]) => {
+            const taskId = taskOf.get(workspaceId)
+            return taskId === undefined ? [] : [[workerId, taskId] as const]
+          }),
+        ) as ReadonlyMap<string, string>
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.as(
+            Effect.logWarning('Could not read what the home’s workers run', cause),
+            new Map<string, string>() as ReadonlyMap<string, string>,
+          ),
+        ),
+      )
+      /** Whether a worker runs another task than this one: one of its agents is at work there, or the worker holds its workspace. */
+      const workerTaken = (
+        workerId: string,
+        taskId: string,
+        at: ReadonlySet<string>,
+        placed: ReadonlyMap<string, string>,
+        held: ReadonlyMap<string, string>,
+      ) =>
+        [...at].some((key) => {
+          const one = agentOf(key)
+          return one.taskId !== taskId && workerOf(one, placed) === workerId
+        }) ||
+        (held.has(workerId) && held.get(workerId) !== taskId)
       /** The tasks automations' runs started that are under way; none where they can't be read, so nothing waits for that. */
       const automated = provide(automatedTasks).pipe(
         Effect.catchCause((cause) =>
@@ -414,6 +508,8 @@ export class Busy extends Context.Service<
       const anyway = new Set<string>()
       /* The tasks held back as the queue was last looked at, each with why (`held`). */
       let heldBack: ReadonlyMap<string, PlacesWhy> = new Map()
+      /* The tasks whose leads waited for their worker as the queue was last looked at, each with that worker (`waitsForWorker`). */
+      let forWorker: ReadonlyMap<string, string> = new Map()
       /*
        * What each thread's left running used of the CPU when last read, by thread: the agent's process (what it
        * started is part of its tree), each process in the tree with its CPU time then, when, when it last showed real
@@ -614,8 +710,24 @@ export class Busy extends Context.Service<
           placed.add(holder.taskId)
           return true
         })
-        return { at: new Set(held.map((holder) => keyOf(holder.taskId, holder.review, holder.helper))), holders: held }
+        // Where each runs: on the home's worker its task's plan placed it on, or here.
+        const on = yield* placedOf(held.map((holder) => holder.taskId))
+        return {
+          at: new Set(held.map((holder) => keyOf(holder.taskId, holder.review, holder.helper))),
+          holders: held.map((holder): Holder => {
+            const workerId = workerOf(holder, on)
+            return workerId === undefined ? holder : { ...holder, workerId }
+          }),
+          placed: on,
+        }
       })
+
+      /** Where the agents at work and those that wait run: the home's worker each task's plan placed it on, or here. */
+      const placedWith = (work: { readonly placed: ReadonlyMap<string, string> }, waiters: ReadonlyArray<Agent>) =>
+        Effect.map(
+          placedOf(waiters.map((waiter) => waiter.taskId).filter((taskId) => !work.placed.has(taskId))),
+          (more) => new Map([...work.placed, ...more]) as ReadonlyMap<string, string>,
+        )
 
       /** The place a task holds only by what its agents left running, which its next work takes; undefined where it holds none so. */
       const keptPlace = (taskId: string, holders: ReadonlyArray<Holder>) => {
@@ -770,10 +882,15 @@ export class Busy extends Context.Service<
        */
       const roomFor = (
         agent: Agent,
-        { at, holders }: { readonly at: ReadonlySet<string>; readonly holders: ReadonlyArray<Holder> },
+        work: {
+          readonly at: ReadonlySet<string>
+          readonly holders: ReadonlyArray<Holder>
+          readonly placed: ReadonlyMap<string, string>
+        },
         asked: Order,
       ) =>
         Effect.gen(function* () {
+          const { at, holders } = work
           if (chatting(agent, yield* asides)) return true
           const key = keyOf(agent.taskId, agent.review, agent.helper)
           const tasks = yield* automated
@@ -784,28 +901,43 @@ export class Busy extends Context.Service<
           // A task's helpers, or automations' runs, as many at work as may be: it waits its turn, whatever is free.
           if (helpersFull(agent, at)) return false
           if (agent.helper === undefined && keptPlace(agent.taskId, holders) !== undefined) return true
-          const most = yield* admission
-          // Every place of the number taken, only a small task's lead has room, in the quick lane beyond it.
-          const beyond = at.size >= most
-          if (beyond && at.size >= roomUpTo(most, agent, yield* smallOf([agent.taskId]))) return false
           if (automationsFull(order, at, tasks)) return false
-          // Work waiting for a place of its own, standing where this does or before it, goes first; what waits on an agent at
-          // work, or is on its way, takes none, nor what its kind's limit holds back. In the quick lane, only what could take its
-          // place stands before it. This stands after all else of its rank, unless the person put it somewhere in Up next: then
-          // it stands there.
+          const others = (yield* everything).filter((one) => waiterKey(one) !== key)
+          const placed = yield* placedWith(work, [agent, ...others])
+          // This stands after all else of its rank, unless the person put it somewhere in Up next: then it stands there.
           const asking: Waiter = { ...agent, order: asked, since: '\uffff', start: Effect.void }
-          const queue = yield* rank([...(yield* everything).filter((one) => waiterKey(one) !== key), asking])
+          const standing = (queue: ReadonlyArray<Ranked>) => queue.find((one) => one.waiter === asking)!
+          // Waiting for nothing of this computer's, what may stand before it is what waits for its worker.
+          const before = (one: Ranked, mine: Ranked) =>
+            waiterKey(one.waiter) !== key &&
+            !at.has(waiterKey(one.waiter)) &&
+            ahead(one, mine) <= 0 &&
+            !helpersFull(one.waiter, at) &&
+            !automationsFull(one.order, at, tasks)
+          const worker = workerOf(agent, placed)
+          if (worker !== undefined) {
+            // On the home's worker its plan placed it on: none of this computer's places, nor its memory or CPU, holds it, only
+            // its worker running another task, and the work that waits for that worker before it.
+            if (workerTaken(worker, agent.taskId, at, placed, yield* occupied)) return false
+            const queue = yield* rank([...others, asking])
+            const mine = standing(queue)
+            return !queue.some((one) => one.waiter.taskId !== agent.taskId && workerOf(one.waiter, placed) === worker && before(one, mine))
+          }
+          const most = yield* admission
+          const busy = here(at, placed)
+          // Every place of the number taken, only a small task's lead has room, in the quick lane beyond it.
+          const beyond = busy >= most
+          if (beyond && busy >= roomUpTo(most, agent, yield* smallOf([agent.taskId]))) return false
+          // Work waiting for a place of its own here, standing where this does or before it, goes first; what waits on an
+          // agent at work, or is on its way, takes none, nor what its kind's limit holds back, nor what runs on a worker. In the
+          // quick lane, only what could take its place stands before it.
+          const queue = yield* rank([...others, asking])
           const small = beyond ? yield* smallOf(queue.map(({ waiter }) => waiter.taskId)) : new Set<string>()
           // Ranked with the rest, it is among them.
-          const mine = queue.find((one) => one.waiter === asking)!
+          const mine = standing(queue)
           return !queue.some(
             (one) =>
-              waiterKey(one.waiter) !== key &&
-              !at.has(waiterKey(one.waiter)) &&
-              ahead(one, mine) <= 0 &&
-              !helpersFull(one.waiter, at) &&
-              !automationsFull(one.order, at, tasks) &&
-              (!beyond || roomUpTo(most, one.waiter, small) > most),
+              workerOf(one.waiter, placed) === undefined && before(one, mine) && (!beyond || roomUpTo(most, one.waiter, small) > most),
           )
         })
 
@@ -831,23 +963,34 @@ export class Busy extends Context.Service<
           // A failed source may hide waiting work. Keep polling even if all the readable sources are empty.
           if (queue.length === 0) {
             heldBack = new Map()
+            forWorker = new Map()
             anyway.clear()
             return read.failed
           }
-          const { at: busy, holders } = yield* atWork
+          const work = yield* atWork
+          const { at: busy, holders } = work
+          const on = yield* placedWith(
+            work,
+            queue.map(({ waiter }) => waiter),
+          )
+          // What the home's workers run, read only where something waits for one.
+          const onWorkers = queue.some(({ waiter }) => workerOf(waiter, on) !== undefined)
+            ? yield* occupied
+            : (new Map() as ReadonlyMap<string, string>)
           const settings = yield* atOnce
           const most = capacity(settings)
           const tasks = yield* automated
           const online = yield* connectivity.online
           const scratch = yield* asides
           // Which of what waits is planned small, read only where every place of the number may be taken: those have the quick lane.
-          const small = busy.size + queue.length > most ? yield* smallOf(queue.map(({ waiter }) => waiter.taskId)) : new Set<string>()
+          const small = here(busy, on) + queue.length > most ? yield* smallOf(queue.map(({ waiter }) => waiter.taskId)) : new Set<string>()
           const left: Array<string> = []
           // The tasks whose place kept by what they left running is taken in this look: by one of their work only.
           const taken = new Set<string>()
           // Fewer may work for now than the person's number: what would have a place with it is held back, and says why.
           const why = pressure.why(settings.count)
           const held = new Map<string, PlacesWhy>()
+          const waitsOn = new Map<string, string>()
           // Started anyway, and no longer waiting (stopped meanwhile): nothing of it stands as the person's any more.
           for (const taskId of anyway) if (!queue.some(({ waiter }) => waiter.taskId === taskId)) anyway.delete(taskId)
           for (const { waiter, order, placed } of queue) {
@@ -868,20 +1011,24 @@ export class Busy extends Context.Service<
             const kept = taken.has(waiter.taskId) ? undefined : keptPlace(waiter.taskId, holders)
             // Owed its task's place, which its agent has freed since: it takes that place, though others hold every one.
             const back = owed.has(waiter.taskId) && !holders.some((holder) => holder.taskId === waiter.taskId)
+            // On the home's worker its plan placed it on, it takes none of the places here: only that worker running another task
+            // keeps it waiting, never this computer's number, memory or CPU.
+            const worker = workerOf(waiter, on)
+            const full =
+              worker === undefined
+                ? here(busy, on) >= roomUpTo(most, waiter, small)
+                : workerTaken(worker, waiter.taskId, busy, on, onWorkers)
             // Its task's own place, kept or owed, is no new one: an automation's run takes it beyond how many may be at work. A new
             // place it takes only while fewer automations than it may have are at work, wherever the person put it in Up next.
-            if (
-              order !== 'person' &&
-              !busy.has(key) &&
-              kept === undefined &&
-              !back &&
-              (busy.size >= roomUpTo(most, waiter, small) || automationsFull(order, busy, tasks))
-            ) {
+            if (order !== 'person' && !busy.has(key) && kept === undefined && !back && (full || automationsFull(order, busy, tasks))) {
+              if (worker !== undefined) {
+                if (full) waitsOn.set(waiter.taskId, worker)
+              }
               // Kept out only by the number lowered for now: one of the places beyond it, as the person's number has them.
-              if (
+              else if (
                 why !== null &&
                 !automationsFull(order, busy, tasks) &&
-                busy.size + held.size < roomUpTo(settings.count, waiter, small) &&
+                here(busy, on) + held.size < roomUpTo(settings.count, waiter, small) &&
                 !held.has(waiter.taskId)
               )
                 held.set(waiter.taskId, why)
@@ -923,9 +1070,10 @@ export class Busy extends Context.Service<
           for (const taskId of owed) if (!waits.has(taskId)) owed.delete(taskId)
           for (const taskId of waits) if (holders.some((holder) => holder.taskId === taskId)) owed.add(taskId)
           heldBack = held
+          forWorker = waitsOn
           // Who holds the places, and whether by what they left running, is on the cards too, as is each one's place in Up next
-          // and whether it is held back: read again when any changes.
-          const shown = `${[...held].join(',')} ${holders
+          // and whether it is held back or waits for its worker: read again when any changes.
+          const shown = `${[...held].join(',')} ${[...waitsOn].join(',')} ${holders
             .map((holder) => `${keyOf(holder.taskId, holder.review, holder.helper)} ${holder.reason} ${holder.threadId ?? ''}`)
             .toSorted()
             .join(',')} ${most}/${settings.count} ${online} ${queue.map(({ waiter }) => waiterKey(waiter)).join(',')}`
@@ -1261,36 +1409,30 @@ export class Busy extends Context.Service<
         atOnce,
         set,
         now: Effect.gen(function* () {
-          const { at, holders } = yield* atWork
+          const { at, holders, placed } = yield* atWork
           const settings = yield* atOnce
-          return { busy: at.size, atOnce: capacity(settings), configured: settings.count, offline: !(yield* connectivity.online), holders }
+          return {
+            busy: here(at, placed),
+            atOnce: capacity(settings),
+            configured: settings.count,
+            offline: !(yield* connectivity.online),
+            holders,
+          }
         }),
         places: Effect.gen(function* () {
-          const { at, holders } = yield* atWork
+          const { at, holders, placed } = yield* atWork
           const settings = yield* atOnce
           const waiters = yield* waiting
-          // Agents at once counts every agent the home starts, wherever it runs: a lead placed on a worker by its task's
-          // accepted plan, and its helpers there with it, run on that worker; reviews run on the home.
-          const placed = [...new Set(holders.flatMap((holder) => (holder.review ? [] : [holder.taskId])))]
-          const remote =
-            placed.length === 0
-              ? new Set<string>()
-              : new Set(
-                  (yield* sql<{ taskId: string }>`
-                    SELECT k.id AS task_id FROM tasks k WHERE k.id IN ${sql.in(placed)} AND (
-                      SELECT json_extract(tp.parameters, '$.workerId') FROM task_plans tp WHERE tp.task_id = k.id
-                        AND tp.state = 'accepted' ORDER BY tp.decided_at DESC, tp.rowid DESC LIMIT 1
-                    ) IS NOT NULL`.pipe(
-                    Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read which agents run on workers', cause), [])),
-                  )).map((row) => row.taskId),
-                )
+          // Agents at once counts the agents at work on this computer: a lead placed on a worker by its task's accepted plan,
+          // and its helpers there with it, run on that worker and take none of its places, so they are counted apart; its
+          // reviews run here.
           return {
-            busy: at.size,
+            busy: here(at, placed),
             configured: settings.count,
             atOnce: capacity(settings),
             why: pressure.why(settings.count),
             waiting: new Set(waiters.map(({ waiter }) => waiter.taskId)).size,
-            onWorkers: holders.filter((holder) => !holder.review && remote.has(holder.taskId)).length,
+            onWorkers: holders.filter((holder) => holder.workerId !== undefined).length,
           }
         }),
         order: Effect.map(waiting, (all) => all.map(({ waiter, line }) => ({ taskId: waiter.taskId, review: waiter.review, line }))),
@@ -1316,6 +1458,7 @@ export class Busy extends Context.Service<
             ),
           ),
         held: Effect.sync(() => heldBack),
+        waitsForWorker: Effect.sync(() => forWorker),
         startNow: (taskId) =>
           Effect.gen(function* () {
             if (!(yield* everything).some((waiter) => waiter.taskId === taskId)) return false

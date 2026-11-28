@@ -2821,6 +2821,11 @@ export const Queued = Schema.Struct({
    * fewer agents work (`atOnce` < `configured`). It starts as that frees up, or at once where the person starts it anyway.
    */
   held: Schema.optional(PlacesWhy),
+  /**
+   * Waits for the home's worker its accepted plan placed it on, by name: the worker runs one task at a time, and runs
+   * another now. Nothing of this computer's holds it, so `busy` and `holders` are that worker's.
+   */
+  worker: Schema.optional(Schema.String),
 })
 export const WorkPlaces = Schema.Struct({
   ...Queued.fields,
@@ -2836,8 +2841,8 @@ export type Queued = typeof Queued.Type
  * load popover and the Agents at once slider: how many are at work, the
  * person's number (or the default), how many may work for now, fewer while
  * the home's computer is under load, and why, and how many tasks wait for
- * one. The number counts every agent the home starts, wherever it runs:
- * `onWorkers` says how many of those at work run on its workers.
+ * one. The number counts the agents at work on the home's own computer: those
+ * on its workers take none of its places, and `onWorkers` counts them apart.
  */
 export const Places = Schema.Struct({
   busy: Schema.Int,
@@ -2846,7 +2851,7 @@ export const Places = Schema.Struct({
   /** Null while as many may work as the number says. */
   why: Schema.NullOr(PlacesWhy),
   waiting: Schema.Int,
-  /** Of `busy`, those on the home's workers rather than its own computer; none where an older home doesn't say. */
+  /** Besides `busy`, the agents at work on the home's workers; none where an older home doesn't say (it counted them in `busy`). */
   onWorkers: Schema.optionalKey(Schema.Int),
 })
 export type Places = typeof Places.Type

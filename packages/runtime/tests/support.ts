@@ -427,6 +427,8 @@ export const runtime = (
     readonly localEvery?: Duration.Duration
     /** Told each look for where something an agent left running answers from its port, to say what a test saw. */
     readonly serving?: RuntimeOptions['serving']
+    /** The home's workers, where a test places work on one; none unless it says. */
+    readonly workers?: RuntimeOptions['workers']
   } = {},
 ) =>
   Runtime.layer({
@@ -475,6 +477,7 @@ export const runtime = (
     ...(more.computer === undefined ? {} : { computer: more.computer }),
     ...(more.computerEnded === undefined ? {} : { computerEnded: more.computerEnded }),
     ...(more.skills === undefined ? {} : { skills: more.skills }),
+    ...(more.workers === undefined ? {} : { workers: more.workers }),
     busy: { machine: ROOMY, pressure: false, ...more.busy },
     ...(more.automations === undefined ? {} : { automations: more.automations }),
     ...(more.zone === undefined ? {} : { zone: more.zone }),

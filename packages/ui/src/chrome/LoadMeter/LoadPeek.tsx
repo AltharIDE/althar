@@ -80,7 +80,7 @@ export const loadPeekText: LoadPeekText = {
   agentsFigure: (busy, configured) => `${busy} of ${configured}`,
   fewer: fewerWords,
   waiting: (n) => (n === 1 ? '1 task waiting' : `${n} tasks waiting`),
-  onWorkers: (n) => (n === 1 ? '1 of them on a worker' : `${n} of them on workers`),
+  onWorkers: (n) => (n === 1 ? '1 more on a worker' : `${n} more on workers`),
   running: 'Running',
   runningOn: (machine) => `Running on ${machine}`,
   workers: 'Workers',
@@ -152,7 +152,7 @@ function Figure({ name, figure, total, ours, work }: { name: string; figure: str
 
 /**
  * The agents beside CPU and memory, in their form: how many work of the number, all of them Althar's; under it, how many
- * of them run on the home's workers (the number counts them all), fewer for now and why, and what waits.
+ * more run on the home's workers (the number counts only this computer's), fewer for now and why, and what waits.
  */
 function Agents({ agents, t }: { agents: LoadAgents; t: LoadPeekText }) {
   const share = agents.busy / Math.max(1, agents.configured)
