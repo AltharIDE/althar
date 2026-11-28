@@ -279,12 +279,13 @@ export const ExternalKind = Schema.Literals(['issue', 'change', 'review'])
 export type ExternalKind = typeof ExternalKind.Type
 
 /**
- * Where an issue the coordinator drafted stands: waiting on the person, being
- * filed, filed, not filed for a reason the tracker gave, perhaps filed (its
- * answer was lost, so the tracker is looked at before filing it again), or
- * discarded.
+ * Where an issue the coordinator drafted stands: waiting on the person,
+ * filed by them and waiting its turn on its tracker's account or for the
+ * tracker's limit to reset (nothing of it sent yet), being filed, filed, not
+ * filed for a reason the tracker gave, perhaps filed (its answer was lost,
+ * so the tracker is looked at before filing it again), or discarded.
  */
-export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
+export const IssueDraftState = Schema.Literals(['pending', 'waiting', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
 export type IssueDraftState = typeof IssueDraftState.Type
 
 /**

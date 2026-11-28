@@ -51,6 +51,22 @@ describe('IssueDraft', () => {
     expect(screen.getAllByRole('button')).toHaveLength(1)
   })
 
+  it('says it waits for its tracker, and can only be thrown away meanwhile', () => {
+    const onFile = vi.fn()
+    const onDiscard = vi.fn()
+    const { rerender } = render(
+      <IssueDraft {...pending} state={IssueDraftState.Waiting} onFile={onFile} onChange={vi.fn()} onDiscard={onDiscard} />,
+    )
+    expect(screen.getByText('Waiting its turn on Linear…')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: issueDraftText.file }))
+    expect(onFile).not.toHaveBeenCalled()
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual([issueDraftText.discard, issueDraftText.file])
+    fireEvent.click(screen.getByRole('button', { name: issueDraftText.discard }))
+    expect(onDiscard).toHaveBeenCalledTimes(1)
+    rerender(<IssueDraft {...pending} state={IssueDraftState.Waiting} waitingUntil="14:05" onFile={onFile} onDiscard={onDiscard} />)
+    expect(screen.getByText('Linear asked Althar to wait. Filing at 14:05…')).toBeInTheDocument()
+  })
+
   it('edits: an empty title is said and focused, and a save reads the labels as a list', () => {
     const onChange = vi.fn()
     render(<IssueDraft {...pending} onChange={onChange} />)

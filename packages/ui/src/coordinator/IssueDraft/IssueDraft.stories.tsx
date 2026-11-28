@@ -93,6 +93,18 @@ export const Filing: Story = {
   },
 }
 
+/** Filed, and waiting for the time its tracker said: it can still be thrown away, which sends nothing, but not changed. */
+export const Waiting: Story = {
+  args: { state: IssueDraftState.Waiting, waitingUntil: '14:05' },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Linear asked Althar to wait. Filing at 14:05…')).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'File issue' })).toHaveAttribute('aria-busy', 'true')
+    await expect(c.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Discard' })).toBeInTheDocument()
+  },
+}
+
 /** Perhaps filed: the tracker's answer was lost, so the person looks there before filing it again. */
 export const Uncertain: Story = {
   args: {
@@ -353,6 +365,8 @@ export const AllStates: Story = {
         { state: 'hover', node: <IssueDraft {...args} {...DRAFT_JIRA} /> },
         { state: 'focus', node: <IssueDraft {...args} {...DRAFT_JIRA} /> },
         { state: 'pressed', node: <IssueDraft {...args} {...DRAFT_JIRA} /> },
+        { state: 'waiting its turn', node: <IssueDraft {...args} state={IssueDraftState.Waiting} /> },
+        { state: 'waiting until', node: <IssueDraft {...args} state={IssueDraftState.Waiting} waitingUntil="14:05" /> },
         { state: 'filing', node: <IssueDraft {...args} state={IssueDraftState.Filing} /> },
         {
           state: 'failed',

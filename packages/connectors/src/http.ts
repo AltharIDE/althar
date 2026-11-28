@@ -252,7 +252,14 @@ const retryAtOf = (headers: Headers, now: number): string | undefined => {
         : undefined
     if (retryAt !== undefined) return retryAt
   }
-  return quotaResetAt(headers, now) ?? isoDate(numberHeader(headers, 'x-ratelimit-requests-reset') ?? NaN)
+  // Linear's resets are times in milliseconds since the epoch: of the endpoint's own limit, of all requests, or of complexity.
+  const linearReset = numberHeader(
+    headers,
+    'x-ratelimit-endpoint-requests-reset',
+    'x-ratelimit-requests-reset',
+    'x-ratelimit-complexity-reset',
+  )
+  return quotaResetAt(headers, now) ?? (linearReset === undefined ? undefined : isoDate(linearReset))
 }
 
 /** Classifies an answer that isn't a success; `fallback` is what it says where the answer has no words of its own. */
@@ -590,7 +597,25 @@ export const makeHttp = (options: HttpOptions): Http => {
           answer.body,
         ).pipe(Effect.catch(() => Effect.flatMap(success(answer), () => Effect.fail(invalid('The answer was not GraphQL')))))
         const first = envelope.errors?.[0]
-        if (first !== undefined) return yield* Effect.fail(graphqlFailure(product, first, answer.status))
+        if (first !== undefined) {
+          // A partial mutation may already have performed its write. Never describe it as a refusal.
+          if (envelope.data != null && /\bmutation\b/.test(query))
+            return yield* Effect.fail(invalid('The mutation returned partial data with errors'))
+          const failed = graphqlFailure(product, first, answer.status)
+          if (failed.reason === 'rate_limited') {
+            const retryAt = retryAtOf(answer.headers, yield* Clock.currentTimeMillis)
+            return yield* Effect.fail(
+              new ConnectorFailed({
+                product,
+                reason: failed.reason,
+                message: failed.message,
+                status: answer.status,
+                ...(retryAt === undefined ? {} : { retryAt }),
+              }),
+            )
+          }
+          return yield* Effect.fail(failed)
+        }
         yield* success(answer)
         return yield* Schema.decodeUnknownEffect(schema)(envelope.data ?? null).pipe(Effect.mapError((error) => invalid(error.message)))
       }),
