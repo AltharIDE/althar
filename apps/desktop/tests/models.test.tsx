@@ -12,6 +12,7 @@ import { useModelNames } from '../src/renderer/shared/modelNames'
 import {
   catalogOf,
   defaultEffortOf,
+  startEffortOf,
   choiceOf,
   defaultPins,
   effortId,
@@ -297,6 +298,19 @@ describe('the models every agent offers', () => {
     expect(modelName(bothRoutes, 'opencode', 'opencode-go/deepseek-v4.1-flash')).toBe('DeepSeek Go')
   })
 
+  it('pass over a default effort the model no longer offers, as the runtime does when it starts', () => {
+    const gone = catalogOf(
+      models.map((offered) => (offered.agentId === 'codex' ? { ...offered, defaults: [{ model: 'gpt-5.2', effort: 'max' }] } : offered)),
+      signedIn,
+    )
+    expect(
+      defaultEffortOf(
+        gone,
+        gone.models.find((model) => model.id === 'codex:gpt-5.2')!,
+      ),
+    ).toBe('Medium')
+  })
+
   it('carry the person’s default effort for each model, or else the one it starts at', () => {
     const kept = catalogOf(
       models.map((offered) =>
@@ -321,6 +335,8 @@ describe('the models every agent offers', () => {
     )
     const on = (id: string) => seen.models.find((model) => model.id === id)!
     expect([defaultEffortOf(seen, on('codex:gpt-5.2-codex')), defaultEffortOf(seen, on('codex:gpt-5.2'))]).toEqual(['High', null])
+    // That is no start effort: it may be what its latest session was asked, and a new one isn't started on it.
+    expect(startEffortOf(seen, on('codex:gpt-5.2-codex'))).toBeNull()
   })
 })
 

@@ -21,7 +21,7 @@ import { useServices } from '../../data/services'
 import { openBlockers, standsOf } from '../../shared/blockers'
 import { factsOf, readyText, readyWordOf } from '../../shared/standing'
 import { externalWaitWords, holdersWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
-import { type NameEffort, type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
+import { type NameModel, type NameStepEfforts, useEffortNames, useModelNames, useStepEfforts } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
 import { localText } from '../../shared/local'
 import { ModelChoice } from '../../shared/ModelChoice'
@@ -149,16 +149,23 @@ const fromOf = (card: TaskCardContent): IssueRefProps | undefined => {
 /**
  * The plan's steps as the kit shows them, by model; the agent's id rides on
  * the model's runtime. A review of someone else's pull request has one, its
- * lead, which reviews.
+ * lead, which reviews. A lead on a worker names only an effort set for it; the
+ * review runs on the home.
  */
-const launchSteps = (plan: Plan, named: NameModel, effortOf: NameEffort, reviews: boolean): ReadonlyArray<LaunchStep> =>
+const launchSteps = (
+  plan: Plan,
+  named: NameModel,
+  effortsOf: NameStepEfforts,
+  reviews: boolean,
+  leadElsewhere = false,
+): ReadonlyArray<LaunchStep> =>
   plan.steps.map((step) => ({
     id: step.key,
     label: text.label[reviews ? 'review' : step.key],
     agents: [named(step.agentId, step.model)],
     optional: step.key === 'review',
     skipped: step.skipped,
-    effort: effortOf(step.agentId, step.model, step.effort ?? null),
+    ...effortsOf(step.agentId, step.model, step.effort ?? null, step.key === 'implement' && leadElsewhere),
   }))
 
 /**
@@ -205,7 +212,7 @@ function PlanCard({
 }) {
   const title = useTaskTitle(card.taskId, card.title)
   const named = useModelNames()
-  const effortOf = useEffortNames()
+  const effortsOf = useStepEfforts()
   // What it waits for (tasks wait for their blockers), a row each before its lead: one the person stops waiting for goes at once.
   const [letGo, setLetGo] = useState<ReadonlySet<string>>(new Set())
   const waitsFor = openBlockers(card)
@@ -292,6 +299,8 @@ function PlanCard({
   // On a worker, the picker offers what its agents offer there.
   const onWorker = selected === HOME || selected === ANY ? undefined : actions.workers?.find((one) => one.workerId === selected)
   const startProblem = placement?.problem
+  // Whether its lead runs on a worker: as chosen here, or, waiting to begin, as it was placed.
+  const leadElsewhere = (placeable ? selected : (plan.runsOn ?? HOME)) !== HOME
   /** Shows it held until `sent` is done, where the change makes the place chosen unable to take it. */
   const holdWhile = (holds: boolean, sent: void | Promise<unknown>, request: number) => {
     if (!holds) return
@@ -324,7 +333,7 @@ function PlanCard({
       title={title}
       {...(from === undefined ? {} : { from })}
       project={actions.project}
-      steps={launchSteps({ ...plan, steps }, named, effortOf, card.reviewing != null)}
+      steps={launchSteps({ ...plan, steps }, named, effortsOf, card.reviewing != null, leadElsewhere)}
       onStepsChange={(next) =>
         change(steps.map((step) => ({ ...step, skipped: next.find((launch) => launch.id === step.key)?.skipped ?? step.skipped })))
       }
@@ -428,7 +437,7 @@ const OPEN_SEATS: ReadonlyArray<LaunchStep> = [
 function NotBegun({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
   const title = useTaskTitle(card.taskId, card.title)
   const named = useModelNames()
-  const effortOf = useEffortNames()
+  const effortsOf = useStepEfforts()
   const [discarding, setDiscarding] = useState(false)
   const plan = card.plan
   const discarded = card.discarded === true || discarding
@@ -440,7 +449,7 @@ function NotBegun({ card, actions }: { card: TaskCardContent; actions: CardActio
       title={title}
       {...(plan?.preset === undefined ? {} : { preset: plan.preset })}
       project={actions.project}
-      steps={plan === null ? OPEN_SEATS : launchSteps(plan, named, effortOf, card.reviewing != null)}
+      steps={plan === null ? OPEN_SEATS : launchSteps(plan, named, effortsOf, card.reviewing != null)}
       picker={() => null}
       onStart={() => undefined}
       {...(plan === null ? {} : plan.end === null ? { hideEnd: true } : { end: ENDS[plan.end] })}

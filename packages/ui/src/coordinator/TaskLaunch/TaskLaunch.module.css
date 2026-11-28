@@ -256,6 +256,10 @@
 }
 .effort {
   font-weight: 400;
+  color: var(--t-2);
+}
+/* no one set it: a step dimmer, and still readable */
+.byDefault {
   color: var(--t-3);
 }
 .faint {
