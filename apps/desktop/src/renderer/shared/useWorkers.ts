@@ -213,6 +213,100 @@ export const useWorkerProjects = (): WorkerProjectsModel => {
   return { set, failed }
 }
 
+/** A worker's check run from here, by Check again: under way, what it found, or that it couldn't run. */
+export type WorkerCheckView =
+  | { readonly kind: 'checking' }
+  | { readonly kind: 'checked'; readonly sandbox: NonNullable<HomeWorker['readiness']>['sandbox'] }
+  | { readonly kind: 'failed' }
+  /** Its release ran its check without saying what it found: an older one. */
+  | { readonly kind: 'unsaid' }
+
+export const checkText = {
+  stillFails: 'Checked again: it still can’t start.',
+  failed: (name: string) => `Couldn’t check ${name} over SSH. Althar’s log says why.`,
+  unsaid: (name: string) => `${name}’s release doesn’t say what its check found. Update it, then check again.`,
+}
+
+export interface WorkerCheckModel {
+  /** Each worker checked from here, by its id: held over the home's reads until one says what it found. */
+  readonly checks: ReadonlyMap<string, WorkerCheckView>
+  readonly check: (worker: HomeWorker) => void
+  /** Lets go of each check a read of the home now says too. */
+  readonly confirmed: (workers: ReadonlyArray<HomeWorker>) => void
+}
+
+/**
+ * Check again on a worker's sandbox problem: the worker's whole check, run now over the SSH address it was set up at, as
+ * after a sign-in. What it found shows at once, over the home's reads, until the worker's next heartbeats tell its home
+ * the same: a sandbox an administrator let start clears within seconds of the press, not at the next hourly check.
+ */
+export const useWorkerCheck = (): WorkerCheckModel => {
+  const { host } = useServices()
+  const bridge = host.workers
+  const [checks, setChecks] = useState<ReadonlyMap<string, WorkerCheckView>>(new Map())
+  const check = useCallback(
+    (worker: HomeWorker) => {
+      const ssh = worker.ssh
+      if (bridge === undefined || ssh === undefined) return
+      const id = worker.workerId
+      const settle = (view: WorkerCheckView) =>
+        setChecks((before) => (before.get(id)?.kind === 'checking' ? new Map(before).set(id, view) : before))
+      setChecks((before) => new Map(before).set(id, { kind: 'checking' }))
+      bridge.check(ssh).then(
+        (found) =>
+          // A release that doesn't say its check: the home's reads stand, with why nothing changed.
+          settle(
+            found === null
+              ? { kind: 'unsaid' }
+              : {
+                  kind: 'checked',
+                  sandbox: found.starts
+                    ? { starts: true }
+                    : { starts: false, problem: found.problem, ...(found.fix === undefined ? {} : { fix: found.fix }) },
+                },
+          ),
+        () => settle({ kind: 'failed' }),
+      )
+    },
+    [bridge],
+  )
+  // A sandbox that starts now is let go once the home says so too; one that still fails keeps its line until the next press,
+  // or until the home says it starts after all.
+  const confirmed = useCallback(
+    (workers: ReadonlyArray<HomeWorker>) =>
+      setChecks((before) => {
+        const still = [...before].filter(([id, view]) => {
+          const sandbox = workers.find((one) => one.workerId === id)?.readiness?.sandbox
+          return sandbox === undefined || view.kind === 'checking' || !sandbox.starts
+        })
+        return still.length === before.size ? before : new Map(still)
+      }),
+    [],
+  )
+  return { checks, check, confirmed }
+}
+
+/** A worker as Check again found it: its sandbox, as the check said, over the home's read. */
+export const checkedWorker = (worker: HomeWorker, view: WorkerCheckView | undefined): HomeWorker =>
+  view?.kind !== 'checked' || worker.readiness === undefined
+    ? worker
+    : { ...worker, readiness: { ...worker.readiness, sandbox: view.sandbox } }
+
+/** Its problem, with Check again's press as it stands: under way, or what it found where that is no change. */
+export const checkedUnready = (
+  unready: ComputerWorker['unready'],
+  view: WorkerCheckView | undefined,
+  name: string,
+): ComputerWorker['unready'] =>
+  unready === undefined || view === undefined
+    ? unready
+    : view.kind === 'checking'
+      ? { ...unready, checking: true }
+      : {
+          ...unready,
+          note: view.kind === 'failed' ? checkText.failed(name) : view.kind === 'unsaid' ? checkText.unsaid(name) : checkText.stillFails,
+        }
+
 export interface WorkerSignInModel {
   readonly signingIn: WorkerSignInView | null
   /** Who is signed in on a worker, as a sign-in that ended here showed it, until a read of the home says so too. */

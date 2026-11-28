@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { agents, BWRAP_TRY, type AgentDefinition } from '@althar/provider-adapters'
@@ -11,6 +11,7 @@ import {
   checkSandbox,
   checkTools,
   checkWorker,
+  holding,
   linkShipped,
   offeredModels,
   readinessLines,
@@ -40,6 +41,7 @@ const machine = (given: Partial<CheckSystem> & { readonly has?: ReadonlyArray<st
     read: () => undefined,
     executable: (path) => has.includes(path),
     startAgent: async () => [],
+    now: () => 1_000,
     ...given,
   }
 }
@@ -237,7 +239,7 @@ describe('its agents, started once', () => {
     ])
     // An agent that couldn't start is said too: the home keeps work from it there, with why.
     expect(readFileSync(join(folder, 'readiness'), 'utf8')).toBe(
-      'sandbox\tstarts\nmodel\tclaude-code\topus\tClaude Opus 5.5\nagent\tclaude-code\tstarts\nagent\tcodex\tfails\tNot signed in.\n',
+      'observed\t1000\nsandbox\tstarts\nmodel\tclaude-code\topus\tClaude Opus 5.5\nagent\tclaude-code\tstarts\nagent\tcodex\tfails\tNot signed in.\n',
     )
   })
 
@@ -301,6 +303,121 @@ describe('its agents, started once', () => {
         agents: [{ id: 'codex', name: 'Codex', signedIn: true, started: false, models: [] }],
       }),
     ).toBe('sandbox\tstarts\nagent\tcodex\tfails\tIt couldn’t start.\n')
+  })
+
+  it('writes its sandbox as soon as it is seen, while an agent still starts, and keeps what the last check found of the rest', async () => {
+    const folder = temporary()
+    const file = join(folder, 'readiness')
+    writeFileSync(file, 'observed\t500\nsandbox\tfails\tNoUserNamespaces\nfix\tsudo sh -c x\ntool\tgit\t2.43.0\n')
+    let started: () => void = () => undefined
+    let seen: unknown
+    const here = machine({
+      has: [join(folder, 'bin', 'bwrap'), join(folder, 'bin', 'socat'), '/usr/bin/systemd-run'],
+      read: (path) => (existsSync(path) ? readFileSync(path, 'utf8') : undefined),
+      startAgent: () => new Promise((resolve) => (started = () => resolve([{ id: 'opus', name: 'Opus' }]))),
+    })
+    const checking = checkWorker(
+      {
+        folder,
+        current: '/r',
+        program: '/p',
+        agents: [{ id: 'claude-code', name: 'Claude Code', definition: agents['claude-code'], signedIn: true }],
+      },
+      here,
+      undefined,
+      (sandbox) => (seen = sandbox),
+    )
+    // The administrator's fix shows while Claude Code hasn't started yet: the sandbox now, the tools of the check before.
+    await expect.poll(() => seen).toEqual({ starts: true, bwrap: join(folder, 'bin', 'bwrap') })
+    expect(readFileSync(file, 'utf8')).toBe('observed\t1000\nsandbox\tstarts\ntool\tgit\t2.43.0\n')
+    started()
+    await checking
+    expect(readFileSync(file, 'utf8')).toBe('observed\t1000\nsandbox\tstarts\nmodel\tclaude-code\topus\tOpus\nagent\tclaude-code\tstarts\n')
+  })
+
+  it('never writes an older sight of its sandbox over a newer check’s, run beside it', async () => {
+    const folder = temporary()
+    const file = join(folder, 'readiness')
+    // Check again saw the sandbox start at 2000, after the fix; the check that began at the service's start saw it fail at 1000
+    // and ends only now.
+    writeFileSync(file, 'observed\t2000\nsandbox\tstarts\n')
+    const slow = machine({
+      has: [join(folder, 'bin', 'bwrap'), join(folder, 'bin', 'socat'), '/usr/bin/systemd-run', join(folder, 'bin', 'git')],
+      run: async (command) => ({ ok: command.endsWith('git'), stdout: 'git version 2.43.0', stderr: '' }),
+      read: (path) =>
+        path === '/proc/sys/kernel/apparmor_restrict_unprivileged_userns'
+          ? '1\n'
+          : existsSync(path)
+            ? readFileSync(path, 'utf8')
+            : undefined,
+    })
+    const found = await checkWorker({ folder, current: '/r', program: '/p', agents: [] }, slow)
+    expect(found.sandbox).toMatchObject({ starts: false, problem: 'NoUserNamespaces' })
+    // Its own sight stands for itself; the file keeps the newer one, with what this check found of the rest.
+    expect(readFileSync(file, 'utf8')).toBe('observed\t2000\nsandbox\tstarts\ntool\tgit\t2.43.0\n')
+    // A newer sight of its own writes over an older one.
+    writeFileSync(file, 'observed\t500\nsandbox\tstarts\n')
+    await checkWorker({ folder, current: '/r', program: '/p', agents: [] }, slow)
+    expect(readFileSync(file, 'utf8')).toMatch(/^observed\t1000\nsandbox\tfails\tNoUserNamespaces\nfix\tsudo sh -c '/u)
+  })
+
+  it('never writes an older sight over a newer one published while it was between its read and its write', async () => {
+    const folder = temporary()
+    const file = join(folder, 'readiness')
+    const has = [join(folder, 'bin', 'bwrap'), join(folder, 'bin', 'socat'), '/usr/bin/systemd-run']
+    const read = (path: string) => (existsSync(path) ? readFileSync(path, 'utf8') : undefined)
+    // The service's start: it saw the sandbox fail at 1000, read the file, and stops just before its write.
+    let paused: () => void = () => undefined
+    let reachedWrite = false
+    const older = checkWorker(
+      { folder, current: '/r', program: '/p', agents: [] },
+      machine({
+        has,
+        run: async () => ({ ok: false, stdout: '', stderr: '' }),
+        read: (path) => (path === '/proc/sys/kernel/apparmor_restrict_unprivileged_userns' ? '1\n' : read(path)),
+      }),
+      async (path, text) => {
+        reachedWrite = true
+        await new Promise<void>((resolve) => (paused = resolve))
+        writeFileSync(path, text)
+      },
+    )
+    await expect.poll(() => reachedWrite).toBe(true)
+    // Check again, after the fix: it sees the sandbox start at 2000, and waits for the older write rather than going under it.
+    let seen: unknown
+    let probed = false
+    const newer = checkWorker(
+      { folder, current: '/r', program: '/p', agents: [] },
+      machine({
+        has,
+        read,
+        now: () => 2_000,
+        run: async () => {
+          probed = true
+          return { ok: true, stdout: '', stderr: '' }
+        },
+      }),
+      undefined,
+      (sandbox) => (seen = sandbox),
+    )
+    // Its sandbox seen, it goes for the file: room for it to write under the older check, were there no lock.
+    await expect.poll(() => probed).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(seen).toBeUndefined()
+    paused()
+    await Promise.all([older, newer])
+    expect(seen).toMatchObject({ starts: true })
+    expect(readFileSync(file, 'utf8')).toBe('observed\t2000\nsandbox\tstarts\n')
+    expect(existsSync(`${file}.lock`)).toBe(false)
+  })
+
+  it('takes a lock left by a check that died once it is stale', async () => {
+    const folder = temporary()
+    const lock = join(folder, 'readiness.lock')
+    writeFileSync(lock, '')
+    utimesSync(lock, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000))
+    expect(await holding(lock, async () => 'held')).toBe('held')
+    expect(existsSync(lock)).toBe(false)
   })
 
   it('keeps tabs and new lines out of what it writes', () => {

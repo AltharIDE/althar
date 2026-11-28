@@ -469,3 +469,45 @@ it('checks a worker’s sign-ins by its whole check, so one signed in in a termi
   expect(asked).toContain('worker-check')
   expect(asked).not.toContain('worker-agents')
 })
+
+it('says a worker’s sandbox for Check again as soon as its check sees it, while its agents still start there', async () => {
+  const event = (step: string, state: string, more: Record<string, unknown> = {}) => JSON.stringify({ protocol: 1, step, state, ...more })
+  const fix = "sudo sh -c 'apparmor_parser -r /etc/apparmor.d/althar-worker-bwrap'"
+  // The check says its sandbox, then waits on an agent that hasn't started: the answer comes before the command ends.
+  let finish: () => void = () => undefined
+  const { system, log } = machine({})
+  const running: SetupSystem = {
+    ...system,
+    run: (_program, _args, options) =>
+      new Promise((resolve) => {
+        options.line?.(event('check', 'started'))
+        options.line?.(event('sandbox', 'seen', { sandbox: { starts: true } }))
+        finish = () => resolve({ code: 0, stdout: '', stderr: '' })
+      }),
+  }
+  const setups = workerSetups(running, vi.fn(), vi.fn(), vi.fn(), { log, release: vi.fn() })
+  expect(await setups.check('build@box')).toEqual({ starts: true })
+  finish()
+  // A release from before it said its sandbox early: its check's end says it.
+  const done = machine({
+    'worker-check': {
+      stdout: [
+        event('check', 'started'),
+        event('check', 'done', { sandbox: { starts: false, problem: 'NoUserNamespaces', fix }, agents: [] }),
+      ].join('\n'),
+    },
+  })
+  expect(await workerSetups(done.system, vi.fn(), vi.fn(), vi.fn(), { log: done.log, release: vi.fn() }).check('build@box')).toEqual({
+    starts: false,
+    problem: 'NoUserNamespaces',
+    fix,
+  })
+  // One that says nothing of its check: null where it ended well, a failure where it didn't.
+  const older = machine({ 'worker-check': { stdout: event('check', 'started') } })
+  expect(await workerSetups(older.system, vi.fn(), vi.fn(), vi.fn(), { log: older.log, release: vi.fn() }).check('build@box')).toBeNull()
+  const broken = machine({ 'worker-check': { code: 1, stdout: '' } })
+  await expect(
+    workerSetups(broken.system, vi.fn(), vi.fn(), vi.fn(), { log: broken.log, release: vi.fn() }).check('build@box'),
+  ).rejects.toThrow()
+  expect(broken.lines).toContainEqual(expect.objectContaining({ level: 'WARN', message: 'A worker’s check said nothing of its sandbox' }))
+})

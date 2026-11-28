@@ -119,6 +119,11 @@ export interface WorkersHost {
   readonly onSignIn: (listener: (event: WorkerSignInEvent) => void) => () => void
   /** The worker's agents and their sign-ins, by its whole check now over SSH: each signed in started once, as a task would. */
   readonly agents: (ssh: string) => Promise<ReadonlyArray<WorkerAgent>>
+  /**
+   * Whether the worker's sandbox starts, by its check run now over SSH, as Check again runs it: said as soon as the check
+   * sees it, as an administrator's fix left it. Null from a release that doesn't say it; it fails where the check couldn't run.
+   */
+  readonly check: (ssh: string) => Promise<WorkerCheck['sandbox'] | null>
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null

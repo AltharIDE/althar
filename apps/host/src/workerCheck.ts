@@ -8,8 +8,8 @@ import { BWRAP_TRY, bundledCodex, connect, type AgentDefinition, type ConfigOpti
 import { Duration, Effect } from 'effect'
 
 /*
- * A worker's check of itself (`althar-host worker check`), as its setup ends, after each sign-in, and with its hourly
- * timer: what Claude Code's and Codex's sandbox need shipped and linked where its runs find them (bubblewrap and
+ * A worker's check of itself (`althar-host worker check`), as its setup ends, after each sign-in, each time its service
+ * starts, with its hourly timer, and at the window's Check again: what Claude Code's and Codex's sandbox need shipped and linked where its runs find them (bubblewrap and
  * ripgrep from Codex's own package, socat built for the release), whether bubblewrap actually starts a namespace there,
  * and where it can't, why and the one command an administrator runs to let it; the tools on its PATH; and each
  * signed-in agent started once, as a run starts it, which says the models it offers there. What it finds is kept in
@@ -54,6 +54,8 @@ export interface CheckSystem {
     env: Readonly<Record<string, string>>,
     sandboxStarts: boolean,
   ) => Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>
+  /** The clock a check stamps when it saw its sandbox by, in ms; the computer's own unless said. */
+  readonly now?: () => number
 }
 
 /** The tools a project's files may ask for, looked for on the worker's PATH. */
@@ -249,6 +251,36 @@ export const readinessLines = (check: WorkerCheck) =>
     .map((line) => `${line}\n`)
     .join('')
 
+/** When the file says its sandbox was seen, in ms; 0 for a file from before checks said so, or none. */
+const observedOf = (text: string | undefined) => Number(/^observed\t(\d{1,16})$/mu.exec(text ?? '')?.[1] ?? 0)
+
+/** The file's lines about its sandbox (its state and the fix), and the rest (tools, models, agents). */
+const partsOf = (text: string | undefined) => {
+  const lines = (text ?? '').split('\n').filter((line) => line !== '' && !line.startsWith('observed\t'))
+  const sandbox = (line: string) => line.startsWith('sandbox\t') || line.startsWith('fix\t')
+  return {
+    sandbox: lines
+      .filter(sandbox)
+      .map((line) => `${line}\n`)
+      .join(''),
+    rest: lines
+      .filter((line) => !sandbox(line))
+      .map((line) => `${line}\n`)
+      .join(''),
+  }
+}
+
+/**
+ * What a check writes, over what the file holds: its sandbox as it saw it at `observed`, unless the file holds a newer
+ * check's (one run beside it, as the service's start and Check again may), which stands; and `rest` where it has it,
+ * else the file's own. Several checks at once each publish what they saw, and the newest sight of the sandbox wins.
+ */
+export const publishedReadiness = (kept: string | undefined, sandbox: string, observed: number, rest?: string) => {
+  const before = partsOf(kept)
+  const newer = observedOf(kept) > observed
+  return `observed\t${newer ? observedOf(kept) : observed}\n${newer ? before.sandbox : sandbox}${rest ?? before.rest}`
+}
+
 /** This computer: its programs, its files, and its agents started as the worker's runs start them. */
 export const checkHere: CheckSystem = {
   run: (command, args, options = {}) =>
@@ -313,7 +345,9 @@ const startProblem = (error: unknown) => {
 
 /**
  * The whole check: the sandbox, the tools, and each signed-in agent started once with the sandbox as it found it. Kept in
- * `readiness`, written only where it changed.
+ * `readiness`, written only where it changed: the sandbox as soon as it is seen (`sandboxSeen` hears it too), so a fix
+ * shows before the agents have started, then the whole. A slower check run beside it never writes an older sight of the
+ * sandbox over a newer one's.
  */
 export const checkWorker = async (
   input: {
@@ -328,10 +362,23 @@ export const checkWorker = async (
     }>
   },
   system: CheckSystem = checkHere,
-  write: (path: string, text: string) => Promise<unknown> = (path, text) => fs.writeFile(path, text, { mode: 0o600 }),
+  write: (path: string, text: string) => Promise<unknown> = writeAtomically,
+  sandboxSeen?: (sandbox: SandboxCheck) => void,
 ): Promise<WorkerCheck> => {
   const path = workerPath(input.folder, input.current)
+  const file = join(input.folder, 'readiness')
+  // Read, weighed and replaced under its lock: a check beside it can't write between this one's read and its write.
+  const publish = (sandbox: string, rest?: string) =>
+    holding(`${file}.lock`, async () => {
+      const kept = system.read(file)
+      const text = publishedReadiness(kept, sandbox, observed, rest)
+      if (kept !== text) await write(file, text)
+    })
   const sandbox = await checkSandbox(path, input.program, system)
+  const observed = (system.now ?? Date.now)()
+  const sandboxText = readinessLines({ sandbox, tools: [], agents: [] })
+  await publish(sandboxText)
+  sandboxSeen?.(sandbox)
   const tools = await checkTools(path, system)
   const agents: AgentCheck[] = []
   // One at a time: a small worker starts one agent's program at once, as it runs one task.
@@ -348,8 +395,43 @@ export const checkWorker = async (
     }
   }
   const check = { sandbox, tools, agents }
-  const file = join(input.folder, 'readiness')
-  const text = readinessLines(check)
-  if (system.read(file) !== text) await write(file, text)
+  await publish(sandboxText, readinessLines(check).slice(sandboxText.length))
   return check
+}
+
+/** How long a lock may stand before it is taken for one a check left as it died. */
+const STALE_LOCK = 30_000
+
+/**
+ * Runs `work` holding `lock`, a file made only where there is none, so checks in several processes (the service's start,
+ * its hourly update, Check again over SSH) read and replace readiness one at a time. One left by a check that died
+ * goes once it is older than any write takes.
+ */
+export const holding = async <A>(lock: string, work: () => Promise<A>): Promise<A> => {
+  for (;;) {
+    try {
+      await (await fs.open(lock, 'wx', 0o600)).close()
+      break
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error
+      const made = await fs.stat(lock).then(
+        (stat) => stat.mtimeMs,
+        () => undefined,
+      )
+      if (made !== undefined && Date.now() - made > STALE_LOCK) await fs.rm(lock, { force: true })
+      else await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+  }
+  try {
+    return await work()
+  } finally {
+    await fs.rm(lock, { force: true })
+  }
+}
+
+/** Written beside and renamed over, so the worker never reads half of it. */
+const writeAtomically = async (path: string, text: string) => {
+  const next = `${path}.${process.pid}`
+  await fs.writeFile(next, text, { mode: 0o600 })
+  await fs.rename(next, path)
 }

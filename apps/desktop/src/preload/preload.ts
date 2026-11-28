@@ -209,6 +209,7 @@ contextBridge.exposeInMainWorld('althar', {
       }
     },
     agents: (ssh: string) => ipcRenderer.invoke('althar:workers-agents', ssh),
+    check: (ssh: string) => ipcRenderer.invoke('althar:workers-check', ssh),
     signIn: (ssh: string, agent: string, way: 'browser' | 'device') => ipcRenderer.invoke('althar:workers-sign-in', ssh, agent, way),
     signInAct: (action: unknown) => ipcRenderer.invoke('althar:workers-sign-in-act', action),
     onSignIn: (listener: (event: WorkerSignInEvent) => void) => {

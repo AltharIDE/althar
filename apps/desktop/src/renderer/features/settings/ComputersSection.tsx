@@ -19,7 +19,16 @@ import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { useNow } from '../../shared/time'
 import { usePlaces } from '../../shared/usePlaces'
-import { computerWorkerOf, useRemoveWorker, useWorkerProjects, useWorkersRead, useWorkerSignIn } from '../../shared/useWorkers'
+import {
+  checkedUnready,
+  checkedWorker,
+  computerWorkerOf,
+  useRemoveWorker,
+  useWorkerCheck,
+  useWorkerProjects,
+  useWorkersRead,
+  useWorkerSignIn,
+} from '../../shared/useWorkers'
 import { useNewestWorkerRelease, usePressed, useWorkerUpdates, withIntents, workerUpdateOf } from '../../shared/workerUpdates'
 import { useAddWorker } from './useAddWorker'
 import { homesUi, useHomesUi } from '../homes/useHomes'
@@ -86,6 +95,7 @@ export function ComputersSection({
   const removing = useRemoveWorker()
   const picking = useWorkerProjects()
   const signing = useWorkerSignIn()
+  const checking = useWorkerCheck()
   // Each worker's update, against the newest worker release: asked from here, or from the bar's Updates.
   const newest = useNewestWorkerRelease()
   const updates = useWorkerUpdates()
@@ -117,9 +127,12 @@ export function ComputersSection({
   // the home's workers, as this computer's own home or one reached over SSH is, never one paired over the network.
   const signsIn = host.workers !== undefined && here.canManageWorkers
   const confirmed = signing.confirmed
+  const checked = checking.confirmed
   useEffect(() => {
-    if (workers !== null) confirmed(workers.workers)
-  }, [confirmed, workers])
+    if (workers === null) return
+    confirmed(workers.workers)
+    checked(workers.workers)
+  }, [checked, confirmed, workers])
   return (
     <>
       <Computers
@@ -131,12 +144,16 @@ export function ComputersSection({
                 enabled: workers.enabled,
                 list: workers.workers.map((one) => {
                   const update = workerUpdateOf(one, newest, pressed.refused.get(one.workerId), pressed.cancelRefused.get(one.workerId))
+                  const check = checking.checks.get(one.workerId)
+                  const shown = computerWorkerOf(
+                    checkedWorker(signing.held.has(one.workerId) ? { ...one, signedIn: signing.held.get(one.workerId) ?? [] } : one, check),
+                    (id) => names.get(id) ?? id,
+                    signsIn,
+                  )
+                  const unready = checkedUnready(shown.unready, check, shown.name)
                   return {
-                    ...computerWorkerOf(
-                      signing.held.has(one.workerId) ? { ...one, signedIn: signing.held.get(one.workerId) ?? [] } : one,
-                      (id) => names.get(id) ?? id,
-                      signsIn,
-                    ),
+                    ...shown,
+                    ...(unready === undefined ? {} : { unready }),
                     ...(one.release === undefined ? {} : { release: one.release }),
                     ...(update === undefined ? {} : { update }),
                   }
@@ -177,6 +194,10 @@ export function ComputersSection({
               onPaste: signing.paste,
               onCheckSignIn: signing.check,
               onCancelSignIn: signing.cancel,
+              onCheckWorker: (workerId: string) => {
+                const worker = workers?.workers.find((one) => one.workerId === workerId)
+                if (worker !== undefined) checking.check(worker)
+              },
               onOpenLink: (url: string) => window.open(url, '_blank', 'noopener'),
             })}
         homeSettings={

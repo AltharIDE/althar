@@ -137,6 +137,10 @@ export const startWorkerSetups = ({
     operator(event)
     return setups.agents(address(at))
   })
+  ipcMain.handle('althar:workers-check', (event, at: unknown) => {
+    operator(event)
+    return setups.check(address(at))
+  })
   ipcMain.handle('althar:workers-sign-in', (event, at: unknown, agent: unknown, way: unknown) => {
     operator(event)
     if (typeof agent !== 'string' || !/^[a-z][a-z0-9-]{0,47}$/u.test(agent)) throw new Error('Choose one of the worker’s agents.')

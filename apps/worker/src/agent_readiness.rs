@@ -6,9 +6,11 @@ use crate::wire::{
 };
 
 /*
- * What the worker's own check found (`althar-host worker check`, run as its setup ends, after each sign-in and with its
- * hourly timer), kept beside `signed-in` as lines of tab-separated fields:
+ * What the worker's own check found (`althar-host worker check`, run as its setup ends, after each sign-in, each time
+ * its service starts, with its hourly timer and at the window's Check again), kept beside `signed-in` as lines of
+ * tab-separated fields:
  *
+ *   observed <ms>   when the check saw its sandbox, so a slower check never writes an older sight over it (not read)
  *   sandbox  starts
  *   sandbox  fails   <code>
  *   fix      <the command an administrator runs to let it start>
