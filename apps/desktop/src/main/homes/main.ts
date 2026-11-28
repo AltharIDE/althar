@@ -14,7 +14,7 @@ import { homeController, type HomeUsageEvent } from './controller'
 import { homeGlances } from './glances'
 import { homePictures } from './pictures'
 import { connectHomeProcess, inspectHomeProcess, pairHomeProcess } from './process'
-import { homePartition } from './policy'
+import { homePartition, homeWindowAllows } from './policy'
 import { findRelease, findWorkerRelease, HOST_RELEASE_KEYS, newestHostVersion, workerRelease } from './release'
 import { canSetUp, homeSetups, nativeSetupSystem, runProgram } from './setup'
 import { homeStore, homeTarget, savedHome } from './store'
@@ -495,8 +495,8 @@ export const startHomeConnections = ({
         if (home.kind !== 'local' && !otherOn(home.home.homeId, id)) pictures.forget(home.home.homeId)
       })
       if (homePartition(home) !== undefined) {
-        window.webContents.session.setPermissionRequestHandler((_contents, _permission, reply) => reply(false))
-        window.webContents.session.setPermissionCheckHandler(() => false)
+        window.webContents.session.setPermissionRequestHandler((_contents, permission, reply) => reply(homeWindowAllows(permission)))
+        window.webContents.session.setPermissionCheckHandler((_contents, permission) => homeWindowAllows(permission))
       }
     },
     connect,

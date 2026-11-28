@@ -18,7 +18,7 @@ import { stageUpdate } from '../src/updates/stage'
 import { loadInstallation, readState } from '../src/updates/store'
 import { digest, releaseIdentity, type ReleaseManifest } from '../src/updates/release'
 import { releaseInfo } from '../src/updates/info'
-import { copyHostAssets, type BundleSource } from '../src/updates/bundle'
+import { copyDependencies, copyHostAssets, keepOwnPty, type BundleSource } from '../src/updates/bundle'
 import type { UpdateServices } from '../src/updates/execute'
 import metadata from '../package.json'
 import { temporary } from './support'
@@ -63,6 +63,9 @@ const assembleFixture = async (source: BundleSource, folder: string) => {
   // The release's preflight checks these against the host's own pins.
   for (const name of ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp'] as const)
     module(name, metadata.dependencies[name])
+  // The release's preflight starts a shell through it, as a home's terminal does: the real one, built for this machine.
+  await copyDependencies(bundle, folder, ['node-pty'])
+  await keepOwnPty(folder)
   module('@anthropic-ai/claude-agent-sdk', '0.3.322')
   module(`@anthropic-ai/claude-agent-sdk-linux-${process.arch}`, '0.3.322', false)
   module('@openai/codex', '0.0.0')
