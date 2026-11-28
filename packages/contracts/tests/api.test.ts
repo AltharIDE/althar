@@ -565,6 +565,8 @@ describe('the API', () => {
                   workers: [{ workerId: 'wrk_' + '1'.repeat(32), connected: false, busy: false, providers: [], projects: [], task: null }],
                 }),
               RemoveWorker: () => Effect.void,
+              UpdateWorker: () => Effect.void,
+              CancelWorkerUpdate: () => Effect.void,
               AddWorker: () => Effect.die('unused'),
               CreateWorkerCode: () => Effect.die('unused'),
               SetWorkerProjects: () => Effect.void,

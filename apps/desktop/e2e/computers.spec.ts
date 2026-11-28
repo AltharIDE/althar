@@ -152,6 +152,7 @@ test('shows an enrolled worker in the popover and Computers as it connects and d
       signedIn: [],
       release: '',
       reserveBeforeTransfer: false,
+      updatesOnRequest: false,
       version: 1,
       workerId,
       journalId: `wjn_${'3'.repeat(32)}`,

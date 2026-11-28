@@ -45,14 +45,15 @@ use crate::{
     grpc::{WorkerEnrollment, control_client, endpoint},
     project::{cgroup_empty, cgroup_path, monotonic_ms},
     relay::{WorkerRelay, relay_channel},
-    valid_id,
+    update, valid_id,
     wire::{
         AgentHomeFrame, AgentRunAccepted, AgentRunBytes, AgentRunExit, AgentRunOutcome,
         AgentRunReady, AgentRunStart, AgentSkillFiles, AgentSnapshotIndex, AgentSnapshotRequest,
         AgentSnapshotResult, AgentWorkerCapability, AgentWorkerFrame, AgentWorkerHeartbeat,
-        AgentWorkerHello, AgentWorkerMcpCommand, AgentWorkerReadiness, AgentWorkspaceSetup,
-        AgentWorkspaceSetupResult, AgentWorkspaceSetupSource,
-        agent_home_frame::Payload as HomeMessage, agent_worker_frame::Payload as WorkerMessage,
+        AgentWorkerHello, AgentWorkerMcpCommand, AgentWorkerReadiness, AgentWorkerUpdateOutcome,
+        AgentWorkerUpdateState, AgentWorkspaceSetup, AgentWorkspaceSetupResult,
+        AgentWorkspaceSetupSource, agent_home_frame::Payload as HomeMessage,
+        agent_worker_frame::Payload as WorkerMessage,
     },
 };
 
@@ -558,6 +559,24 @@ impl Slot {
         Ok(())
     }
 
+    /// Waits for `work`, its heartbeats going meanwhile: the home sends nothing else while it waits for the worker.
+    async fn alongside<T>(&mut self, work: impl Future<Output = T>) -> Result<T, Failure> {
+        tokio::pin!(work);
+        loop {
+            tokio::select! {
+                biased;
+                _ = tokio::time::sleep_until(self.until) => return Err(invalid("The home stopped renewing the agent lease").into()),
+                _ = self.send_heartbeat.tick() => self.heartbeat().await?,
+                incoming = self.incoming.message() => match incoming?.and_then(|message| message.payload) {
+                    Some(HomeMessage::Heartbeat(heartbeat)) => self.acknowledge(heartbeat)?,
+                    Some(_) => return Err(invalid("The home sent work while the worker updates").into()),
+                    None => return Err(invalid("The home closed the agent worker stream").into()),
+                },
+                value = &mut work => return Ok(value),
+            }
+        }
+    }
+
     async fn message(&mut self) -> Result<HomeMessage, Failure> {
         loop {
             tokio::select! {
@@ -1003,6 +1022,44 @@ async fn send_snapshot(
     Ok(())
 }
 
+/// Asked by its home between runs: its updater, as its timer would run it, its heartbeats going meanwhile; then how it
+/// went. On success the updater restarts it into its new release, and this never returns.
+async fn update_now(slot: &mut Slot) -> Result<(), Failure> {
+    let said = |outcome: AgentWorkerUpdateOutcome, version: String, message: String| {
+        WorkerMessage::UpdateState(AgentWorkerUpdateState {
+            outcome: outcome.into(),
+            version: version.chars().take(64).collect(),
+            message,
+        })
+    };
+    timeout(
+        REPLY_TIMEOUT,
+        send(
+            &slot.outgoing,
+            said(
+                AgentWorkerUpdateOutcome::Started,
+                String::new(),
+                String::new(),
+            ),
+        ),
+    )
+    .await??;
+    let tools = update::Tools::default();
+    let reply = match slot.alongside(update::run(&tools)).await? {
+        update::Outcome::Current { version } => {
+            said(AgentWorkerUpdateOutcome::Current, version, String::new())
+        }
+        update::Outcome::Waiting { version } => {
+            said(AgentWorkerUpdateOutcome::Waiting, version, String::new())
+        }
+        update::Outcome::Failed { message } => {
+            said(AgentWorkerUpdateOutcome::Failed, String::new(), message)
+        }
+    };
+    timeout(REPLY_TIMEOUT, send(&slot.outgoing, reply)).await??;
+    Ok(())
+}
+
 /// How an exchange with the home ended.
 #[derive(Debug, Eq, PartialEq)]
 pub enum SlotEnd {
@@ -1045,6 +1102,7 @@ pub async fn watch_agent_slot(
                 signed_in: config.signed_in(),
                 release: config.release.clone(),
                 readiness: config.readiness(),
+                updates_on_request: update::available(),
             }),
         )
         .await?;
@@ -1097,50 +1155,59 @@ pub async fn watch_agent_slot(
         return Ok(SlotEnd::Removed);
     };
 
-    let reply = match slot.message().await? {
-        HomeMessage::Start(run) => {
-            let (outcome, exit_code, worker_busy) =
-                match execute(&mut slot, config, journal, &run).await {
-                    Ok((outcome, exit_code)) => (outcome, exit_code, false),
-                    Err(error) if error.downcast_ref::<WorkerBusy>().is_some() => {
-                        (AgentRunOutcome::StartFailed, None, true)
+    let reply = loop {
+        break match slot.message().await? {
+            // Only ever sent between runs, to a worker whose hello says it can: then the next instruction, on this stream.
+            HomeMessage::Update(_) => {
+                update_now(&mut slot).await?;
+                continue;
+            }
+            HomeMessage::Start(run) => {
+                let (outcome, exit_code, worker_busy) =
+                    match execute(&mut slot, config, journal, &run).await {
+                        Ok((outcome, exit_code)) => (outcome, exit_code, false),
+                        Err(error) if error.downcast_ref::<WorkerBusy>().is_some() => {
+                            (AgentRunOutcome::StartFailed, None, true)
+                        }
+                        Err(error) => return Err(error),
+                    };
+                AgentRunExit {
+                    run_id: run.run_id,
+                    outcome: outcome.into(),
+                    exit_code,
+                    worker_busy,
+                }
+            }
+            HomeMessage::Reconcile(run) => {
+                if !valid_id(&run.workspace_id, "ws_") {
+                    return Err(invalid("The home sent an invalid workspace to reconcile").into());
+                }
+                let stopped = match journal.agent_group(&run.run_id)? {
+                    Some(group) => {
+                        let name = agent_service(&run.run_id);
+                        stop_group(&name, &cgroup_path(&name, &group)?).await
                     }
-                    Err(error) => return Err(error),
+                    // The guardian only grants a launch after its group was recorded.
+                    None => true,
                 };
-            AgentRunExit {
-                run_id: run.run_id,
-                outcome: outcome.into(),
-                exit_code,
-                worker_busy,
-            }
-        }
-        HomeMessage::Reconcile(run) => {
-            if !valid_id(&run.workspace_id, "ws_") {
-                return Err(invalid("The home sent an invalid workspace to reconcile").into());
-            }
-            let stopped = match journal.agent_group(&run.run_id)? {
-                Some(group) => {
-                    let name = agent_service(&run.run_id);
-                    stop_group(&name, &cgroup_path(&name, &group)?).await
+                AgentRunExit {
+                    run_id: run.run_id,
+                    outcome: if stopped {
+                        AgentRunOutcome::Stopped
+                    } else {
+                        AgentRunOutcome::Unconfirmed
+                    }
+                    .into(),
+                    exit_code: None,
+                    worker_busy: false,
                 }
-                // The guardian only grants a launch after its group was recorded.
-                None => true,
-            };
-            AgentRunExit {
-                run_id: run.run_id,
-                outcome: if stopped {
-                    AgentRunOutcome::Stopped
-                } else {
-                    AgentRunOutcome::Unconfirmed
-                }
-                .into(),
-                exit_code: None,
-                worker_busy: false,
             }
-        }
-        // Only ever sent between runs: the home refuses to remove a worker at work.
-        HomeMessage::Removed(_) => return Ok(SlotEnd::Removed),
-        _ => return Err(invalid("Expected an agent run or reconciliation from the home").into()),
+            // Only ever sent between runs: the home refuses to remove a worker at work.
+            HomeMessage::Removed(_) => return Ok(SlotEnd::Removed),
+            _ => {
+                return Err(invalid("Expected an agent run or reconciliation from the home").into());
+            }
+        };
     };
     let run_id = reply.run_id.clone();
     let start_failed = reply.outcome() == AgentRunOutcome::StartFailed;

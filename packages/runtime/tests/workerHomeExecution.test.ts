@@ -63,6 +63,9 @@ it.live('keeps each repository’s own baseline and sends commands to the select
         connected: () => [],
         openTools: () => undefined,
         remove: () => false,
+        update: () => false,
+        cancelUpdate: () => false,
+        updateOf: () => undefined,
         stopRun: () => false,
         list: () => [
           {
@@ -339,6 +342,9 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
       connected: () => [],
       openTools: () => undefined,
       remove: () => false,
+      update: () => false,
+      cancelUpdate: () => false,
+      updateOf: () => undefined,
       // What the worker is asked to stop that no lead here holds any more.
       stopRun: (id) => {
         orphans.push(id)
