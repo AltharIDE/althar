@@ -3,7 +3,7 @@ import { generateKeyPairSync, sign } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { isoAfter } from '@althar/testing'
 
-import { releaseIdentity, verifyRelease, type ReleaseManifest } from '../src/updates/release'
+import { authenticateRelease, compareVersions, releaseIdentity, verifyRelease, type ReleaseManifest } from '../src/updates/release'
 
 const pair = generateKeyPairSync('ed25519')
 const publicKey = pair.publicKey.export({ format: 'pem', type: 'spki' }).toString()
@@ -107,5 +107,31 @@ describe('authenticated host releases', () => {
     expect(() =>
       releaseIdentity(generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ format: 'pem', type: 'spki' }).toString()),
     ).toThrow()
+  })
+})
+
+describe('a worker release’s base', () => {
+  const base = { url: 'https://releases.example/base.tar.gz', sha256: 'e'.repeat(64), bytes: 10, files: 1, unpackedBytes: 20 }
+
+  it('is taken over HTTPS, and refused otherwise or where it isn’t one', () => {
+    expect(verify(signed({ ...manifest, base })).manifest.base).toEqual(base)
+    expect(() => verify(signed({ ...manifest, base: { ...base, url: 'http://releases.example/base.tar.gz' } }))).toThrow()
+    expect(() => verify(signed({ ...manifest, base: { ...base, sha256: 'nope' } }))).toThrow()
+    expect(() => verify(signed({ ...manifest, base: { ...base, bytes: 0 } }))).toThrow()
+  })
+})
+
+describe('versions and envelopes, at their edges', () => {
+  it('reads a version missing its patch as .0, either side', () => {
+    expect(compareVersions('1.2', '1.2.0')).toBe(0)
+    expect(compareVersions('1.2.1', '1.2')).toBe(1)
+    expect(compareVersions('1.1', '1.2.0')).toBe(-1)
+  })
+
+  it('refuses a signature that isn’t written exactly as base64url', () => {
+    const envelope = JSON.parse(signed().toString()) as { signature: string }
+    const padded = Buffer.from(JSON.stringify({ ...envelope, signature: `${envelope.signature}==` }))
+    expect(() => authenticateRelease(padded, [publicKey], 'x64')).toThrow()
+    expect(authenticateRelease(signed(), [publicKey], 'x64').manifest.version).toBe(manifest.version)
   })
 })

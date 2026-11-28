@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 
@@ -122,4 +122,123 @@ export const codexProgram = (platform: string, arch: string): Bundled | undefine
     platforms: [`@openai/codex-${platform}-${arch}`],
     program: join('vendor', target, 'bin', platform === 'win32' ? 'codex.exe' : 'codex'),
   }
+}
+
+/** A release's parts as numbers: `2.1.331` is [2, 1, 331]; undefined where it isn't one. */
+const partsOf = (version: string): readonly [number, number, number] | undefined => {
+  const match = /^(\d+)\.(\d+)\.(\d+)/u.exec(version)
+  return match === null ? undefined : [Number(match[1]), Number(match[2]), Number(match[3])]
+}
+
+/**
+ * The version of an install of an agent, read from where it is installed, without running it: the package.json of
+ * the npm package it is (one of `packages`, its platform builds included), or the folder of its version that its own
+ * installer or Homebrew keeps it in (`…/claude/versions/2.1.331`, `…/Cellar/codex/0.172.0/…`). Undefined where
+ * neither says.
+ */
+export const installedVersion = (
+  path: string,
+  packages: ReadonlyArray<string>,
+  folders: ReadonlyArray<string>,
+  read: (file: string) => string | undefined = (file) => {
+    try {
+      return readFileSync(file, 'utf8')
+    } catch {
+      return undefined
+    }
+  },
+  real: (file: string) => string = realpathSync,
+): string | undefined => {
+  let at: string
+  try {
+    at = real(path)
+  } catch {
+    return undefined
+  }
+  const segments = at.split(/[\\/]/u)
+  // Its installer's or Homebrew's folder of versions: `<name>/versions/<v>`, `Cellar/<name>/<v>`, `Caskroom/<name>/<v>`.
+  for (let index = 1; index < segments.length; index++) {
+    const segment = segments[index] ?? ''
+    const before = segments[index - 1] ?? ''
+    const twoBefore = segments[index - 2] ?? ''
+    if (partsOf(segment) === undefined) continue
+    if (before === 'versions' && folders.includes(twoBefore)) return segment
+    if ((twoBefore === 'Cellar' || twoBefore === 'Caskroom') && folders.includes(before)) return segment
+  }
+  // The npm package it is part of, a few folders up.
+  let folder = dirname(at)
+  for (let depth = 0; depth < 6; depth++) {
+    const manifest = read(join(folder, 'package.json'))
+    if (manifest !== undefined)
+      try {
+        const parsed = JSON.parse(manifest) as { readonly name?: unknown; readonly version?: unknown }
+        if (typeof parsed.name === 'string' && packages.some((name) => parsed.name === name || String(parsed.name).startsWith(`${name}-`)))
+          return typeof parsed.version === 'string' ? parsed.version : undefined
+      } catch {
+        // Not a package's: further up.
+      }
+    const up = dirname(folder)
+    if (up === folder) break
+    folder = up
+  }
+  return undefined
+}
+
+/** A field of a package's manifest, as the adapter at `from` finds the package. */
+const manifestOf = (from: string, request: string, resolve: Resolver): Record<string, unknown> | undefined => {
+  try {
+    return JSON.parse(readFileSync(resolve(from, request), 'utf8')) as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+}
+
+/** Where the adapters are found from: this package, as Althar's own. */
+const here = import.meta.url
+
+/**
+ * Whether a Claude Code of the person's own, at this path, is one claude-agent-acp can drive: the release its SDK names
+ * (`claudeCodeVersion`) or a newer one of the same major. An older one is what failed every start on 24 November.
+ */
+export const claudeFits = (path: string, resolve: Resolver = nodeResolver, from: string = here): boolean => {
+  const adapter = (() => {
+    try {
+      return resolve(from, '@agentclientprotocol/claude-agent-acp/package.json')
+    } catch {
+      return undefined
+    }
+  })()
+  if (adapter === undefined) return false
+  let sdkFolder: string
+  try {
+    sdkFolder = dirname(resolve(adapter, '@anthropic-ai/claude-agent-sdk'))
+  } catch {
+    return false
+  }
+  const needs = (() => {
+    try {
+      const value = (JSON.parse(readFileSync(join(sdkFolder, 'package.json'), 'utf8')) as { claudeCodeVersion?: unknown }).claudeCodeVersion
+      return typeof value === 'string' ? partsOf(value) : undefined
+    } catch {
+      return undefined
+    }
+  })()
+  const theirs = partsOf(installedVersion(path, ['@anthropic-ai/claude-code'], ['claude', 'claude-code']) ?? '')
+  if (needs === undefined || theirs === undefined) return false
+  return theirs[0] === needs[0] && (theirs[1] > needs[1] || (theirs[1] === needs[1] && theirs[2] >= needs[2]))
+}
+
+/**
+ * Whether a Codex of the person's own, at this path, is one codex-acp can drive: within the range it depends on
+ * (`^0.172.0`, the same minor, this patch or later), read as npm reads a caret range.
+ */
+export const codexFits = (path: string, resolve: Resolver = nodeResolver, from: string = here): boolean => {
+  const adapter = manifestOf(from, '@agentclientprotocol/codex-acp/package.json', resolve)
+  const range = (adapter?.dependencies as Record<string, unknown> | undefined)?.['@openai/codex']
+  const needs = typeof range === 'string' ? partsOf(range.replace(/^[\^~=v]+/u, '')) : undefined
+  const theirs = partsOf(installedVersion(path, ['@openai/codex'], ['codex']) ?? '')
+  if (needs === undefined || theirs === undefined) return false
+  // A caret range below 1.0 holds its minor; from 1.0, its major.
+  if (needs[0] === 0) return theirs[0] === 0 && theirs[1] === needs[1] && theirs[2] >= needs[2]
+  return theirs[0] === needs[0] && (theirs[1] > needs[1] || (theirs[1] === needs[1] && theirs[2] >= needs[2]))
 }

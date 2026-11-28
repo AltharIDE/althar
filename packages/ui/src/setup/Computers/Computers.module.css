@@ -649,6 +649,30 @@
   font-size: 12px;
   color: var(--t-3);
 }
+/* An agent's own sign-in, as the line that runs it on the worker: code, wrapping where it is long, its copy beside it. */
+.commandRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.signInCommand {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  color: var(--t-1);
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+/* Fixed width, so the line stays put as it counts. */
+.percent {
+  min-width: 4ch;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
 .codeWay .waiting {
   display: flex;
   gap: 12px;

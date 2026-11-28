@@ -9,6 +9,14 @@ export const MAX_ARCHIVE_BYTES = 1_073_741_824
 export const MAX_UNPACKED_BYTES = 4_294_967_296
 const Hash = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
 const Natural = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }))
+/** An archive of a release, or of a part of one, with what it holds unpacked. */
+const Counted = {
+  url: Schema.String,
+  sha256: Hash,
+  bytes: Natural.check(Schema.isLessThanOrEqualTo(MAX_ARCHIVE_BYTES)),
+  files: Natural.check(Schema.isLessThanOrEqualTo(50_000)),
+  unpackedBytes: Natural.check(Schema.isLessThanOrEqualTo(MAX_UNPACKED_BYTES)),
+}
 export const ReleaseManifest = Schema.Struct({
   format: Schema.Literal(1),
   version: Schema.String.check(Schema.isPattern(/^(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})$/)),
@@ -25,6 +33,12 @@ export const ReleaseManifest = Schema.Struct({
   files: Natural.check(Schema.isLessThanOrEqualTo(50_000)),
   /** What it is: a home's release, or a worker's own. A manifest from before workers had their own is a home's. */
   product: Schema.optional(Schema.Literals(['host', 'worker'])),
+  /**
+   * A worker's release without the agents' own programs, which come on first use (docs/plans/agents-on-first-use.md):
+   * what a worker or window that knows it downloads. The `archive` stays the whole release, with Claude Code's and
+   * Codex's programs beside their adapters, for host 0.3.0's updater and windows from before.
+   */
+  base: Schema.optional(Schema.Struct(Counted)),
 })
 export type ReleaseManifest = typeof ReleaseManifest.Type
 const Envelope = Schema.Struct({ format: Schema.Literal(1), keyId: Hash, payload: Schema.String, signature: Schema.String })
@@ -111,6 +125,7 @@ export const authenticateRelease = (bytes: Uint8Array, keys: ReadonlyArray<strin
     const expires = date(manifest.expiresAt)
     if (expires <= published || expires - published > 366 * 86_400_000 || manifest.arch !== arch) throw rejected()
     httpsURL(manifest.archive.url)
+    if (manifest.base !== undefined) httpsURL(manifest.base.url)
     return { id: digest(bytes), manifest, envelope: bytes }
   } catch {
     throw rejected()

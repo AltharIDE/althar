@@ -237,6 +237,12 @@ export const getUpdateBytes = async (
     return Buffer.concat(chunks)
   })
 
+/**
+ * How long one try may take: three minutes, or as long as the archive takes at 128 KiB/s where that's longer, so a slow
+ * line still gets a large release through.
+ */
+export const downloadTime = (bytes: number) => Math.max(180_000, Math.ceil(bytes / 131_072) * 1000)
+
 /** Stream a signed, size-bound archive directly to a new private file; never replace an existing download. */
 export const downloadRelease = async (
   archive: { readonly url: string; readonly bytes: number; readonly sha256: string },
@@ -244,6 +250,8 @@ export const downloadRelease = async (
   fetcher: UpdateFetch = fetch,
   signal?: AbortSignal,
   wait: UpdatePause = pause,
+  /** Hears the bytes received so far in this try. */
+  progress?: (bytes: number) => void,
 ) => {
   let file: fs.FileHandle | undefined
   let complete = false
@@ -253,7 +261,8 @@ export const downloadRelease = async (
     file = await fs.open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
     const writer = file
     const hash = createHash('sha256')
-    const received = await tried(archive.url, 180_000, signal, wait, (stop, progress) =>
+    let sofar = 0
+    const received = await tried(archive.url, downloadTime(archive.bytes), signal, wait, (stop, started) =>
       bounded(
         archive.url,
         archive.bytes,
@@ -262,8 +271,10 @@ export const downloadRelease = async (
         async (chunk) => {
           hash.update(chunk)
           await writer.writeFile(chunk)
+          sofar += chunk.length
+          progress?.(sofar)
         },
-        progress,
+        started,
       ),
     )
     if (received !== archive.bytes || hash.digest('hex') !== archive.sha256)

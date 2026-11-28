@@ -137,7 +137,7 @@ describe('finding an agent’s command', () => {
     expect(codex.signIn.login).toBe('/device/codex login')
   })
 
-  it('has Codex’s adapter drive the person’s own Codex where they have one, and its own copy where they don’t', () => {
+  it('has Codex’s adapter drive the person’s own Codex where they have one, else the one Althar downloaded, else its own', () => {
     let found: Located | null = { command: '/home/me/.local/bin/codex', whose: 'theirs' }
     const codex = usingLocated(agents.codex, () => found)
     expect(codex.launch('node')).toMatchObject({ command: 'node', env: { CODEX_PATH: '/home/me/.local/bin/codex' } })
@@ -147,12 +147,20 @@ describe('finding an agent’s command', () => {
     found = { command: '/bundled/codex', whose: 'bundled' }
     expect(codex.launch('node').env?.CODEX_PATH).toBeUndefined()
     found = { command: '/kept/codex', whose: 'althar' }
-    expect(codex.launch('node').env?.CODEX_PATH).toBeUndefined()
+    expect(codex.launch('node').env?.CODEX_PATH).toBe('/kept/codex')
     found = null
     expect(codex.launch('node').env?.CODEX_PATH).toBeUndefined()
     // Out on the device (a Flatpak's host), it is reached its own way.
     found = { command: '/device/codex', whose: 'theirs', out: (spec) => () => spec }
     expect(codex.launch('node').env?.CODEX_PATH).toBeUndefined()
+    // Unless what the adapter drives is a bridge that runs it out there, as a Flatpak's Codex is: told the copy found.
+    const bridged = usingLocated(
+      { ...agents.codex, cli: { name: 'codex', drivenBy: 'ALTHAR_CODEX_PROGRAM', drivesOutThere: true } },
+      () => found,
+    )
+    expect(bridged.launch('node').env?.ALTHAR_CODEX_PROGRAM).toBe('/device/codex')
+    found = null
+    expect(bridged.launch('node').env?.ALTHAR_CODEX_PROGRAM).toBeUndefined()
     // An agent without such a variable is launched as it was.
     expect(usingLocated(agents.grok, () => ({ command: '/x/grok', whose: 'theirs' })).launch('node').env?.CODEX_PATH).toBeUndefined()
   })

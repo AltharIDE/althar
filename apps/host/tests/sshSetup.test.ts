@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { Effect } from 'effect'
@@ -130,6 +130,15 @@ describe.runIf(process.platform === 'linux' && process.getuid?.() !== 0)('SSH ho
     writeFileSync(at.plan.manifest, '{}')
     await expect(at.run()).rejects.toThrow('signature, expiration or platform')
     expect(at.output.join('')).toContain('"SignatureMismatch"')
+    expect(at.command).not.toHaveBeenCalled()
+    // A manifest others may read, or a key others may change, is no release to trust.
+    at.signManifest({})
+    chmodSync(at.plan.manifest, 0o644)
+    await expect(at.run()).rejects.toThrow('The manifest is not an owner-only, regular file.')
+    chmodSync(at.plan.manifest, 0o600)
+    chmodSync(at.plan.key, 0o666)
+    await expect(at.run()).rejects.toThrow('The pinned public key could not be read securely.')
+    chmodSync(at.plan.key, 0o600)
     expect(at.command).not.toHaveBeenCalled()
     await expect(at.run(at.inUnit)).rejects.toThrow('locked installer')
   })

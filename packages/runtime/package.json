@@ -17,6 +17,7 @@
     "./pullRequestReview": "./src/pullRequestReview.ts",
     "./privateFiles": "./src/privateFiles.ts",
     "./workerHome": "./src/workerHome/index.ts",
+    "./installs": "./src/Installs.ts",
     "./windowActions": "./src/windowActions.ts",
     "./repositories": "./src/repositoriesFound.ts"
   },

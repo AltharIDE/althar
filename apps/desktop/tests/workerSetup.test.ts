@@ -2,8 +2,8 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { expect, it, vi } from 'vitest'
 
 import { findRelease, findWorkerRelease, workerRelease } from '../src/main/homes/release'
-import type { Ran, RunOptions, SetupSystem } from '../src/main/homes/setup'
-import { forTheLog, workerSetups, type WorkerLog } from '../src/main/homes/workerSetup'
+import { runProgram, type Ran, type RunOptions, type SetupSystem } from '../src/main/homes/setup'
+import { forTheLog, terminalLine, transferTime, workerSetups, type WorkerLog } from '../src/main/homes/workerSetup'
 import type { WorkerSetup } from '../src/workers'
 
 const now = Date.parse('2026-01-20T00:00:00.000Z')
@@ -332,4 +332,140 @@ it('ends with the worker’s check: stays at it where its sandbox can’t start,
   await vi.waitFor(() => expect(told.at(-1)?.check?.allowed).toBe('NeedsAdministrator'))
   expect(told.at(-1)).toMatchObject({ phase: 'done', at: 5, checking: false })
   expect(asked).toContain('worker-sandbox')
+})
+
+it('takes a worker release’s base, without its agents’ own programs, and refuses one that isn’t over HTTPS', async () => {
+  const signal = new AbortController().signal
+  const pair = generateKeyPairSync('ed25519')
+  const base = { url: 'https://x.test/base.tar.gz', sha256: 'e'.repeat(64), bytes: 50, files: 3, unpackedBytes: 500 }
+  const own = (extra: Record<string, unknown>, product = 'worker') => ({
+    keys: [signed('0.3.1', {}, pair).pem],
+    manifest: 'http://127.0.0.1:8080/r/m.json',
+    fetch: vi.fn(async () => new Response(signed('0.3.1', { product, ...extra }, pair).envelope)),
+    now: () => now,
+  })
+  expect(await findWorkerRelease('x64', own({ base }), signal)).toMatchObject({
+    url: 'https://example.test/a.tar.gz',
+    base: { url: 'https://x.test/base.tar.gz', sha256: 'e'.repeat(64), bytes: 50, unpackedBytes: 500 },
+  })
+  expect((await findWorkerRelease('x64', own({}), signal)).base).toBeUndefined()
+  await expect(findWorkerRelease('x64', own({ base: { ...base, url: 'http://x.test/b' } }), signal)).rejects.toThrow(/failed its check/)
+  await expect(findWorkerRelease('x64', own({ base: { ...base, sha256: 'nope' } }), signal)).rejects.toThrow(/failed its check/)
+})
+
+/** Adding a worker from a release in parts, its first install answered as `first` says: what each install was asked, and its deadline. */
+const addingInParts = async (first: Partial<Ran>) => {
+  const event = (step: string, state: string, more: Record<string, unknown> = {}) => JSON.stringify({ protocol: 1, step, state, ...more })
+  const installs: Array<{ readonly args: ReadonlyArray<string>; readonly timeout: number }> = []
+  const { system: given, log } = machine({})
+  const system: SetupSystem = {
+    ...given,
+    run: async (program: string, args: ReadonlyArray<string>, options: RunOptions) => {
+      const operation = program !== 'ssh' ? program : (/^sh -s -- '([a-z-]+)'/.exec(args.at(-1) ?? '')?.[1] ?? 'resolve')
+      const answers: Record<string, string> = {
+        probe: [event('reach', 'done'), event('look', 'done', { arch: 'x64', freeKiB: 65_000_000, linger: true })].join('\n'),
+        'worker-prepare-upload': event('get', 'started', { uploadId: 'abcdefgh', uploadPath: '/u/archive.partial' }),
+      }
+      if (operation === 'worker-install') {
+        installs.push({
+          args:
+            args
+              .at(-1)
+              ?.split(' ')
+              .map((one) => one.replace(/^'|'$/gu, ''))
+              .slice(4, 9) ?? [],
+          timeout: options.timeout,
+        })
+        if (installs.length === 1) return { code: 1, stdout: '', stderr: '', ...first }
+        return { code: 0, stdout: event('key', 'done', { publicKey: 'PUBLIC' }), stderr: '' }
+      }
+      return { code: 0, stdout: answers[operation] ?? '', stderr: '' }
+    },
+  }
+  vi.mocked(system.release).mockResolvedValue({
+    envelope: new Uint8Array([1]),
+    key: 'KEY',
+    version: '0.3.1',
+    url: 'https://x.test/whole.tar.gz',
+    sha256: 'a'.repeat(64),
+    bytes: 400_000_000,
+    unpackedBytes: 1_000_000_000,
+    apiVersion: 1,
+    storage: 'c'.repeat(64),
+    base: {
+      url: 'https://x.test/base.tar.gz',
+      sha256: 'e'.repeat(64),
+      bytes: 60_000_000,
+      unpackedBytes: 200_000_000,
+    },
+  })
+  vi.mocked(system.scratch).mockResolvedValue({ path: '/scratch', remove: async () => {} })
+  const told: Array<WorkerSetup | null> = []
+  const release = vi.fn(async () => ({ kind: 'ready' as const, version: '0.3.1', base: 'https://x.test' }))
+  workerSetups(system, vi.fn(), (setup) => told.push(setup), vi.fn(), { log, release }).start({ target: 'build@box' }, true)
+  await vi.waitFor(() => expect(['enroll', 'failed']).toContain(told.at(-1)?.phase))
+  return { installs, told, system, event }
+}
+
+it('downloads a release in parts on the machine by its base, and sends the whole one where the machine can’t download', async () => {
+  const event = (step: string, state: string, more: Record<string, unknown> = {}) => JSON.stringify({ protocol: 1, step, state, ...more })
+  const { installs, system } = await addingInParts({ stdout: event('get', 'failed', { code: 'CannotDownload' }) })
+  // On the machine, the base, with the time it takes; sent from here, the whole release, which needs nothing more.
+  expect(installs[0]?.args).toEqual(['download', 'e'.repeat(64), '60000000', '200000000', 'https://x.test/base.tar.gz'])
+  expect(installs[0]?.timeout).toBe(transferTime(60_000_000))
+  expect(transferTime(400_000_000)).toBeGreaterThan(60 * 60_000)
+  expect(installs[1]?.args).toEqual(['upload', 'a'.repeat(64), '400000000', '1000000000', 'abcdefgh'])
+  expect(vi.mocked(system.fetchArchive).mock.calls[0]?.[0]).toMatchObject({ url: 'https://x.test/whole.tar.gz', sha256: 'a'.repeat(64) })
+})
+
+it('sends the whole release where downloading on the machine outran its time, and stops at Get where a part won’t fit', async () => {
+  // Stopped at its deadline: OpenSSH exits 255 when stopped, as for a connection that failed; no word from the machine.
+  const slow = await addingInParts({ code: 255, timedOut: true })
+  expect(slow.installs.map((one) => one.args[0])).toEqual(['download', 'upload'])
+  expect(slow.told.at(-1)?.phase).toBe('enroll')
+  // A connection that failed is still that.
+  const gone = await addingInParts({ code: 255, stderr: 'ssh: connect to host box port 22: Connection refused' })
+  expect(gone.installs).toHaveLength(1)
+  expect(gone.told.at(-1)).toMatchObject({ phase: 'failed', problem: { code: 'Unreachable' } })
+  const full = await addingInParts({ stdout: slow.event('get', 'failed', { code: 'NotEnoughDisk' }) })
+  expect(full.installs).toHaveLength(1)
+  expect(full.told.at(-1)).toMatchObject({ phase: 'failed', at: 2, problem: { code: 'NotEnoughDisk' } })
+})
+
+it('says a program it ran was stopped at its deadline, whatever it exited with then', async () => {
+  const signal = new AbortController().signal
+  // Node, which every computer the tests run on has; where a stop is a signal it can catch, it exits 255 as OpenSSH does.
+  const node = (script: string, timeout: number) => runProgram(process.execPath, ['-e', script], { signal, timeout })
+  const late = await node('process.on("SIGTERM", () => process.exit(255)); setTimeout(() => undefined, 20_000)', 500)
+  expect(late.timedOut).toBe(true)
+  if (process.platform !== 'win32') expect(late.code).toBe(255)
+  const done = await node('process.exit(3)', 20_000)
+  expect(done.code).toBe(3)
+  expect(done.timedOut).toBeUndefined()
+})
+
+it('gives an agent’s own sign-in as the line that runs it on the worker over its SSH address, its port where it has one', () => {
+  expect(terminalLine('althar@build-box', 'opencode auth login --standalone')).toBe(
+    "ssh -t althar@build-box 'opencode auth login --standalone'",
+  )
+  expect(terminalLine('me@10.0.0.9:2222', "copilot login --host 'x'")).toBe(`ssh -t -p 2222 me@10.0.0.9 'copilot login --host '\\''x'\\'''`)
+})
+
+it('checks a worker’s sign-ins by its whole check, so one signed in in a terminal is started, and its models said, first', async () => {
+  const event = (step: string, state: string, more: Record<string, unknown> = {}) => JSON.stringify({ protocol: 1, step, state, ...more })
+  const agents = [
+    // Junie can't say whether it is signed in: its check started it, so it is.
+    { id: 'junie', name: 'Junie', signedIn: true, started: true, models: 3 },
+    { id: 'qwen-code', name: 'Qwen Code', signedIn: false, started: false, message: 'It didn’t start.', models: 0 },
+  ]
+  const { system, asked, log } = machine({
+    'worker-check': { stdout: [event('check', 'started'), event('check', 'done', { sandbox: { starts: true }, agents })].join('\n') },
+  })
+  const setups = workerSetups(system, vi.fn(), vi.fn(), vi.fn(), { log, release: vi.fn() })
+  expect(await setups.agents('build@box')).toEqual([
+    { id: 'junie', name: 'Junie', signedIn: true },
+    { id: 'qwen-code', name: 'Qwen Code', signedIn: false },
+  ])
+  expect(asked).toContain('worker-check')
+  expect(asked).not.toContain('worker-agents')
 })

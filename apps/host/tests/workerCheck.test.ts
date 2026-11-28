@@ -118,6 +118,16 @@ describe('what it ships and finds', () => {
     expect(shippedSandbox('/r', null)).toEqual({ socat: '/r/tools/bin/socat' })
   })
 
+  it('finds them in its own tools first, where a worker’s release keeps them whichever agents it has', () => {
+    const release = temporary()
+    mkdirSync(join(release, 'tools', 'bin'), { recursive: true })
+    for (const name of ['bwrap', 'rg', 'socat']) writeFileSync(join(release, 'tools', 'bin', name), name, { mode: 0o700 })
+    const tools = join(release, 'tools', 'bin')
+    // Codex not downloaded, or there: its own copies are the release's.
+    for (const codex of [null, join(release, 'node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex')])
+      expect(shippedSandbox(release, codex)).toEqual({ bwrap: join(tools, 'bwrap'), rg: join(tools, 'rg'), socat: join(tools, 'socat') })
+  })
+
   it('links each into its bin through current, and drops a link to what the release no longer carries', async () => {
     const folder = temporary()
     const release = join(folder, 'release')

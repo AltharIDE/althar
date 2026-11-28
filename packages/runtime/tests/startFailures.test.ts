@@ -1,3 +1,9 @@
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { AgentExited, AgentRequestFailed, AgentStartFailed, type InProcessAgent } from '@althar/provider-adapters'
 import { fakeAgent } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
@@ -191,6 +197,111 @@ describe('a program that is still arriving', () => {
     }).pipe(
       Effect.provide(
         runtime(':memory:', {}, { agents: arriving, programWait: { every: Duration.millis(10), within: Duration.seconds(5) } }),
+      ),
+    )
+  })
+})
+
+describe('a program another start is bringing', () => {
+  it.live('is looked for as a launch now would be, so the start goes on as soon as it is kept', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'althar-agents-'))
+    const kept = join(folder, 'claude')
+    // Kept a moment after the start first looks, as by another session's download.
+    setTimeout(() => writeFileSync(kept, '#!/bin/sh\n', { mode: 0o755 }), 100)
+    const arriving = changed((entry) => ({
+      ...entry,
+      definition: {
+        ...entry.definition,
+        launch: (node) => {
+          const spec = entry.definition.launch(node)
+          return existsSync(kept) ? { ...spec, env: { ...spec.env, CLAUDE_CODE_EXECUTABLE: kept } } : spec
+        },
+        cli: { name: 'claude', drivenBy: 'CLAUDE_CODE_EXECUTABLE' },
+        program: (env) =>
+          env.CLAUDE_CODE_EXECUTABLE !== undefined ? undefined : "Claude Code's own program for this computer is missing.",
+      },
+    }))
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { task: created } = yield* task()
+      const exit = yield* Effect.exit(sessions.start({ threadId: created.threadId, agentId: 'claude-code' }))
+      assert.isTrue(Exit.isSuccess(exit), Exit.isFailure(exit) ? Cause.pretty(exit.cause) : '')
+    }).pipe(
+      // Long: a look again at the launch that failed would wait all of it out, and time the test out.
+      Effect.provide(
+        runtime(':memory:', {}, { agents: arriving, programWait: { every: Duration.millis(10), within: Duration.minutes(1) } }),
+      ),
+    )
+  })
+})
+
+describe('a program that comes on first use', () => {
+  // Not on Windows: the program the stand-in package holds is a shell script, which Althar runs (--version) to check it.
+  it.live.skipIf(process.platform === 'win32')('is downloaded at the agent’s first start, checked, and the start goes on', () => {
+    const root = mkdtempSync(join(tmpdir(), 'althar-agents-'))
+    const staged = mkdtempSync(join(tmpdir(), 'althar-npm-'))
+    mkdirSync(join(staged, 'package'))
+    writeFileSync(join(staged, 'package', 'claude'), '#!/bin/sh\necho 2.1.331\n', { mode: 0o755 })
+    execFileSync('tar', ['-czf', join(staged, 'package.tgz'), '-C', staged, 'package'])
+    const bytes = readFileSync(join(staged, 'package.tgz'))
+    const tarball = 'https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/stand-in.tgz'
+    const asked: string[] = []
+    const kept = join(root, 'claude-code', '0.3.331', 'claude')
+    const firstUse = changed((entry) => ({
+      ...entry,
+      definition: {
+        ...entry.definition,
+        // As Config's `usingLocated` points it: its adapter told the copy Althar keeps, once it is there.
+        launch: (node) => {
+          const spec = entry.definition.launch(node)
+          return existsSync(kept) ? { ...spec, env: { ...spec.env, CLAUDE_CODE_EXECUTABLE: kept } } : spec
+        },
+        cli: {
+          name: 'claude',
+          drivenBy: 'CLAUDE_CODE_EXECUTABLE',
+          download: {
+            npm: true as const,
+            version: '0.3.331',
+            assets: {
+              [`${process.platform}-${process.arch}`]: {
+                name: '@anthropic-ai/claude-agent-sdk-stand-in',
+                version: '0.3.331',
+                tarball,
+                integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}`,
+                program: 'claude',
+                prune: [],
+              },
+            },
+          },
+        },
+        // As Claude Code's own check: missing unless its launch names a copy to drive, as it does once Althar has downloaded it.
+        program: (env) =>
+          env.CLAUDE_CODE_EXECUTABLE !== undefined ? undefined : "Claude Code's own program for this computer is missing.",
+      },
+    }))
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { task: created } = yield* task()
+      const exit = yield* Effect.exit(sessions.start({ threadId: created.threadId, agentId: 'claude-code' }))
+      assert.isTrue(Exit.isSuccess(exit), Exit.isFailure(exit) ? Cause.pretty(exit.cause) : '')
+      assert.deepStrictEqual(asked, [tarball])
+      assert.isTrue(existsSync(kept))
+    }).pipe(
+      Effect.provide(
+        runtime(
+          ':memory:',
+          {},
+          {
+            agents: firstUse,
+            agentsRoot: root,
+            download: async (url) => {
+              asked.push(String(url))
+              return new Response(new Uint8Array(bytes))
+            },
+            // Long: once downloaded, the start goes on at once, never waiting this out.
+            programWait: { every: Duration.millis(10), within: Duration.minutes(1) },
+          },
+        ),
       ),
     )
   })

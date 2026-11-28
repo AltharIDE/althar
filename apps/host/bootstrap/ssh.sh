@@ -180,7 +180,11 @@ if [ "$operation" = join ]; then
   case $(( ${#encoded} % 4 )) in 2) encoded="$encoded==" ;; 3) encoded="$encoded=" ;; esac
   payload=$(printf '%s' "$encoded" | base64 -d 2>/dev/null) || fail get ReleaseRejected
   [ -n "$payload" ] || fail get ReleaseRejected
-  field() { printf '%s' "$payload" | sed -n "s|.*\"$1\":\($2\).*|\1|p"; }
+  field() { printf '%s' "$fields" | sed -n "s|.*\"$1\":\($2\).*|\1|p"; }
+  # A release's base, without its agents' own programs, which come each with its sign-in. Else the whole archive's
+  # fields, which are the payload's last mention of each.
+  fields=$(printf '%s' "$payload" | sed -n 's|.*"base":{\([^}]*\)}.*|\1|p')
+  if [ -z "$fields" ]; then fields=$payload; fi
   set -- download "$(field sha256 '"[a-f0-9]*"' | tr -d '"')" "$(field bytes '[0-9]*')" "$(field unpackedBytes '[0-9]*')" \
     "$(field url '"https://[^"]*"' | tr -d '"')" "$(printf '%s' "$fetched" | base64 | tr -d '\n')" "$(printf '%s\n' "$release_key" | base64 | tr -d '\n')"
   operation=install
@@ -311,10 +315,11 @@ private_dir "$root" || fail get UnsafeState
     if [ "$method" = download ]; then
       case "$source" in https://*) ;; *) fail get InvalidRequest ;; esac
       command -v curl >/dev/null || fail get CannotDownload
+      # Three minutes, and as long as it takes at 128 KiB/s, as the release's own downloads have (updates/network.ts).
       (
         ulimit -f "$(( (bytes + 511) / 512 ))"
         exec curl --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' \
-          --connect-timeout 15 --max-time 180 --max-filesize "$bytes" --output "$archive" -- "$source"
+          --connect-timeout 15 --max-time "$(( 180 + bytes / 131072 ))" --max-filesize "$bytes" --output "$archive" -- "$source"
       ) 2>>"$root/transfer.log" &
       pid=$!
       last=0

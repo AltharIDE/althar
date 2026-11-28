@@ -217,6 +217,24 @@ describe('installing a tool', () => {
     ).toBe('Node 25.1.0 has no build for this computer.')
     const pnpm = { 'https://registry.npmjs.org/pnpm': npm('pnpm', { '10.4.1': Buffer.from('') }, '10.4.1') }
     expect(await fails('pnpm', '9', servers(pnpm).fetcher)).toBe('No 9 of pnpm on npm.')
+    // A registry that lists nothing, or offers a tarball over plain HTTP.
+    expect(await fails('pnpm', '9', servers({ 'https://registry.npmjs.org/pnpm': '{}' }).fetcher)).toBe('No 9 of pnpm on npm.')
+    expect(await fails('pnpm', 'latest', servers({ 'https://registry.npmjs.org/pnpm': '{}' }).fetcher)).toBe('No latest of pnpm on npm.')
+    const plain = JSON.stringify({
+      'dist-tags': { latest: '10.4.1' },
+      versions: { '10.4.1': { dist: { tarball: 'http://registry.npmjs.org/pnpm/-/10.4.1.tgz', integrity: 'sha512-x' } } },
+    })
+    expect(await fails('pnpm', 'latest', servers({ 'https://registry.npmjs.org/pnpm': plain }).fetcher)).toBe('No latest of pnpm on npm.')
+    // GitHub's latest with no address at all, and releases with no tag.
+    expect(await fails('uv', 'latest', async () => new Response(null, { status: 302 }))).toBe('GitHub didn’t say which uv is the latest.')
+    expect(
+      await fails(
+        'uv',
+        '0.13',
+        servers({ 'https://api.github.com/repos/astral-sh/uv/releases?per_page=100': JSON.stringify([{}, { tag_name: '0.12.1' }]) })
+          .fetcher,
+      ),
+    ).toBe('uv has no release 0.13.')
     // An integrity by a digest it doesn't know matches nothing.
     const unknown = JSON.stringify({
       'dist-tags': { latest: '1.0.0' },

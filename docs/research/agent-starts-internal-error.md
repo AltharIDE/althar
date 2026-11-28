@@ -105,7 +105,7 @@ Each was checked for how it fails to start and what Althar holds of it.
 | Other ACP agents | The person | Whatever they say | The same classes, the retry, and their own first error line |
 
 The agents the person installs are each started afresh at every start; only
-Claude Code and Codex come with Althar, so only they can be at the wrong
+Claude Code and Codex came with Althar then (they now come on first use, pinned to what their adapters need: docs/plans/agents-on-first-use.md), so only they could be at the wrong
 version without the person having changed anything. Kimi Code, Gemini CLI,
 Qwen Code, Mistral Vibe and Junie weren't installed where this was checked:
 their lines are their parsers' own wording rather than recorded.

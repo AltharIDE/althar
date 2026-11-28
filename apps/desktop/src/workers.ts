@@ -83,6 +83,10 @@ export type WorkerSetupAction =
 /** An agent's sign-in on a worker, as its steps come: the sign-in flow's own, and a page to open in the browser here. */
 export type WorkerSignInEvent =
   | { readonly kind: 'browser'; readonly link: string | null; readonly paste: boolean }
+  /** The agent's own program, downloading to the worker before its sign-in starts; its whole where it is known. */
+  | { readonly kind: 'getting'; readonly bytes: number; readonly totalBytes?: number }
+  /** Its sign-in is its own command, run in a terminal here: this line reaches the worker over SSH and runs it there. */
+  | { readonly kind: 'terminal'; readonly command: string }
   | { readonly kind: 'device'; readonly code: string; readonly page: string; readonly minutes: number }
   | { readonly kind: 'open'; readonly url: string }
   | { readonly kind: 'refused'; readonly message: string }
@@ -113,7 +117,7 @@ export interface WorkersHost {
   readonly signIn: (ssh: string, agent: string, way: 'browser' | 'device') => Promise<void>
   readonly signInAct: (action: { readonly paste: string } | { readonly cancel: true }) => Promise<void>
   readonly onSignIn: (listener: (event: WorkerSignInEvent) => void) => () => void
-  /** The worker's agents and their sign-ins, checked now over SSH. */
+  /** The worker's agents and their sign-ins, by its whole check now over SSH: each signed in started once, as a task would. */
   readonly agents: (ssh: string) => Promise<ReadonlyArray<WorkerAgent>>
 }
 

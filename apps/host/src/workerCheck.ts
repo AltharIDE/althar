@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { accessSync, constants, readFileSync } from 'node:fs'
+import { accessSync, constants, existsSync, readFileSync } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -94,13 +94,21 @@ export const workerPath = (folder: string, current: string, env: NodeJS.ProcessE
     join(current, 'node', 'bin'),
   ].join(':')
 
-/** What a release ships for its agents' sandbox, by name: bubblewrap and ripgrep from Codex's own package, socat its own. */
+/**
+ * What a release ships for its agents' sandbox, by name: its own `tools/bin`, where a worker's release keeps bubblewrap and
+ * ripgrep beside socat whichever agents the worker has; from a release before, Codex's own package's.
+ */
 export const shippedSandbox = (current: string, codex: string | null = bundledCodex()) => {
+  const tools = join(current, 'tools', 'bin')
   // Codex's program is <vendor>/<target>/bin/codex; its bubblewrap and ripgrep sit beside that folder.
   const target = codex === null ? undefined : dirname(dirname(codex))
+  const own = (name: string, codexs: string | undefined) => (existsSync(join(tools, name)) ? join(tools, name) : codexs)
+  const bwrap = own('bwrap', target === undefined ? undefined : join(target, 'codex-resources', 'bwrap'))
+  const rg = own('rg', target === undefined ? undefined : join(target, 'codex-path', 'rg'))
   return {
-    ...(target === undefined ? {} : { bwrap: join(target, 'codex-resources', 'bwrap'), rg: join(target, 'codex-path', 'rg') }),
-    socat: join(current, 'tools', 'bin', 'socat'),
+    ...(bwrap === undefined ? {} : { bwrap }),
+    ...(rg === undefined ? {} : { rg }),
+    socat: join(tools, 'socat'),
   } as Readonly<Partial<Record<'bwrap' | 'rg' | 'socat', string>>>
 }
 

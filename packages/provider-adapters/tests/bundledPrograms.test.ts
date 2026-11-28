@@ -70,6 +70,19 @@ describe('the program Althar brings for an agent', () => {
     assert.isUndefined(agents.codex.program!({ CODEX_PATH: '/nowhere/codex' }))
   })
 
+  it('in a Flatpak, is Codex there only where its launch names the copy its bridge runs, never the bridge alone', () => {
+    const before = process.env.FLATPAK_ID
+    try {
+      process.env.FLATPAK_ID = 'dev.althar.app'
+      // `CODEX_PATH` is always the bridge there: told no copy to run, there is none, so its first start brings one.
+      assert.include(agents.codex.program!({ CODEX_PATH: '/app/bin/althar-host-codex' }) ?? '', 'missing')
+      assert.isUndefined(agents.codex.program!({ CODEX_PATH: '/app/bin/althar-host-codex', ALTHAR_CODEX_PROGRAM: '/kept/codex' }))
+    } finally {
+      if (before === undefined) delete process.env.FLATPAK_ID
+      else process.env.FLATPAK_ID = before
+    }
+  })
+
   it('says it is missing where its platform package isn’t installed, and the rest are', () => {
     const resolve = layout({
       '@agentclientprotocol/claude-agent-acp': ADAPTER,
