@@ -4,6 +4,8 @@ import { mkdtemp, open, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { cleanUp } from '@althar/provider-adapters'
+import { sendSizeWords, sizeOfBytes, type WorkerBytes } from '@althar/worker-protocol/agent-runs'
+export { sendSizeWords }
 import { Effect } from 'effect'
 
 import { GitFailed } from './errors'
@@ -17,21 +19,8 @@ const failed = (cwd: string, args: ReadonlyArray<string>, reason: string) => new
 
 /** Long enough to bundle a large project's whole history, as a worker's first send of it does. */
 const BUNDLE_TIMEOUT_MS = 30 * 60_000
-
-/** A send's size for the thread: 12 KB, 3.4 MB, 81 MB, 1.2 GB. */
-export const sendSizeWords = (bytes: number): string => {
-  const units = [
-    [1024 ** 3, 'GB'],
-    [1024 ** 2, 'MB'],
-    [1024, 'KB'],
-  ] as const
-  for (const [size, unit] of units) {
-    if (bytes < size) continue
-    const value = bytes / size
-    return `${value < 10 ? Number(value.toFixed(1)) : Math.round(value)} ${unit}`
-  }
-  return `${bytes} bytes`
-}
+/** Long enough to take in a large checkpoint from a worker: its commits, or a patch of large files. */
+const APPLY_TIMEOUT_MS = 10 * 60_000
 
 /** What the home sent a worker as a task started there, for the thread: its size, and what it carried. */
 export const sentWords = (sent: { readonly bytes: number; readonly thin: boolean; readonly keeps: boolean }, worker: string): string => {
@@ -216,11 +205,11 @@ export interface WorkerGitState {
 }
 
 /** Materialize the worker's staged tree in Git objects without touching either active index. */
-export const verifyWorkerIndex = (worktree: string, base: string, index: { readonly tree: string; readonly patch: Uint8Array }) =>
+export const verifyWorkerIndex = (worktree: string, base: string, index: { readonly tree: string; readonly patch: WorkerBytes }) =>
   Effect.scoped(
     Effect.gen(function* () {
       const mismatch = () => failed(worktree, ['apply', '--cached'], 'The worker’s staged files do not match their reported Git tree.')
-      if (index.patch.byteLength === 0) return index.tree === base ? base : yield* mismatch()
+      if (sizeOfBytes(index.patch) === 0) return index.tree === base ? base : yield* mismatch()
       const folder = yield* Effect.acquireRelease(
         Effect.tryPromise({
           try: () => mkdtemp(join(tmpdir(), 'althar-worker-index-')),
@@ -228,13 +217,15 @@ export const verifyWorkerIndex = (worktree: string, base: string, index: { reado
         }),
         (folder) => cleanUp(folder, 'the received worker index patch'),
       )
-      const patch = join(folder, 'staged.diff')
-      yield* Effect.tryPromise({ try: () => writeFile(patch, index.patch, { mode: 0o600 }), catch: () => mismatch() })
+      const given = index.patch
+      const patch = given instanceof Uint8Array ? join(folder, 'staged.diff') : given.file
+      if (given instanceof Uint8Array)
+        yield* Effect.tryPromise({ try: () => writeFile(patch, given, { mode: 0o600 }), catch: () => mismatch() })
       const tree = yield* untouched(
         worktree,
         Effect.gen(function* () {
           yield* git(worktree, 'read-tree', base)
-          yield* git(worktree, 'apply', '--cached', '--whitespace=nowarn', '--', patch)
+          yield* gitWithin(APPLY_TIMEOUT_MS, worktree, 'apply', '--cached', '--whitespace=nowarn', '--', patch)
           return yield* git(worktree, 'write-tree')
         }),
       )
@@ -247,8 +238,8 @@ export const acceptWorkerPatch = (
   worktree: string,
   base: WorkerGitState,
   incoming: WorkerGitState & {
-    readonly patch: Uint8Array
-    readonly commits: Uint8Array
+    readonly patch: WorkerBytes
+    readonly commits: WorkerBytes
   },
   ownsRun?: () => boolean,
 ) =>
@@ -260,11 +251,12 @@ export const acceptWorkerPatch = (
       const head = yield* git(worktree, 'rev-parse', '--verify', 'HEAD')
       if (head !== base.head || (yield* treeOf(worktree)) !== base.tree)
         return yield* refuse('This task’s checkout changed on the home. The worker’s changes are still on the worker.')
-      if (incoming.patch.byteLength === 0 && incoming.tree !== base.tree)
-        return yield* refuse('The worker reported a new tree without a patch.')
-      if ((incoming.head === base.head) !== (incoming.commits.byteLength === 0))
+      const patchSize = sizeOfBytes(incoming.patch)
+      const commitsSize = sizeOfBytes(incoming.commits)
+      if (patchSize === 0 && incoming.tree !== base.tree) return yield* refuse('The worker reported a new tree without a patch.')
+      if ((incoming.head === base.head) !== (commitsSize === 0))
         return yield* refuse('The worker’s commit transfer does not match its checkout.')
-      if (incoming.patch.byteLength === 0 && incoming.commits.byteLength === 0) return
+      if (patchSize === 0 && commitsSize === 0) return
       const folder = yield* Effect.acquireRelease(
         Effect.tryPromise({
           try: () => mkdtemp(join(tmpdir(), 'althar-worker-patch-')),
@@ -272,7 +264,10 @@ export const acceptWorkerPatch = (
         }),
         (path) => cleanUp(path, 'the received worker patch'),
       )
-      const received = (filename: string, bytes: Uint8Array) =>
+      // Received into a file already, as the worker pool does with what a worker sends; else written to one here.
+      const received = (filename: string, bytes: WorkerBytes) =>
+        bytes instanceof Uint8Array ? written(filename, bytes) : Effect.succeed(bytes.file)
+      const written = (filename: string, bytes: Uint8Array) =>
         Effect.tryPromise({
           try: async () => {
             const path = join(folder, filename)
@@ -281,24 +276,25 @@ export const acceptWorkerPatch = (
           },
           catch: () => refuse('Could not save the worker’s changes.'),
         })
-      const patch = incoming.patch.byteLength === 0 ? undefined : yield* received('files.diff', incoming.patch)
+      const patch = patchSize === 0 ? undefined : yield* received('files.diff', incoming.patch)
       if (patch !== undefined) {
         // Verify the proposed tree in a private index before writing any home files.
         const projected = yield* untouched(
           worktree,
           Effect.gen(function* () {
             yield* git(worktree, 'read-tree', base.tree)
-            yield* git(worktree, 'apply', '--cached', '--whitespace=nowarn', '--', patch)
+            yield* gitWithin(APPLY_TIMEOUT_MS, worktree, 'apply', '--cached', '--whitespace=nowarn', '--', patch)
             return yield* git(worktree, 'write-tree')
           }),
         )
         if (projected !== incoming.tree) return yield* refuse('The worker’s patch does not match its reported checkout.')
       }
-      if (incoming.commits.byteLength > 0) {
+      if (commitsSize > 0) {
         const archive = yield* received('commits.bundle', incoming.commits)
         if ((yield* git(worktree, 'bundle', 'list-heads', archive)) !== incoming.head + ' ' + COMMITS_REF)
           return yield* refuse('The worker sent a different commit than the one it reported.')
-        yield* git(
+        yield* gitWithin(
+          APPLY_TIMEOUT_MS,
           worktree,
           '-c',
           'protocol.file.allow=always',
@@ -315,7 +311,7 @@ export const acceptWorkerPatch = (
       if (patch !== undefined) {
         // Git apply checks every file before updating any. Keep its checks
         // against edits made since the base was read and against escaping paths.
-        yield* git(worktree, 'apply', '--whitespace=nowarn', '--', patch)
+        yield* gitWithin(APPLY_TIMEOUT_MS, worktree, 'apply', '--whitespace=nowarn', '--', patch)
       }
       if (incoming.head !== base.head) {
         // Import the worker's original commits, with the worker's author and

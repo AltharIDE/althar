@@ -9,6 +9,21 @@ export const MAX_WORKER_HISTORY_BYTES = 2 ** 32 - 1
 export const MAX_WORKER_HISTORY_COMMITS = 32
 /** The most projects whose history a worker says it holds. */
 export const MAX_WORKER_HISTORIES = 64
+/** A size for the person: 12 KB, 3.4 MB, 81 MB, 1.2 GB. */
+export const sendSizeWords = (bytes: number): string => {
+  const units = [
+    [1024 ** 3, 'GB'],
+    [1024 ** 2, 'MB'],
+    [1024, 'KB'],
+  ] as const
+  for (const [size, unit] of units) {
+    if (bytes < size) continue
+    const value = bytes / size
+    return `${value < 10 ? Number(value.toFixed(1)) : Math.round(value)} ${unit}`
+  }
+  return `${bytes} bytes`
+}
+
 export const gitObjectId = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/
 
 export interface WorkerCheckout {

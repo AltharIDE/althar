@@ -11,6 +11,7 @@ use rustix::fs::{CWD, RenameFlags, renameat_with};
 use tokio::process::Command;
 
 use crate::{
+    agent_checkpoint::{CheckpointLimits, Part, Written},
     agent_history::{History, git_command, run_git},
     wire::AgentWorkspaceSource,
 };
@@ -216,16 +217,16 @@ impl Drop for WorkspaceTransfer {
     }
 }
 
-const MAX_PATCH_BYTES: u64 = 16 * 1024 * 1024;
-const MAX_COMMIT_BUNDLE_BYTES: u64 = 64 * 1024 * 1024;
 const COMMITS_REF: &str = "refs/althar/worker-head";
 
+/// A checkpoint, its parts in files of its scratch folder: they go with it once it is sent.
 pub(crate) struct WorkspacePatch {
     pub tree: String,
     pub head: String,
-    pub patch: Vec<u8>,
-    pub commits: Vec<u8>,
-    pub index: Option<(String, Vec<u8>)>,
+    pub patch: Written,
+    pub commits: Written,
+    pub index: Option<(String, Written)>,
+    _scratch: TemporaryIndex,
 }
 
 struct TemporaryIndex(PathBuf);
@@ -243,6 +244,7 @@ pub(crate) async fn workspace_patch(
     base: &str,
     base_head: &str,
     capture_index: bool,
+    limits: CheckpointLimits,
 ) -> io::Result<WorkspacePatch> {
     let object_id = |value: &str| {
         matches!(value.len(), 40 | 64)
@@ -336,10 +338,26 @@ pub(crate) async fn workspace_patch(
         .map_err(io::Error::other)?
         .trim()
         .to_owned();
-    let patch = workspace_diff(checkpoint_git(), base, &tree).await?;
+    let patch = workspace_diff(
+        checkpoint_git(),
+        base,
+        &tree,
+        &index.0.join("files.diff"),
+        Part::Patch,
+        limits,
+    )
+    .await?;
     let staged = match saved_index {
         Some((original, staged)) => {
-            let patch = workspace_diff(checkpoint_git(), base, &staged).await?;
+            let patch = workspace_diff(
+                checkpoint_git(),
+                base,
+                &staged,
+                &index.0.join("staged.diff"),
+                Part::Staged,
+                limits,
+            )
+            .await?;
             if crate::agent_files::read_in_checkout(directory, ".git/index")? != original {
                 return Err(invalid(
                     "The worker changed its staged files while the snapshot was being made",
@@ -359,7 +377,7 @@ pub(crate) async fn workspace_patch(
         ));
     }
     let commits = if head == base_head {
-        Vec::new()
+        Written::default()
     } else {
         if !checkpoint_git()
             .args(["merge-base", "--is-ancestor", base_head, &head])
@@ -391,12 +409,12 @@ pub(crate) async fn workspace_patch(
         {
             return Err(invalid("Could not package the worker's new commits"));
         }
-        if fs::metadata(&bundle)?.len() > MAX_COMMIT_BUNDLE_BYTES {
-            return Err(invalid(
-                "The worker committed more than the home can receive in one checkpoint",
-            ));
+        let size = fs::metadata(&bundle)?.len();
+        limits.check(Part::Commits, size)?;
+        Written {
+            path: Some(bundle),
+            size,
         }
-        fs::read(bundle)?
     };
     Ok(WorkspacePatch {
         tree,
@@ -404,12 +422,25 @@ pub(crate) async fn workspace_patch(
         patch,
         commits,
         index: staged,
+        _scratch: index,
     })
 }
 
-async fn workspace_diff(mut git: Command, base: &str, tree: &str) -> io::Result<Vec<u8>> {
-    use tokio::io::AsyncReadExt as _;
-    let mut diff = git
+/// The patch from `base` to `tree`, written to `to`: none where they're the same.
+async fn workspace_diff(
+    mut git: Command,
+    base: &str,
+    tree: &str,
+    to: &Path,
+    what: Part,
+    limits: CheckpointLimits,
+) -> io::Result<Written> {
+    let output = format!(
+        "--output={}",
+        to.to_str()
+            .ok_or_else(|| invalid("The checkpoint folder must be UTF-8"))?
+    );
+    let made = git
         .args([
             "diff",
             "--binary",
@@ -418,25 +449,25 @@ async fn workspace_diff(mut git: Command, base: &str, tree: &str) -> io::Result<
             "--no-color",
             "--no-renames",
             "--no-relative",
+            &output,
             base,
             tree,
             "--",
         ])
-        .stdout(Stdio::piped())
-        .spawn()?;
-    let mut patch = Vec::new();
-    diff.stdout
-        .take()
-        .ok_or_else(|| invalid("No worker diff output"))?
-        .take(MAX_PATCH_BYTES + 1)
-        .read_to_end(&mut patch)
+        .stdout(Stdio::null())
+        .status()
         .await?;
-    if patch.len() as u64 > MAX_PATCH_BYTES || !diff.wait().await?.success() {
+    if !made.success() {
         return Err(invalid(
-            "The worker changes could not fit in a workspace checkpoint",
+            "The worker couldn't write its changes for a checkpoint. Is its disk full?",
         ));
     }
-    Ok(patch)
+    let size = fs::metadata(to)?.len();
+    limits.check(what, size)?;
+    Ok(Written {
+        path: (size > 0).then(|| to.to_owned()),
+        size,
+    })
 }
 
 #[cfg(test)]
@@ -578,16 +609,20 @@ mod tests {
         run_git(&worker, &["add", "stage.txt"]).await?;
         let staged = run_git(&worker, &["write-tree"]).await?;
         fs::write(worker.join("stage.txt"), "Working file on the worker\n")?;
-        let update = workspace_patch(&worker, "check", &tree, &head, true).await?;
+        let large = CheckpointLimits::of(true);
+        let update = workspace_patch(&worker, "check", &tree, &head, true, large).await?;
         let (index_tree, index_patch) = update.index.as_ref().expect("Requested staged tree");
+        let index_patch = index_patch.bytes()?;
+        let patch = update.patch.bytes()?;
         assert_eq!(index_tree, staged.trim());
-        assert!(String::from_utf8_lossy(index_patch).contains("+Staged by the worker"));
-        assert!(!String::from_utf8_lossy(index_patch).contains("Working file on the worker"));
-        assert!(String::from_utf8_lossy(&update.patch).contains("+Working file on the worker"));
+        assert!(String::from_utf8_lossy(&index_patch).contains("+Staged by the worker"));
+        assert!(!String::from_utf8_lossy(&index_patch).contains("Working file on the worker"));
+        assert!(String::from_utf8_lossy(&patch).contains("+Working file on the worker"));
         assert_eq!(run_git(&worker, &["write-tree"]).await?, staged);
-        assert!(String::from_utf8_lossy(&update.patch).contains("+On the worker"));
-        assert!(String::from_utf8_lossy(&update.patch).contains("+Unsaved in Git"));
-        assert!(!update.commits.is_empty());
+        assert!(String::from_utf8_lossy(&patch).contains("+On the worker"));
+        assert!(String::from_utf8_lossy(&patch).contains("+Unsaved in Git"));
+        assert!(update.commits.size > 0 && !update.commits.bytes()?.is_empty());
+        drop(update);
         assert_eq!(
             update.head,
             run_git(&worker, &["rev-parse", "HEAD"]).await?.trim()
@@ -601,10 +636,42 @@ mod tests {
         fs::write(worker.join("ignored.txt"), "Forced into the index\n")?;
         run_git(&worker, &["add", "-f", "ignored.txt"]).await?;
         fs::write(worker.join("ignored.txt"), "New working contents\n")?;
-        let copied = workspace_patch(&worker, "copy", &tree, &head, true).await?;
-        let (_, index_patch) = copied.index.expect("Requested staged tree");
-        assert!(String::from_utf8_lossy(&index_patch).contains("+Forced into the index"));
-        assert!(String::from_utf8_lossy(&copied.patch).contains("+New working contents"));
+        let copied = workspace_patch(&worker, "copy", &tree, &head, true, large).await?;
+        let (_, index_patch) = copied.index.as_ref().expect("Requested staged tree");
+        assert!(String::from_utf8_lossy(&index_patch.bytes()?).contains("+Forced into the index"));
+        assert!(String::from_utf8_lossy(&copied.patch.bytes()?).contains("+New working contents"));
+        drop(copied);
+
+        // More than an older home takes: said, with what to do, and the changes stay.
+        // Bytes Git can't pack smaller, as a build's output is.
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let noise: Vec<u8> = (0..17 * 1024 * 1024)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                (state >> 32) as u8
+            })
+            .collect();
+        fs::write(worker.join("large.bin"), noise)?;
+        let refused = match workspace_patch(
+            &worker,
+            "older",
+            &tree,
+            &head,
+            false,
+            CheckpointLimits::of(false),
+        )
+        .await
+        {
+            Ok(_) => panic!("An older home takes at most 16 MB of uncommitted changes"),
+            Err(error) => error,
+        };
+        assert_eq!(refused.kind(), io::ErrorKind::FileTooLarge);
+        assert!(refused.to_string().contains("Update Althar on the home"));
+        assert!(worker.join("large.bin").exists());
+        let taken = workspace_patch(&worker, "newer", &tree, &head, false, large).await?;
+        assert!(taken.patch.size > 16 * 1024 * 1024);
         Ok(())
     }
 }

@@ -173,6 +173,9 @@ message AgentHomeHello {
   uint32 version = 3;
   uint32 lease_ms = 4;
   bool reserve_before_transfer = 5;
+  // It takes a checkpoint's patch, staged patch and commits each up to 4 GiB,
+  // through its disk. An older home takes a 16 MiB patch and 64 MiB of commits.
+  bool takes_large_checkpoints = 6;
 }
 
 // Provider executable, provider arguments, and account credentials stay on the worker.
@@ -413,6 +416,8 @@ message AgentSnapshotResult {
   bytes commits_sha256 = 8;
   string workspace_id = 9;
   AgentSnapshotIndex index = 10;
+  // Where it is unavailable: why, in words to show, such as what is too large.
+  string problem = 11;
 }
 
 message AgentSnapshotIndex {

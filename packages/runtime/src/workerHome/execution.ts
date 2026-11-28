@@ -8,6 +8,7 @@ import { AgentRunOutcome } from '@althar/worker-protocol'
 import {
   isWorkerBusy,
   MAX_WORKER_BUNDLE_BYTES,
+  MAX_WORKER_SET_BYTES,
   type AgentWorkerPool,
   type WorkerAgentProcess,
   type WorkerManagedProcess,
@@ -348,7 +349,7 @@ export const workerExecution = (
                     try: () => workspace.agent.readPatch(previous.tree, previous.head, commandId),
                     catch: unavailable,
                   })
-                  yield* acceptWorkerPatch(copy, previous, changed, owns)
+                  yield* acceptWorkerPatch(copy, previous, changed, owns).pipe(Effect.ensuring(Effect.sync(() => changed.release?.())))
                   baseline = { head: changed.head, tree: changed.tree }
                 }).pipe(
                   Effect.mapError(
@@ -419,6 +420,13 @@ export const workerExecution = (
             const [primary] = entries
             if (primary === undefined) return yield* failed('There are no task repositories to send to this worker.')
             const bytes = entries.reduce((sum, entry) => sum + entry.checkout.size, 0)
+            // A worker on an older release takes a repository set's sends together only up to its own limit.
+            if (limits.keeps !== true && repositories !== undefined && bytes > MAX_WORKER_SET_BYTES)
+              return yield* failed(
+                new Error(
+                  `The task’s repositories come to ${sendSizeWords(bytes)} together; the worker takes at most ${sendSizeWords(MAX_WORKER_SET_BYTES)} at once. Update the worker: it then keeps each project’s history, and later sends carry only what’s new.`,
+                ),
+              )
             // The worker holds the send, its copy of the history and the checkout made from them: about three times the send.
             const free = pool.list(projectId).find((one) => one.workerId === workerId)?.capacity?.freeDiskMib
             if (free !== undefined && bytes * 3 > free * 1024 ** 2)
@@ -490,12 +498,15 @@ export const workerExecution = (
                   try: () => agent.readPatch(entry.base.tree, entry.base.head, entry.workspaceId, captureIndex),
                   catch: unavailable,
                 })
-                if (captureIndex) {
-                  if (changed.index === undefined) return yield* Effect.fail('The worker did not return its staged files.')
-                  const index = yield* verifyWorkerIndex(entry.worktree, entry.base.tree, changed.index)
-                  captured.set(entry.worktree, { head: changed.head, tree: changed.tree, index })
-                }
-                yield* acceptWorkerPatch(entry.worktree, entry.base, changed, agent.ownsRun)
+                // What came back is in files of its own until it is taken in, or refused.
+                yield* Effect.gen(function* () {
+                  if (captureIndex) {
+                    if (changed.index === undefined) return yield* Effect.fail('The worker did not return its staged files.')
+                    const index = yield* verifyWorkerIndex(entry.worktree, entry.base.tree, changed.index)
+                    captured.set(entry.worktree, { head: changed.head, tree: changed.tree, index })
+                  }
+                  yield* acceptWorkerPatch(entry.worktree, entry.base, changed, agent.ownsRun)
+                }).pipe(Effect.ensuring(Effect.sync(() => changed.release?.())))
                 entry.base = { head: changed.head, tree: changed.tree }
                 if (!agent.ownsRun()) return yield* Effect.fail('The worker no longer owns this run.')
               }

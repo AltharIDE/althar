@@ -60,7 +60,8 @@ it.live('transfers a task checkout, imports the worker’s original commit and k
       assert.include(revoked.reason, 'no longer owns this run')
       assert.strictEqual(yield* git(home, 'rev-parse', 'HEAD'), source.head)
       assert.strictEqual(yield* treeOf(home), source.tree)
-      yield* acceptWorkerPatch(home, source, changes)
+      // Its commits as the worker pool hands them over: in the file they were received into.
+      yield* acceptWorkerPatch(home, source, { ...changes, commits: { file: received, size: changes.commits.byteLength } })
       assert.strictEqual(yield* git(home, 'rev-parse', 'HEAD'), head)
       assert.strictEqual(readFileSync(join(home, 'draft.txt'), 'utf8'), 'Uncommitted work\n')
       assert.strictEqual(yield* git(home, 'status', '--porcelain'), '?? draft.txt')

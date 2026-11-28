@@ -10,10 +10,10 @@ import { join } from 'node:path'
 import { test, type TestContext } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { setInterval, setTimeout as delay } from 'node:timers/promises'
-import { createHash, X509Certificate } from 'node:crypto'
+import { createHash, randomBytes, X509Certificate } from 'node:crypto'
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { Client, credentials, status } from '@grpc/grpc-js'
-import { isWorkerBusy, makeAgentWorkerPool, runAgentMethod, type AgentRunAssignment } from '../src/agentRuns.ts'
+import { isWorkerBusy, makeAgentWorkerPool, readBytes, runAgentMethod, type AgentRunAssignment } from '../src/agentRuns.ts'
 import { agentToolsMethod } from '../src/agentTools.ts'
 import { agentPreviewMethod } from '../src/agentPreviews.ts'
 import { bindWorkerHandshake, workerCertificateFingerprint } from '../src/grpc.ts'
@@ -440,11 +440,79 @@ void test('verifies the staged-file digest independently of the working checkout
   }
   const captured = await checkpoint(true)
   equal(captured.index?.tree, index)
-  deepEqual(captured.index?.patch, bytes)
-  deepEqual(captured.patch, Buffer.alloc(0))
+  deepEqual(readBytes(captured.index?.patch ?? new Uint8Array()), bytes)
+  deepEqual(readBytes(captured.patch), Buffer.alloc(0))
+  captured.release?.()
   await rejects(checkpoint(false), /wrong workspace transfer digest/)
   equal(agent.ownsRun(), false)
 })
+
+void test(
+  'takes back a checkpoint larger than an older home did, through its disk, and says what a worker found too large',
+  { timeout: 30_000 },
+  async (t) => {
+    const { pool, connect } = await fixture(t)
+    const worker = connect()
+    worker.send(hello(workerId, journalId))
+    const greeted = await worker.read()
+    ok(greeted?.case === 'hello')
+    // It tells the worker it takes large checkpoints.
+    equal(greeted.value.takesLargeCheckpoints, true)
+    const opening = pool.start(workerId, placement)
+    const start = await worker.read()
+    ok(start?.case === 'start')
+    const { runId } = start.value
+    worker.send({
+      case: 'ready',
+      value: {
+        $typeName: 'althar.worker.v1.AgentRunReady',
+        runId,
+        workspacePath: '/worker/project',
+        toolsPort: 0,
+        skillsPath: '',
+        mcpCommands: [],
+      },
+    })
+    const agent = await opening
+    const base = 'a'.repeat(40)
+    const digest = (given: Uint8Array) => createHash('sha256').update(given).digest()
+    const empty = digest(Buffer.alloc(0))
+
+    // More than the 16 MiB patch an older home took: received in full.
+    const patch = randomBytes(17 * 1024 * 1024)
+    const large = agent.readPatch(base, base)
+    ok((await worker.read())?.case === 'snapshot')
+    worker.send({
+      case: 'snapshot',
+      value: create(AgentSnapshotResultSchema, {
+        runId,
+        head: base,
+        tree: 'd'.repeat(40),
+        size: patch.byteLength,
+        sha256: digest(patch),
+        commitsSize: 0,
+        commitsSha256: empty,
+      }),
+    })
+    for (let offset = 0; offset < patch.byteLength; offset += 2_048)
+      worker.send({ case: 'patch', value: create(AgentRunBytesSchema, { runId, data: patch.subarray(offset, offset + 2_048) }) })
+    const received = await large
+    ok(readBytes(received.patch).equals(patch))
+    ok(!(received.patch instanceof Uint8Array))
+    const file = received.patch.file
+    ok(existsSync(file))
+    received.release?.()
+    ok(!existsSync(file))
+
+    // Too large even so: the worker's own words, what is too large and what to do.
+    const refused = agent.readPatch(base, base)
+    ok((await worker.read())?.case === 'snapshot')
+    const problem = 'The worker’s new commits come to 5 GB; a checkpoint carries at most 4 GB of them at once.'
+    worker.send({ case: 'snapshot', value: create(AgentSnapshotResultSchema, { runId, unavailable: true, problem }) })
+    await rejects(refused, (error: Error) => error.message === problem)
+    equal(agent.ownsRun(), true)
+  },
+)
 
 void test('waits for a negotiated worker reservation before reading project bytes', { timeout: 15_000 }, async (t) => {
   const { pool, connect } = await fixture(t)
@@ -1163,7 +1231,7 @@ void test(
         await scratch.write(Buffer.from('A separate change\n'))
         equal(Buffer.from(await spoken).toString(), 'Home source\nA separate change\n')
         equal(readFileSync(join(leadCheckout, 'README.md'), 'utf8'), 'Home source\n')
-        ok(Buffer.from((await agent.readPatch(tree, head, id)).patch).includes('+A separate change'))
+        ok(readBytes((await agent.readPatch(tree, head, id)).patch).includes('+A separate change'))
         await scratch.stop()
         await rejects(agent.readPatch(tree, head, id), /does not own/)
       }
@@ -1204,16 +1272,16 @@ void test(
       writeFileSync(join(leadCheckout, 'stage.txt'), 'unstaged on the native worker\n')
       const change = await agent.readPatch(tree, head, grouped ? workspaceId : undefined, true)
       equal(change.index?.tree, staged)
-      ok(Buffer.from(change.index?.patch ?? []).includes('+staged on the native worker'))
-      ok(!Buffer.from(change.index?.patch ?? []).includes('unstaged on the native worker'))
-      ok(Buffer.from(change.patch).includes('+unstaged on the native worker'))
-      ok(Buffer.from(change.patch).includes('+' + data))
+      ok(readBytes(change.index?.patch ?? new Uint8Array()).includes('+staged on the native worker'))
+      ok(!readBytes(change.index?.patch ?? new Uint8Array()).includes('unstaged on the native worker'))
+      ok(readBytes(change.patch).includes('+unstaged on the native worker'))
+      ok(readBytes(change.patch).includes('+' + data))
       if (grouped) {
         equal(readFileSync(join(agent.workspacePath, 'web/README.md'), 'utf8'), 'Home source\n')
         const secondSetup = agent.setup?.repositories.find((one) => one.workspaceId === webId)
         equal(secondSetup?.exitCode, 7)
         equal(Buffer.from(secondSetup?.outputTail ?? []).toString(), 'web-failed')
-        ok(Buffer.from((await agent.readPatch(tree, head, webId)).patch).includes('+second-setup'))
+        ok(readBytes((await agent.readPatch(tree, head, webId)).patch).includes('+second-setup'))
         await rejects(agent.readPatch(tree, head, 'ws_' + '8'.repeat(32)), /does not own/)
       }
       const response = await fetch('http://127.0.0.1:' + agent.toolPort + '/mcp', {

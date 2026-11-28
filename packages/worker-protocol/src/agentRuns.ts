@@ -34,18 +34,21 @@ import {
   MAX_WORKER_HISTORY_COMMITS,
   gitObjectId as objectId,
   sendLimitOf,
+  sendSizeWords,
   sourceOf,
   transferMsOf,
   validCheckout,
   type WorkerCheckout,
 } from './agentCheckout.ts'
 import { makeWorkerFiles, type WorkerFile } from './agentFiles.ts'
+import { receiveParts, type ReceivingParts, type WorkerBytes } from './agentReceived.ts'
 import { makeManagedCommands, type WorkerHelperRequest, type WorkerManagedCommand, type WorkerManagedProcess } from './agentManaged.ts'
 import { makePreviewTunnels } from './agentPreviews.ts'
 import { workerSkillBundle, type WorkerSkillFile } from './agentSkillFiles.ts'
 import { deferred, type Deferred } from './deferred.ts'
 
 export type { WorkerFile } from './agentFiles.ts'
+export { readBytes, sizeOfBytes, type ReceivedFile, type WorkerBytes } from './agentReceived.ts'
 export type { WorkerManagedCommand, WorkerManagedProcess } from './agentManaged.ts'
 export { MAX_WORKER_SKILL_BYTES, MAX_WORKER_SKILL_FILES, type WorkerSkillFile } from './agentSkillFiles.ts'
 
@@ -95,12 +98,15 @@ const START_TIMEOUT_MS = 30_000
 const STOP_TIMEOUT_MS = 6_000
 const CHECKOUT_TIMEOUT_MS = 180_000
 const SNAPSHOT_TIMEOUT_MS = 60_000
-const MAX_PATCH_BYTES = 16 * 1024 * 1024
-const MAX_COMMIT_BUNDLE_BYTES = 64 * 1024 * 1024
+/** What a worker on an older release sends back at once, as its checkpoint's patch and its new commits. */
+const OLDER_WORKER_PATCH_BYTES = 16 * 1024 * 1024
+const OLDER_WORKER_COMMIT_BYTES = 64 * 1024 * 1024
 const MAX_SETUP_BYTES = 128 * 1024
 const SETUP_TIMEOUT_MS = 10 * 60_000 + START_TIMEOUT_MS
-export { MAX_WORKER_BUNDLE_BYTES, MAX_WORKER_HISTORY_BYTES, sendLimitOf, type WorkerCheckout } from './agentCheckout.ts'
+export { MAX_WORKER_BUNDLE_BYTES, MAX_WORKER_HISTORY_BYTES, sendLimitOf, sendSizeWords, type WorkerCheckout } from './agentCheckout.ts'
 const PROVIDER_ID = /^[a-z][a-z0-9-]{0,47}$/
+// eslint-disable-next-line no-control-regex -- Why a worker couldn't send its changes is shown, on one line.
+const SHOWN_PROBLEM = /^[^\x00-\x1f\x7f]{1,600}$/u
 const MCP_COMMAND_NAME = /^[a-zA-Z0-9_.-]{1,64}$/
 const MAX_MCP_COMMANDS = 16
 
@@ -242,9 +248,11 @@ export interface AgentRunLedger {
 export interface WorkerPatch {
   readonly tree: string
   readonly head: string
-  readonly patch: Uint8Array
-  readonly commits: Uint8Array
-  readonly index?: { readonly tree: string; readonly patch: Uint8Array }
+  readonly patch: WorkerBytes
+  readonly commits: WorkerBytes
+  readonly index?: { readonly tree: string; readonly patch: WorkerBytes }
+  /** Lets the files it was received into go, once taken in or not wanted: none where it holds none. */
+  readonly release?: () => void
 }
 
 export interface WorkerLocalMcpCommand {
@@ -345,20 +353,15 @@ interface Slot {
   readonly stopRun: () => boolean
 }
 
-interface SnapshotPart {
-  readonly hash: Uint8Array
-  readonly bytes: Buffer
-  written: number
-}
-
 interface PendingSnapshot {
   readonly result: Deferred<WorkerPatch>
-  readonly timer: NodeJS.Timeout
+  timer: NodeJS.Timeout
   readonly baseHead: string
   readonly baseTree: string
   readonly workspaceId: string
   readonly captureIndex: boolean
-  transfer?: { tree: string; head: string; patch: SnapshotPart; commits: SnapshotPart; index?: SnapshotPart & { readonly tree: string } }
+  /** Its patch, commits and, where asked, staged patch, as parts 0, 1 and 2, each received into a file of its own. */
+  transfer?: { readonly tree: string; readonly head: string; readonly indexTree?: string; readonly parts: ReceivingParts; finishing?: true }
 }
 
 interface Run {
@@ -596,6 +599,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
       if (pending === undefined) return
       delete current.snapshot
       clearTimeout(pending.timer)
+      pending.transfer?.parts.discard()
       pending.result.reject(error)
     }
     const readPatch = (current: Run, baseTree: string, baseHead: string, workspaceId = '', captureIndex = false): Promise<WorkerPatch> => {
@@ -619,20 +623,29 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
     }
     const finishSnapshot = (current: Run, pending: PendingSnapshot): void => {
       const transfer = pending.transfer
-      if (transfer === undefined) return
-      const parts = transfer.index === undefined ? [transfer.patch, transfer.commits] : [transfer.patch, transfer.commits, transfer.index]
-      if (parts.some((part) => part.written !== part.bytes.length)) return
-      if (parts.some((part) => !createHash('sha256').update(part.bytes).digest().equals(part.hash)))
-        return fail(status.INVALID_ARGUMENT, 'The worker returned the wrong workspace transfer digest.')
-      clearTimeout(pending.timer)
-      delete current.snapshot
-      pending.result.resolve({
-        tree: transfer.tree,
-        head: transfer.head,
-        patch: transfer.patch.bytes,
-        commits: transfer.commits.bytes,
-        ...(transfer.index === undefined ? {} : { index: { tree: transfer.index.tree, patch: transfer.index.bytes } }),
-      })
+      if (transfer === undefined || transfer.finishing === true || !transfer.parts.complete()) return
+      transfer.finishing = true
+      void transfer.parts.finish().then(
+        ([patch = new Uint8Array(), commits = new Uint8Array(), index]) => {
+          if (current.snapshot !== pending) return transfer.parts.discard()
+          clearTimeout(pending.timer)
+          delete current.snapshot
+          pending.result.resolve({
+            tree: transfer.tree,
+            head: transfer.head,
+            patch,
+            commits,
+            ...(transfer.indexTree === undefined || index === undefined ? {} : { index: { tree: transfer.indexTree, patch: index } }),
+            release: transfer.parts.discard,
+          })
+        },
+        (error: unknown) => {
+          if (current.snapshot !== pending) return transfer.parts.discard()
+          const digest = error instanceof Error && error.message.includes('digest')
+          if (digest) return fail(status.INVALID_ARGUMENT, 'The worker returned the wrong workspace transfer digest.')
+          interruptSnapshot(current, error instanceof Error ? error : new Error('The home couldn’t keep the worker’s changes.'))
+        },
+      )
     }
     const start: Slot['start'] = (placement, { checkout, repositories, signal, toolPort, setup, skills }) => {
       if (closed || run !== undefined || recovering !== undefined)
@@ -941,6 +954,8 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
               version: WORKER_PROTOCOL_VERSION,
               leaseMs: AGENT_WORKER_LEASE_MS,
               reserveBeforeTransfer,
+              // What comes back goes through its disk (agentReceived.ts): each part up to the protocol's 4 GiB.
+              takesLargeCheckpoints: true,
             }),
           })
           if (recovering !== undefined) sendControl({ case: 'reconcile', value: create(AgentRunReconcileSchema, recovering) })
@@ -1139,14 +1154,22 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
           const pending = current.snapshot
           if (pending === undefined) return fail(status.FAILED_PRECONDITION, 'There is no request for workspace changes.')
           if (payload.case === 'snapshot') {
-            const { size, sha256, tree, head, commitsSize, commitsSha256, unavailable, index } = payload.value
+            const { size, sha256, tree, head, commitsSize, commitsSha256, unavailable, index, problem } = payload.value
             if (pending.transfer !== undefined) return fail(status.INVALID_ARGUMENT, 'The worker already sent its patch metadata.')
             if (payload.value.workspaceId !== pending.workspaceId)
               return fail(status.INVALID_ARGUMENT, 'The worker returned changes for a different repository.')
-            if (unavailable) return interruptSnapshot(current, new Error('The worker could not read its workspace changes.'))
+            if (unavailable)
+              return interruptSnapshot(
+                current,
+                new Error(
+                  SHOWN_PROBLEM.test(problem)
+                    ? problem
+                    : slot?.history.keeps === true
+                      ? 'The worker could not read its workspace changes.'
+                      : `The worker could not read its workspace changes. Where they’re large, update the worker: on its older release it sends back at most ${sendSizeWords(OLDER_WORKER_COMMIT_BYTES)} of new commits and ${sendSizeWords(OLDER_WORKER_PATCH_BYTES)} of other changes at once.`,
+                ),
+              )
             if (
-              size > MAX_PATCH_BYTES ||
-              commitsSize > MAX_COMMIT_BUNDLE_BYTES ||
               !objectId.test(tree) ||
               !objectId.test(head) ||
               sha256.byteLength !== 32 ||
@@ -1156,39 +1179,47 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
               (index !== undefined &&
                 (!objectId.test(index.tree) ||
                   index.tree.length !== pending.baseTree.length ||
-                  index.size > MAX_PATCH_BYTES ||
                   index.sha256.byteLength !== 32 ||
                   (index.tree === pending.baseTree) !== (index.size === 0)))
             )
               return fail(status.INVALID_ARGUMENT, 'The worker sent invalid workspace transfer metadata.')
-            pending.transfer = {
-              tree,
-              head,
-              patch: { bytes: Buffer.alloc(size), hash: sha256, written: 0 },
-              commits: { bytes: Buffer.alloc(commitsSize), hash: commitsSha256, written: 0 },
-              ...(index === undefined
-                ? {}
-                : { index: { tree: index.tree, bytes: Buffer.alloc(index.size), hash: index.sha256, written: 0 } }),
+            let parts: ReceivingParts
+            try {
+              parts = receiveParts([
+                { size, sha256 },
+                { size: commitsSize, sha256: commitsSha256 },
+                ...(index === undefined ? [] : [{ size: index.size, sha256: index.sha256 }]),
+              ])
+            } catch (error) {
+              // No room for them here: said so, and the changes stay on the worker.
+              return interruptSnapshot(current, error instanceof Error ? error : new Error('The home couldn’t keep the worker’s changes.'))
             }
+            pending.transfer = { tree, head, parts, ...(index === undefined ? {} : { indexTree: index.tree }) }
+            // Large changes have longer to arrive, at a slow link's pace.
+            clearTimeout(pending.timer)
+            pending.timer = setTimeout(
+              () => fail(status.DEADLINE_EXCEEDED, 'The worker did not return its workspace changes.'),
+              SNAPSHOT_TIMEOUT_MS + transferMsOf(size + commitsSize + (index?.size ?? 0)),
+            )
+            pending.timer.unref()
             finishSnapshot(current, pending)
             return
           }
-          const part =
-            payload.case === 'patch'
-              ? pending.transfer?.patch
-              : payload.case === 'indexPatch'
-                ? pending.transfer?.index
-                : pending.transfer?.commits
+          const at = payload.case === 'patch' ? 0 : payload.case === 'commits' ? 1 : 2
           const { data } = payload.value
-          if (
-            part === undefined ||
-            data.byteLength === 0 ||
-            data.byteLength > MAX_AGENT_CHUNK ||
-            part.written + data.byteLength > part.bytes.length
-          )
-            return fail(status.INVALID_ARGUMENT, 'The worker sent invalid workspace transfer bytes.')
-          part.bytes.set(data, part.written)
-          part.written += data.byteLength
+          const transfer = pending.transfer
+          const written =
+            transfer === undefined || data.byteLength > MAX_AGENT_CHUNK || (at === 2 && transfer.indexTree === undefined)
+              ? 'invalid'
+              : transfer.parts.write(at, data)
+          if (written === 'invalid') return fail(status.INVALID_ARGUMENT, 'The worker sent invalid workspace transfer bytes.')
+          if (written === 'wait' && transfer !== undefined) {
+            // Its disk is slower than the worker: the worker waits for it.
+            call.pause()
+            void transfer.parts.drained(at).then(() => {
+              if (!closed) call.resume()
+            })
+          }
           finishSnapshot(current, pending)
           return
         }
