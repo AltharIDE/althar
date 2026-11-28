@@ -376,7 +376,8 @@ export class Plans extends Context.Service<
             workerPlanProblem(requirements, parameters.worksIn, parameters.steps) ??
             (workerId === 'auto' && worker === undefined
               ? automaticWorkerUnavailable
-              : workerProblem(worker, parameters.steps, requirements.repositoryCount))
+              : // Picked by name, a worker at work on another task takes it anyway: it waits in Up next for the worker.
+                workerProblem(worker, parameters.steps, requirements.repositoryCount, workerId !== 'auto'))
           if (worker === undefined || message !== undefined)
             return yield* new ApiError({ reason: 'Invalid', message: message ?? automaticWorkerUnavailable })
           // Its agent there doesn't offer the lead's model: the person picks one it does.

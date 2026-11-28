@@ -45,7 +45,7 @@ export const WithWorkers: Story = {
   args: { workers: LOAD_WORKERS, onWorker: fn(), agents: { ...AGENTS_BUSY, onWorkers: 1 } },
   play: async ({ canvasElement, args }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('1 of them on a worker')).toBeInTheDocument()
+    await expect(c.getByText('1 more on a worker')).toBeInTheDocument()
     await expect(c.getByRole('heading', { name: 'Workers' })).toBeInTheDocument()
     await expect(c.getByRole('heading', { name: 'Running on This Mac' })).toBeInTheDocument()
     await expect(c.getByText('Offline')).toBeInTheDocument()

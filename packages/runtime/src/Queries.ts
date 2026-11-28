@@ -69,7 +69,9 @@ import {
   plainTitle,
   shipsToOpen,
   toolPhrase,
+  type Queued,
   type WorkPlaces,
+  workerName,
 } from '@althar/contracts'
 import { Cause, Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema, Semaphore } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
@@ -1034,13 +1036,16 @@ interface Shown {
   readonly json: string
 }
 
+/** The places as cards read them, with the home's worker each holder runs on, by its place in `holders`; none for here. */
+type PlacesRead = WorkPlaces & { readonly away: ReadonlyArray<string | undefined> }
+
 /**
  * Where the read under way stands in the change feed, as it first asked: the cards it gives out are as of then, at least.
  * And what its kept cards' looks said (standsOn.ts), each looked at once however many cards stood on it.
  */
 const ReadAt = Context.Reference<{
   at?: number
-  places?: Deferred.Deferred<WorkPlaces, SqlError.SqlError>
+  places?: Deferred.Deferred<PlacesRead, SqlError.SqlError>
   readonly looked: Map<string, Promise<string>>
 } | null>('@althar/runtime/Queries/ReadAt', {
   defaultValue: () => null,
@@ -2245,6 +2250,7 @@ export class Queries extends Context.Service<
         const titles = new Map(tasks.map((task) => [task.id, task.title]))
         return {
           ...now,
+          away: now.holders.map((holder) => holder.workerId),
           holders: yield* Effect.forEach(now.holders, (holder) =>
             Effect.gen(function* () {
               const live = holder.threadId !== null ? yield* sessions.running(holder.threadId) : Option.none()
@@ -2269,17 +2275,36 @@ export class Queries extends Context.Service<
         const read = yield* ReadAt
         if (read === null) return yield* readWorkPlaces
         if (read.places !== undefined) return yield* Deferred.await(read.places)
-        const places = Deferred.makeUnsafe<WorkPlaces, SqlError.SqlError>()
+        const places = Deferred.makeUnsafe<PlacesRead, SqlError.SqlError>()
         read.places = places
         return yield* readWorkPlaces.pipe(Effect.onExit((exit) => Deferred.done(places, exit)))
       })
 
-      /** A task never waits behind itself: its own places aren't among those it waits for. Held back for now, it says why. */
+      /** A worker as the window names it: as the person added it, else by its system and the end of its id. */
+      const workerNamed = (workerId: string) => {
+        const worker = config.workers?.enrolled?.()?.find((one) => one.workerId === workerId)
+        return workerName({
+          workerId,
+          ...(worker?.name === undefined ? {} : { name: worker.name }),
+          ...(worker?.capacity === undefined ? {} : { capacity: worker.capacity }),
+        })
+      }
+
+      /**
+       * A task never waits behind itself: its own places aren't among those it waits for. Held back for now, it says why.
+       * Waiting for the home's worker its plan placed it on, what holds it is that worker's task, by the worker's name; else
+       * the agents at work here, those on workers left out.
+       */
       const queuedNow = (taskId: string) =>
         Effect.gen(function* () {
-          const [now, held] = [yield* workPlaces, (yield* (yield* Busy).held).get(taskId)]
-          const holders = now.holders.filter((holder) => holder.taskId !== taskId)
-          return { ...now, busy: holders.length, holders, ...(held === undefined ? {} : { held }) }
+          const busy = yield* Busy
+          const { away, ...now } = yield* workPlaces
+          const held = (yield* busy.held).get(taskId)
+          const worker = (yield* busy.waitsForWorker).get(taskId)
+          const holders = now.holders.filter((holder, i) => holder.taskId !== taskId && away[i] === worker)
+          if (worker !== undefined)
+            return { ...now, busy: holders.length, atOnce: 1, holders, worker: workerNamed(worker) } satisfies Queued
+          return { ...now, busy: holders.length, holders, ...(held === undefined ? {} : { held }) } satisfies Queued
         })
 
       /** A project's line, read once in a read: the cards that read it at once share it. */

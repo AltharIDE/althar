@@ -611,7 +611,7 @@ describe('a normal task assigned to a worker', () => {
     ),
   )
 
-  it.live('projects the held plan’s requirements and rechecks the selected worker at Start', () =>
+  it.live('projects the held plan’s requirements, and at Start on a busy worker waits for it', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const workerId = 'wrk_' + '6'.repeat(32)
@@ -619,6 +619,7 @@ describe('a normal task assigned to a worker', () => {
           countdown: Duration.minutes(5),
           workers: {
             list: () => [{ workerId, providers: ['codex', 'claude-code'], busy: true, readiness: READY }],
+            enrolled: () => [{ workerId, connected: true, busy: true, providers: ['codex', 'claude-code'], projectIds: [] }],
             open: () => Effect.die('A busy worker must not start again'),
           },
         })
@@ -639,15 +640,19 @@ describe('a normal task assigned to a worker', () => {
         assert.deepStrictEqual(plan?.workerRequirements, { repositoryCount: 1, homeOnly: false, readOnly: false })
         const planId = plan?.id ?? ''
         yield* client.HoldPlan({ commandId: commandId(), planId })
-        const rejected = yield* Effect.flip(client.StartPlan({ commandId: commandId(), planId, workerId }))
-        assert.strictEqual(rejected.message, 'Linux worker 666666 is at work on another task.')
-        const held = (yield* thread).items.find((one) => one.kind === 'task')
-        assert.strictEqual(held?.kind === 'task' ? held.content.phase : null, 'held')
+        // Picked by name, a worker at work on another task takes it: it waits in Up next for that worker, which says so.
+        yield* client.StartPlan({ commandId: commandId(), planId, workerId })
+        const waiting = yield* until(thread, (snapshot) => {
+          const one = snapshot.items.find((each) => each.kind === 'task')
+          return one?.kind === 'task' && one.content.queued?.worker === 'Linux worker 666666'
+        })
+        const card = waiting.items.find((one) => one.kind === 'task')
+        assert.strictEqual(card?.kind === 'task' ? card.content.phase : null, 'running')
       }),
     ),
   )
 
-  it.live('keeps a worker chosen during the countdown, and holds it when due where that worker can’t take it', () =>
+  it.live('keeps a worker chosen during the countdown, and when due on it busy, waits for it', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const workerId = 'wrk_' + '3'.repeat(32)
@@ -656,6 +661,7 @@ describe('a normal task assigned to a worker', () => {
           countdown: Duration.seconds(3),
           workers: {
             list: () => [{ workerId, providers: ['codex', 'claude-code'], busy, readiness: READY }],
+            enrolled: () => [{ workerId, connected: true, busy, providers: ['codex', 'claude-code'], projectIds: [] }],
             open: () => Effect.die('A busy worker must not start'),
           },
         })
@@ -679,13 +685,10 @@ describe('a normal task assigned to a worker', () => {
         assert.strictEqual(placed?.phase, 'planned')
         assert.isNotNull(placed?.plan?.startsAt)
         assert.strictEqual(placed?.plan?.runsOn, workerId)
-        // Busy by the time it is due: held for the person, rather than started on the home or tried again.
+        // Busy by the time it is due: it starts there all the same, and waits for the worker, never started on the home.
         busy = true
-        const held = yield* until(thread, (snapshot) => card(snapshot)?.phase === 'held')
-        assert.strictEqual(card(held)?.plan?.runsOn, workerId)
-        // Held, it can go back to the home.
-        assert.isFalse(yield* client.PlacePlan({ commandId: commandId(), planId, workerId: null }))
-        assert.isUndefined(card(yield* thread)?.plan?.runsOn)
+        const waiting = yield* until(thread, (snapshot) => card(snapshot)?.queued?.worker === 'Linux worker 333333')
+        assert.strictEqual(card(waiting)?.phase, 'running')
       }),
     ),
   )
@@ -799,7 +802,7 @@ describe('a normal task assigned to a worker', () => {
     ),
   )
 
-  it.live('holds a countdown at once where the worker chosen can’t take it', () =>
+  it.live('keeps a countdown going on a worker chosen while it is at work on another task', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const workerId = 'wrk_' + '2'.repeat(32)
@@ -823,9 +826,10 @@ describe('a normal task assigned to a worker', () => {
         )
         const item = planned.items.find((one) => one.kind === 'task')
         const planId = item?.kind === 'task' ? (item.content.plan?.id ?? '') : ''
-        assert.isTrue(yield* client.PlacePlan({ commandId: commandId(), planId, workerId }))
+        // Busy is no reason it can't take it: the task will wait for it in Up next.
+        assert.isFalse(yield* client.PlacePlan({ commandId: commandId(), planId, workerId }))
         const after = (yield* thread).items.find((one) => one.kind === 'task')
-        assert.strictEqual(after?.kind === 'task' ? after.content.phase : null, 'held')
+        assert.strictEqual(after?.kind === 'task' ? after.content.phase : null, 'planned')
         assert.strictEqual(after?.kind === 'task' ? after.content.plan?.runsOn : null, workerId)
       }),
     ),

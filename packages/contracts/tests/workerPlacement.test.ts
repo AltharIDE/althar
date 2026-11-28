@@ -63,6 +63,8 @@ describe('worker placement', () => {
   it('rejects disappeared, busy, exhausted and incompatible workers', () => {
     assert.strictEqual(workerProblem(undefined, [lead]), 'That worker isn’t connected to this project now.')
     assert.strictEqual(workerProblem({ ...worker, busy: true }, [lead]), 'Linux worker 111111 is at work on another task.')
+    // Picked by name, one at work on another task takes it anyway: the task waits for it.
+    assert.isUndefined(workerProblem({ ...worker, busy: true }, [lead], 1, true))
     for (const limit of ['freeDiskMib', 'freeMemoryMib'] as const)
       assert.strictEqual(
         workerProblem({ ...worker, capacity: { ...capacity, [limit]: 0 } }, [lead]),

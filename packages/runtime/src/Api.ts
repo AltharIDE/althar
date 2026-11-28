@@ -2026,7 +2026,8 @@ export const handlers = apiLayer(
                   ? 'An aside runs on the home.'
                   : workerId === 'auto' && worker === undefined
                     ? automaticWorkerUnavailable
-                    : workerProblem(worker, steps)
+                    : // Picked by name, a worker at work on another task takes it anyway: it waits in Up next for the worker.
+                      workerProblem(worker, steps, 1, workerId !== 'auto')
                 if (message !== undefined) return yield* new ApiError({ reason: 'Invalid', message })
                 repositoryLimit =
                   workerId === 'auto'

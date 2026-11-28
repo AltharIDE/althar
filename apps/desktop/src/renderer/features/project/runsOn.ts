@@ -35,6 +35,8 @@ export const runsOnText = {
   noneFree: 'None free',
   gone: 'Not connected',
   free: (memoryMib: number | undefined) => (memoryMib === undefined ? 'Free' : `${memoryOf(memoryMib)} free`),
+  /** At work on another task, it can still be picked: the task waits for it in Up next. */
+  queues: 'At work · this waits for it',
   /** A worker's state, as Settings › Computers says it: At work, Full; and what it lacks for this task. */
   unfit: (unfit: WorkerUnfit, agentName: (id: string) => string): string | undefined => {
     switch (unfit.kind) {
@@ -118,7 +120,7 @@ export const placementOf = ({
     if (selected === HOME) return undefined
     if (plan !== undefined) return planUnfitWords(plan, said)
     if (selected === ANY) return best === undefined ? automaticWorkerUnavailable : undefined
-    const unfit = workerUnfit(chosen, steps, repositories)
+    const unfit = workerUnfit(chosen, steps, repositories, true)
     if (unfit !== undefined) return workerUnfitWords(unfit, chosen === undefined ? workerNameOf(selected) : workerName(chosen))
     // Its agent there doesn't offer the lead's model: the picker offers what it does.
     const model = workerModelUnfit(chosen, steps)
@@ -143,11 +145,15 @@ export const placementOf = ({
         ]
       : []),
     ...workers.map((worker): LaunchPlace => {
-      const unfit = plan === undefined ? workerUnfit(worker, steps, repositories) : undefined
+      // Picked by name, one at work on another task takes it too, which waits for it.
+      const unfit = plan === undefined ? workerUnfit(worker, steps, repositories, true) : undefined
       const needs = runsOnText.needs(worker)
       const hint =
         unfit === undefined
-          ? [runsOnText.free(worker.capacity?.freeMemoryMib), ...(needs === undefined ? [] : [needs])].join(' · ')
+          ? [
+              worker.busy ? runsOnText.queues : runsOnText.free(worker.capacity?.freeMemoryMib),
+              ...(needs === undefined ? [] : [needs]),
+            ].join(' · ')
           : runsOnText.unfit(unfit, agentName)
       return {
         value: worker.workerId,

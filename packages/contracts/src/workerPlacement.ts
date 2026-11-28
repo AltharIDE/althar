@@ -74,9 +74,19 @@ export const workerPlanUnfit = (
   return repositoriesUnfit(requirements.repositoryCount) ?? (workerLead(steps) === undefined ? { kind: 'lead' } : undefined)
 }
 
-export const workerUnfit = (worker: ProjectWorker | undefined, steps: ReadonlyArray<Lead>, repositories = 1): WorkerUnfit | undefined => {
+/**
+ * Why this worker can't take the task, or undefined where it can. `chosen`, the person picked it by name: one at work on
+ * another task takes it anyway, the task waiting in Up next for it (a worker runs one task at a time); only a pick of any
+ * free worker passes over it.
+ */
+export const workerUnfit = (
+  worker: ProjectWorker | undefined,
+  steps: ReadonlyArray<Lead>,
+  repositories = 1,
+  chosen = false,
+): WorkerUnfit | undefined => {
   if (worker === undefined) return { kind: 'gone' }
-  if (worker.busy) return { kind: 'busy' }
+  if (worker.busy && !chosen) return { kind: 'busy' }
   if (worker.capacity?.freeDiskMib === 0 || worker.capacity?.freeMemoryMib === 0) return { kind: 'full' }
   // What its own check found: work goes only where it found the sandbox starts, which every agent there runs in.
   const readiness = worker.readiness
@@ -213,8 +223,13 @@ export const workerPlanProblem = (
   return unfit === undefined ? undefined : planUnfitWords(unfit)
 }
 
-export const workerProblem = (worker: ProjectWorker | undefined, steps: ReadonlyArray<Lead>, repositories = 1): string | undefined => {
-  const unfit = workerUnfit(worker, steps, repositories)
+export const workerProblem = (
+  worker: ProjectWorker | undefined,
+  steps: ReadonlyArray<Lead>,
+  repositories = 1,
+  chosen = false,
+): string | undefined => {
+  const unfit = workerUnfit(worker, steps, repositories, chosen)
   return unfit === undefined ? undefined : workerUnfitWords(unfit, worker === undefined ? 'That worker' : workerName(worker))
 }
 

@@ -9,7 +9,7 @@ import { keys } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { shortFolder } from '../../shared/folders'
 import { taskStatusOf } from '../../shared/taskStatus'
-import { queuedOfWords } from '../../shared/agents'
+import { queuedCountWords, queuedOfWords } from '../../shared/agents'
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 import type { DoneHere } from '../../shared/standing'
 import { ago, clock, MINUTE, useNow } from '../../shared/time'
@@ -211,8 +211,18 @@ export function HomeView({
     const status = taskStatusOf(task)
     return project === undefined ? [] : [{ id: task.taskId, project, title: task.title, status }]
   })
-  // What waiting tasks wait for is this computer's, the same for each: its project says it, with how many wait there.
-  const queued = working.find((task) => task.queued !== null)?.queued ?? null
+  // What a project's waiting tasks wait for, as its row says it with how many: this computer's places, the same for each, or
+  // the worker a task's plan placed it on. Where they wait for different things, only how many.
+  const queuedOf = new Map(working.flatMap((task) => (task.queued === null ? [] : [[task.taskId, task.queued] as const])))
+  const queuedWordsOf = (n: number, ids: ReadonlyArray<string>) => {
+    const theirs = ids.flatMap((id) => {
+      const queued = queuedOf.get(id)
+      return queued === undefined ? [] : [queued]
+    })
+    const [first] = theirs
+    const said = new Set(theirs.map((queued) => queued.worker ?? ''))
+    return first === undefined || said.size > 1 ? queuedCountWords(n) : queuedOfWords(n, first)
+  }
 
   const lines: ReadonlyArray<HomeLine> = (home?.events ?? []).flatMap((event) => {
     const line = lineOf(event, refs, new Date(now))
@@ -275,7 +285,7 @@ export function HomeView({
               projects: {
                 // The shortcut as this system writes it.
                 newProjectKbd: modKey('N'),
-                ...(queued === null ? {} : { queued: (n: number) => queuedOfWords(n, queued) }),
+                ...(queuedOf.size === 0 ? {} : { queued: queuedWordsOf }),
               },
             }}
             onOpenEvent={(id) => {

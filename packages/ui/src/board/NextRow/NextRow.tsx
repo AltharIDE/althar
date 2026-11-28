@@ -104,17 +104,31 @@ export function NextRow({
   ...rest
 }: NextRowProps) {
   const t = { ...nextRowText, ...text }
+  const ref = t.task(task)
+  const titled = (
+    <CardTitle className={s.title} onOpen={onOpen}>
+      {title}
+    </CardTitle>
+  )
   return (
     <article className={cx(b.row, s.next, className)} aria-current={current || undefined} {...rest}>
-      <div className={b.top}>
-        <span className={s.place}>{t.place(place)}</span>
-        <span className={b.ref}>{t.task(task)}</span>
-        {kind && <span>{kind}</span>}
-        {continues !== undefined && <span className={s.continues}>{t.continues(continues)}</span>}
-      </div>
-      <CardTitle className={s.title} onOpen={onOpen}>
-        {title}
-      </CardTitle>
+      {/* Nothing to say over the title but its place: the place leads the title's line rather than stand alone above it. */}
+      {ref === '' && !kind && continues === undefined ? (
+        <div className={s.placed}>
+          <span className={s.place}>{t.place(place)}</span>
+          {titled}
+        </div>
+      ) : (
+        <>
+          <div className={b.top}>
+            <span className={s.place}>{t.place(place)}</span>
+            <span className={b.ref}>{ref}</span>
+            {kind && <span>{kind}</span>}
+            {continues !== undefined && <span className={s.continues}>{t.continues(continues)}</span>}
+          </div>
+          {titled}
+        </>
+      )}
       <span className={cx(s.wait, wait === Wait.You && s.you)}>
         <span className={cx(s.reason, (onStart || onHold) && s.rest)}>
           <Icon name={glyph(wait)} size={11} />
