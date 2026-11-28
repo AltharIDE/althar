@@ -1,4 +1,9 @@
-"""Gate complete runtime coverage separately from the tests replayed by Vitest."""
+"""Gate complete runtime coverage separately from the tests replayed by Vitest.
+
+On a pull request, `--main <summary>` gives main's own latest measurement (post-merge.yml keeps it). Below the gate,
+a pull request then fails only where it is below main's too, by more than MAIN_SLACK: a dip on main that the pull
+request didn't make is main's to fix, and post-merge still gates main on the gate itself, before any release.
+"""
 
 import json
 import math
@@ -11,6 +16,8 @@ from pathlib import Path
 
 PARTS = tuple(f'part-{i}.json' for i in range(4))
 POLICY = Path(__file__).resolve().parents[2] / 'packages/runtime/coverage-gate.json'
+# The same tree measures within a few hundredths of a point of itself from run to run.
+MAIN_SLACK = 0.05
 
 
 def read_json(path):
@@ -84,26 +91,43 @@ def parts(directory):
     return sources
 
 
-def gate(directory, path, policy=POLICY):
+def gate(directory, path, policy=POLICY, main=None):
     expected = parts(directory)
     measured = summary(path)
+    # Main's measurement that can't be read is none: the gate is the gate.
+    on_main = None
+    if main is not None:
+        try:
+            on_main = summary(main)
+        except ValueError as error:
+            print(f'::warning::Main’s runtime coverage could not be read, so the gate alone decides: {error}', flush=True)
     found = source_files(path)
     if found != expected:
         raise ValueError(f'Merged runtime coverage source files differ from its parts: '
                          f'missing {sorted(expected - found)}; unexpected {sorted(found - expected)}')
     thresholds = read_json(policy)
-    lines = ['### Runtime coverage', '', '| Measurement | Covered | Gate |', '| --- | ---: | ---: |']
+    lines = ['### Runtime coverage', '', '| Measurement | Covered | Gate |' + (' Main |' if on_main else ''),
+             '| --- | ---: | ---: |' + (' ---: |' if on_main else '')]
     failed = []
+    held = []
     for kind, value in measured.items():
         threshold = thresholds[kind]
         if type(threshold) not in (int, float) or not math.isfinite(threshold) or not 0 <= threshold <= 100:
             raise ValueError(f'Invalid runtime coverage gate: {kind}')
-        lines.append(f'| {kind.capitalize()} | {value:.2f}% | {threshold:.2f}% |')
-        if value < threshold:
-            failed.append(f'{kind}: {value:.4f}% < {threshold}%')
+        lines.append(f'| {kind.capitalize()} | {value:.2f}% | {threshold:.2f}% |' + (f' {on_main[kind]:.2f}% |' if on_main else ''))
+        if value >= threshold:
+            continue
+        if on_main is not None and value >= on_main[kind] - MAIN_SLACK:
+            held.append(f'{kind}: {value:.4f}%, with main at {on_main[kind]:.4f}%')
+        else:
+            failed.append(f'{kind}: {value:.4f}% < {threshold}%'
+                          + ('' if on_main is None else f', and below main’s {on_main[kind]:.4f}%'))
     lines.extend(['', f'The target is {thresholds["lines"]}%; the branch gate allows '
                   f'{thresholds["lines"] - thresholds["branches"]:g} percentage points for measurement variation.',
                   'Test results are reported by the individual runtime test jobs.'])
+    if held:
+        lines.extend(['', f'Main is below the gate itself, and this holds it there ({"; ".join(held)}): main’s to fix, '
+                      'and post-merge gates it before any release.'])
     text = '\n'.join(lines) + '\n'
     print(text)
     if os.environ.get('GITHUB_STEP_SUMMARY'):
@@ -120,8 +144,10 @@ if __name__ == '__main__':
             parts(sys.argv[2])
         elif len(sys.argv) == 4 and sys.argv[1] == 'gate':
             gate(sys.argv[2], sys.argv[3])
+        elif len(sys.argv) == 6 and sys.argv[1] == 'gate' and sys.argv[4] == '--main':
+            gate(sys.argv[2], sys.argv[3], main=sys.argv[5] if Path(sys.argv[5]).exists() else None)
         else:
-            raise ValueError('Use runtime-coverage.py parts <directory> or gate <directory> <summary>')
+            raise ValueError('Use runtime-coverage.py parts <directory> or gate <directory> <summary> [--main <summary>]')
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         print(f'::error::{error}', flush=True)
         sys.exit(1)

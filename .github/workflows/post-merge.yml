@@ -154,7 +154,18 @@ jobs:
       # The parts' results and coverage as one run's: the thresholds hold for the whole suite, as before it was split.
       # The parts reported their flaky and quarantined tests; merging, @althar/testing/reporter only lets the
       # quarantined ones through again.
-      - run: bun run test:coverage --merge-reports=.vitest/blob --reporter=default --reporter=github-actions --reporter=@althar/testing/reporter
+      - run: >-
+          bun run test:coverage --merge-reports=.vitest/blob --reporter=default --reporter=github-actions --reporter=@althar/testing/reporter
+          --coverage.reporter=text --coverage.reporter=json-summary
+      # Main's measurement, gated or not, for a pull request's coverage to be held to (harness.yml): below the gate, a
+      # pull request fails only where it is below main too.
+      - if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: runtime-coverage-summary
+          path: packages/runtime/coverage/coverage-summary.json
+          if-no-files-found: ignore
+          retention-days: 30
       # A part that stopped before writing its report leaves out its tests, and the merge alone wouldn't say so.
       - env:
           PARTS: ${{ needs.runtime.result }}
@@ -229,26 +240,33 @@ jobs:
   windows:
     name: windows (${{ matrix.part }})
     runs-on: windows-2025
-    # A few times a part's usual run (seven to ten minutes), so a hang fails here, not at the limit.
-    timeout-minutes: 25
+    # The runtime's tests in six parts, which took fifteen to twenty-four minutes in four. A few times a part's usual
+    # run, so a hang fails here, not at the limit.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
         include:
           - part: desktop
             packages: apps/desktop
-          - part: runtime 1/4
+          - part: runtime 1/6
             packages: packages/runtime
-            shard: 1/4
-          - part: runtime 2/4
+            shard: 1/6
+          - part: runtime 2/6
             packages: packages/runtime
-            shard: 2/4
-          - part: runtime 3/4
+            shard: 2/6
+          - part: runtime 3/6
             packages: packages/runtime
-            shard: 3/4
-          - part: runtime 4/4
+            shard: 3/6
+          - part: runtime 4/6
             packages: packages/runtime
-            shard: 4/4
+            shard: 4/6
+          - part: runtime 5/6
+            packages: packages/runtime
+            shard: 5/6
+          - part: runtime 6/6
+            packages: packages/runtime
+            shard: 6/6
           - part: packages
             packages: packages/provider-adapters packages/connectors packages/contracts packages/transport-node packages/domain packages/persistence-sqlite packages/ui
     defaults:
@@ -368,6 +386,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: read
+      contents: read
       issues: write
     env:
       GH_TOKEN: ${{ github.token }}
@@ -375,6 +394,7 @@ jobs:
       FAILED: ${{ contains(needs.*.result, 'failure') }}
       RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      - uses: actions/checkout@v5
       - name: Open, add to or close "Main is red"
         run: |
           head="$(gh api "repos/$GH_REPO/commits/main" --jq .sha)"
@@ -387,12 +407,15 @@ jobs:
             --jq "map(select(.title == \"$title\"))[0].number // empty")"
           short="${GITHUB_SHA::8}"
           if [ "$FAILED" = true ]; then
-            body="post-merge failed on $short: $RUN"
-            # Merges in quick succession share a run, so the merge that broke main can be any since the last green one.
+            # Merges in quick succession share a run, so the merge that broke main can be any since the last green one:
+            # the jobs that failed, and those merges, the ones that changed what failed first (.github/scripts/main-red.py).
             green="$(gh run list --workflow post-merge.yml --branch main --status success --limit 1 \
               --json headSha --jq '.[0].headSha // empty')"
-            if [ -n "$green" ]; then
-              body="$body"$'\n\n'"Merged since post-merge last passed: $GITHUB_SERVER_URL/$GH_REPO/compare/${green::8}...$short"
+            if ! body="$(python3 .github/scripts/main-red.py "$GITHUB_RUN_ID" "$GITHUB_SHA" "$green")"; then
+              body="post-merge failed on $short: $RUN"
+              if [ -n "$green" ]; then
+                body="$body"$'\n\n'"Merged since post-merge last passed: $GITHUB_SERVER_URL/$GH_REPO/compare/${green::8}...$short"
+              fi
             fi
             if [ -n "$open" ]; then
               gh issue comment "$open" --body "$body"
