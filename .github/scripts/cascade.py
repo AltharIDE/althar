@@ -39,8 +39,9 @@ RELEASE = re.compile(r'^release/(?P<line>[a-z][a-z-]*-)?(?P<major>\d+)\.(?P<mino
 VERSION_FILES = ('package.json', 'app.json', 'bun.lock')
 VERSION_LINE = re.compile(r'^\s*"(version|buildNumber|versionCode)":\s*("[^"]*"|\d+),?\s*$')
 SHA = re.compile(r'^[0-9a-f]{40}$')
-# Waiting for a pull request's checks: the longest of althar's take 75 minutes; the job's limit is a little over this.
-LIMIT = 110 * 60
+# Waiting for a pull request's checks: the longest of althar's take 75 minutes. The job's limit is a little over this;
+# a repository whose checks are short sets its own (CASCADE_WAIT_MINUTES).
+LIMIT = int(os.environ.get('CASCADE_WAIT_MINUTES', '110')) * 60
 EVERY = 30
 # Checks GitHub hasn't started yet don't show: none after this long means the pull request has none.
 GRACE = 120
