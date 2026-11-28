@@ -664,7 +664,17 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       const keptRoot = runtimeConfig.agentsRoot
       const ownCopy = driven !== undefined && (keptRoot === undefined || !driven.startsWith(keptRoot))
       // The program Althar brings for it, there and of the version its adapter needs, before it is spawned (bundledPrograms.ts).
-      const check = selectedWorker === null && definition.program !== undefined ? () => definition.program?.(launchEnv) : undefined
+      // Asked as a launch now would be: one that names a copy downloaded since (its `drivenBy`, which `usingLocated` sets once
+      // it is found) is the one its adapter drives, so a look again while it arrives sees it as soon as it is there.
+      const drivenNow = (): Readonly<Record<string, string>> => {
+        if (drivenBy === undefined) return {}
+        const named = definition.launch(adapterNode()).env?.[drivenBy]
+        return named === undefined ? {} : { [drivenBy]: named }
+      }
+      const check =
+        selectedWorker === null && definition.program !== undefined
+          ? () => definition.program?.({ ...drivenNow(), ...launchEnv })
+          : undefined
       const program = check?.()
       const started = yield* Effect.exit(
         Effect.gen(function* () {
@@ -1086,7 +1096,13 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
               yield* Effect.logWarning('The agent’s own program couldn’t be downloaded', brought.cause).pipe(
                 Effect.annotateLogs({ agent: entry.definition.id, session: sessionId }),
               )
-            else yield* refreshAgent(entry.definition.id)
+            else if (brought.value) {
+              // Brought: started again at once, a launch of its own, which names the copy just kept.
+              yield* refreshAgent(entry.definition.id)
+              return yield* connectOnce(thread, sessionId, entry, account, model, effort, false).pipe(
+                Effect.catchTags({ StartAgain: (again) => Effect.die(again), ProgramArriving: (again) => Effect.die(again) }),
+              )
+            }
           }
           const { every, within } = runtimeConfig.programWait ?? PROGRAM_WAIT
           yield* Effect.logInfo('Waiting for the agent’s own program, which isn’t there yet').pipe(

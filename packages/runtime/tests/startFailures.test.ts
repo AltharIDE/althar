@@ -202,6 +202,39 @@ describe('a program that is still arriving', () => {
   })
 })
 
+describe('a program another start is bringing', () => {
+  it.live('is looked for as a launch now would be, so the start goes on as soon as it is kept', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'althar-agents-'))
+    const kept = join(folder, 'claude')
+    // Kept a moment after the start first looks, as by another session's download.
+    setTimeout(() => writeFileSync(kept, '#!/bin/sh\n', { mode: 0o755 }), 100)
+    const arriving = changed((entry) => ({
+      ...entry,
+      definition: {
+        ...entry.definition,
+        launch: (node) => {
+          const spec = entry.definition.launch(node)
+          return existsSync(kept) ? { ...spec, env: { ...spec.env, CLAUDE_CODE_EXECUTABLE: kept } } : spec
+        },
+        cli: { name: 'claude', drivenBy: 'CLAUDE_CODE_EXECUTABLE' },
+        program: (env) =>
+          env.CLAUDE_CODE_EXECUTABLE !== undefined ? undefined : "Claude Code's own program for this computer is missing.",
+      },
+    }))
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { task: created } = yield* task()
+      const exit = yield* Effect.exit(sessions.start({ threadId: created.threadId, agentId: 'claude-code' }))
+      assert.isTrue(Exit.isSuccess(exit), Exit.isFailure(exit) ? Cause.pretty(exit.cause) : '')
+    }).pipe(
+      // Long: a look again at the launch that failed would wait all of it out, and time the test out.
+      Effect.provide(
+        runtime(':memory:', {}, { agents: arriving, programWait: { every: Duration.millis(10), within: Duration.minutes(1) } }),
+      ),
+    )
+  })
+})
+
 describe('a program that comes on first use', () => {
   // Not on Windows: the program the stand-in package holds is a shell script, which Althar runs (--version) to check it.
   it.live.skipIf(process.platform === 'win32')('is downloaded at the agent’s first start, checked, and the start goes on', () => {
@@ -213,11 +246,16 @@ describe('a program that comes on first use', () => {
     const bytes = readFileSync(join(staged, 'package.tgz'))
     const tarball = 'https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/stand-in.tgz'
     const asked: string[] = []
-    const kept = join(root, 'claude-code', 'current', 'claude')
+    const kept = join(root, 'claude-code', '0.3.331', 'claude')
     const firstUse = changed((entry) => ({
       ...entry,
       definition: {
         ...entry.definition,
+        // As Config's `usingLocated` points it: its adapter told the copy Althar keeps, once it is there.
+        launch: (node) => {
+          const spec = entry.definition.launch(node)
+          return existsSync(kept) ? { ...spec, env: { ...spec.env, CLAUDE_CODE_EXECUTABLE: kept } } : spec
+        },
         cli: {
           name: 'claude',
           drivenBy: 'CLAUDE_CODE_EXECUTABLE',
@@ -236,8 +274,9 @@ describe('a program that comes on first use', () => {
             },
           },
         },
-        // Missing until Althar has downloaded it.
-        program: () => (existsSync(kept) ? undefined : "Claude Code's own program for this computer is missing."),
+        // As Claude Code's own check: missing unless its launch names a copy to drive, as it does once Althar has downloaded it.
+        program: (env) =>
+          env.CLAUDE_CODE_EXECUTABLE !== undefined ? undefined : "Claude Code's own program for this computer is missing.",
       },
     }))
     return Effect.gen(function* () {
@@ -259,7 +298,8 @@ describe('a program that comes on first use', () => {
               asked.push(String(url))
               return new Response(new Uint8Array(bytes))
             },
-            programWait: { every: Duration.millis(10), within: Duration.seconds(5) },
+            // Long: once downloaded, the start goes on at once, never waiting this out.
+            programWait: { every: Duration.millis(10), within: Duration.minutes(1) },
           },
         ),
       ),
