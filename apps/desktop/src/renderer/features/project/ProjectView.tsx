@@ -59,6 +59,7 @@ import { Runs } from '../runs/Runs'
 import { LiveBlocks } from '../../shared/LiveBlocks'
 import { NOTHING_HEARD } from '../../shared/heard'
 import { Now } from '../../shared/Now'
+import { useEdge, usePinnedMerges } from '../../shared/PinnedMerges'
 import { MINUTE, SECOND } from '../../shared/time'
 import { UnsentBringIn } from '../elsewhere/UnsentBringIn'
 import { BoardWorkbench, ConversationFace, useThreadHost } from '../../shared/ThreadHost'
@@ -183,6 +184,8 @@ const classes = (...names: ReadonlyArray<string | false | undefined>) => names.f
 
 /** Which side of the board the conversation is on, as the person last put it: this window's own, kept across launches. */
 const SWAPPED = 'althar.swapped'
+/** A new aside's composer: nothing on its way in. */
+const NO_MERGES = { pills: null, back: null } as const
 
 const storedSwapped = (): boolean => {
   try {
@@ -547,6 +550,10 @@ export function ProjectView({
   // Those of no task are the project's own; a task's show over its own composer.
   const projectRuns = launches.filter((launch) => launch.taskId === null)
   const offer = useForkOffer(about ?? '', model.repositories)
+  // What is open on the composer's edge, one at a time: the run chip's list, or a merging pill.
+  const { edge, opens } = useEdge()
+  // What is on its way into a branch, pinned on the composer's edge while the thread scrolls on.
+  const merges = usePinnedMerges(coordinator?.items ?? NO_DRAFTED_ITEMS, edge, opens)
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts; a run, how long it has been up.
   // Each place that says so ticks by itself (Now): the project isn't drawn again each second.
   const ticking =
@@ -900,6 +907,9 @@ export function ProjectView({
           clearing.ask !== null && pressOf('clear', commandText.clear.does, 'remove', clearing.ask),
         )
 
+  // What the coordinator's thread has on its way in, on its composer's edge; a new aside's composer has none.
+  const { pills, back } = talkingTo.kind === 'new' ? NO_MERGES : merges
+
   const composer = (
     <div className={s.composer}>
       <DraftComposer
@@ -912,7 +922,7 @@ export function ProjectView({
         carried={<CarriedOver here={draftOf} />}
         // The lines about who answers go on the composer's edge, so a running launch's chip and they never overlap.
         notice={
-          model.error !== null || line !== null || asideMoves.failed !== null ? (
+          model.error !== null || line !== null || asideMoves.failed !== null || back !== null ? (
             <>
               <AsideMoveFailed moves={asideMoves} className={s.failure} />
               {model.error !== null && (
@@ -921,19 +931,24 @@ export function ProjectView({
                 </Problem>
               )}
               {line !== null && <div>{line}</div>}
+              {back}
             </>
           ) : null
         }
-        // The project's own runs, the ones of no task, as the task's chip says its own (ADR-096).
+        // The project's own runs, the ones of no task, as the task's chip says its own (ADR-096); what is merging, pinned while the thread scrolls on.
         above={
-          talkingTo.kind === 'new'
-            ? talkingTo.quote !== null && <AsideQuote quote={talkingTo.quote} onDrop={asides.dropQuote} />
-            : (offer.offering !== null || projectRuns.some((launch) => launch.ended === null)) && (
+          talkingTo.kind === 'new' ? (
+            talkingTo.quote !== null && <AsideQuote quote={talkingTo.quote} onDrop={asides.dropQuote} />
+          ) : (
+            <>
+              {(offer.offering !== null || projectRuns.some((launch) => launch.ended === null)) && (
                 <>
                   {offer.offering !== null && <ForkOffer offer={offer} />}
                   <Now ticking={ticking}>
                     {(now) => (
                       <Behind
+                        open={edge === 'runs'}
+                        onOpenChange={opens('runs')}
                         processes={pillOf([], projectRuns, now, { where: true })}
                         onStop={(id) => {
                           const run = runIdOf(id)
@@ -948,7 +963,10 @@ export function ProjectView({
                     )}
                   </Now>
                 </>
-              )
+              )}
+              {pills}
+            </>
+          )
         }
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}

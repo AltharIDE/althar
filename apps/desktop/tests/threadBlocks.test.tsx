@@ -76,18 +76,10 @@ describe('Althar’s lines and a step’s report', () => {
 })
 
 describe('the merge line', () => {
-  it('draws a line still moving at the thread’s foot, each by its number, opening to a row for each linked with where it stands', async () => {
-    show([items.mergeLine()])
-    const line = screen.getByRole('region', { name: 'Merging' })
-    for (const number of ['#778', '#783', '#773', '#779']) expect(line.textContent).toContain(number)
-    // Closed, it is one line: the rows wait behind it.
-    expect(screen.queryByRole('link', { name: /#783/ })).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: /Merging/ }))
-    expect(line.querySelectorAll('li')).toHaveLength(4)
-    expect(screen.getByRole('link', { name: /#783/ }).getAttribute('href')).toBe('https://github.com/meridian/api/pull/783')
-    for (const word of ['Merged', 'In the queue', 'Checks running', 'Waiting']) expect(screen.getAllByText(word).length).toBeGreaterThan(0)
-    // Nothing of the internal name, the repository or a number said twice.
-    expect(screen.queryByText(/merge line,|AltharIDE|of meridian/i)).toBeNull()
+  it('leaves a merge still moving to the composer’s edge: nothing of it at the thread’s foot', () => {
+    show([items.says('Queuing them.'), items.mergeLine()])
+    expect(screen.queryByRole('region', { name: 'Merging' })).toBeNull()
+    expect(screen.queryByText(/#783/)).toBeNull()
   })
 
   it('folds to one line once every pull request has merged', () => {
@@ -105,27 +97,6 @@ describe('the merge line', () => {
     ])
     expect(screen.queryByText('Waiting')).toBeNull()
   })
-
-  it('says what is wrong with a pull request sent back, and what to do', async () => {
-    show([
-      items.mergeLine({
-        rows: [
-          {
-            number: 773,
-            title: 'Board cards show handed-back pictures',
-            url: 'https://github.com/meridian/api/pull/773',
-            state: 'sent_back',
-            reason: 'Checks failed. It goes back in once they pass.',
-          },
-        ],
-      }),
-    ])
-    // Closed, why stands under the line; opened, its row says so.
-    expect(screen.getByText(/#773 sent back\./).parentElement?.textContent).toContain('Checks failed. It goes back in once they pass.')
-    await userEvent.click(screen.getByRole('button', { name: /Merging/ }))
-    expect(screen.getByText('Sent back', { selector: 'li span' })).toBeTruthy()
-    expect(screen.getByText('Checks failed. It goes back in once they pass.')).toBeTruthy()
-  })
 })
 
 describe('a task’s merge on its way, through the coordinator’s thread', () => {
@@ -139,39 +110,21 @@ describe('a task’s merge on its way, through the coordinator’s thread', () =
       },
       null,
     )
-  const card = (state: 'checks' | 'sent_back' | 'merged', reason?: string) => ({
-    ...items.mergeLine({
-      rows: [{ number: 1231, title: 'A worker says when it’s ready', url: PULL, state, ...(reason === undefined ? {} : { reason }) }],
-    }),
-    // Althar keeps one card current in place: the same item, drawn again.
-    id: 'card',
-  })
   const asked = [items.you('see everything thru to main'), items.says('The workers one merges on its own once it’s ready.')]
   const kept = errand('Kept your errand: merge the workers readiness pull request', true, [{ label: 'Workers readiness', url: null }])
   const bound = errand('Its task’s pull request is #1231', true, [{ label: '#1231', url: PULL }])
-  const region = () => screen.queryByRole('region', { name: 'Merging' })
 
-  it('stands by its task’s name, then by its number in place, says why it came back, and ends folded where it was asked', () => {
-    // Kept, with no pull request yet: by its task's name, and no line of chat.
-    show([...asked, kept])
-    expect(region()?.textContent).toContain('Workers readiness')
-    expect(screen.queryByText(/Kept your errand/)).toBeNull()
+  it('says nothing of the errand’s quiet lines, and ends folded where it was asked', () => {
+    show([...asked, kept, bound])
+    expect(screen.queryByText(/Kept your errand|Its task’s pull request/)).toBeNull()
     cleanup()
 
-    // Its pull request opens and goes on the card: one row, by its number, not the task's name beside it.
-    show([...asked, kept, bound, card('checks')])
-    expect(region()?.textContent).toContain('#1231')
-    expect(region()?.textContent).not.toContain('Workers readiness')
-    cleanup()
-
-    // The queue sends it back: why stands under the line.
-    show([...asked, kept, bound, card('sent_back', 'The queue’s end-to-end checks failed.')])
-    expect(screen.getByText(/#1231 sent back\./).parentElement?.textContent).toContain('The queue’s end-to-end checks failed.')
-    cleanup()
-
-    // All in: no foot, and the card folded where it was asked.
-    show([...asked, kept, bound, card('merged'), errand('Merged #1231. Errand done', true, [])])
-    expect(region()).toBeNull()
+    const merged = {
+      ...items.mergeLine({ rows: [{ number: 1231, title: 'A worker says when it’s ready', url: PULL, state: 'merged' }] }),
+      id: 'card',
+    }
+    show([...asked, kept, bound, merged, errand('Merged #1231. Errand done', true, [])])
+    expect(screen.queryByRole('region', { name: 'Merging' })).toBeNull()
     expect(screen.getByRole('region', { name: 'Merge line' }).textContent).toMatch(/Merged #1231/)
   })
 })
