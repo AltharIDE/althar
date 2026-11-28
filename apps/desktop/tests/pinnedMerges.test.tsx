@@ -74,13 +74,35 @@ describe('the merging pill on the composer’s edge', () => {
 
   it('shows all in for a moment once it saw them move, then goes', () => {
     vi.useFakeTimers()
-    const { rerender } = render(<Edge thread={[card('checks')]} />)
-    rerender(<Edge thread={[card('merged')]} />)
+    // The runtime keeps a card current in place: the same item, all in now.
+    const moving = card('checks')
+    const { rerender } = render(<Edge thread={[moving]} />)
+    rerender(<Edge thread={[{ ...card('merged'), id: moving.id }]} />)
     expect(pill()?.getAttribute('aria-label')).toBe('Merging: #1224 merged, #1226 merged')
     act(() => void vi.advanceTimersByTime(1800))
     expect(pill()).toBeTruthy()
     act(() => void vi.advanceTimersByTime(200))
     expect(pill()).toBeNull()
+  })
+
+  it('starts a fresh card on the same branch as a pill of its own: folded, and not going with the last one', () => {
+    vi.useFakeTimers()
+    const first = card('checks')
+    const { rerender } = render(<Edge thread={[first]} />)
+    // Opened while it moved, then all in: held, open.
+    fireEvent.click(pill()!)
+    const done = { ...card('merged'), id: first.id }
+    rerender(<Edge thread={[done]} />)
+    expect(opened()).toBeTruthy()
+    // A fresh card on the same branch, while the last one holds.
+    act(() => void vi.advanceTimersByTime(900))
+    const fresh = items.mergeLine({ rows: [{ number: 1230, title: 'Next', url: `${PULL}1230`, state: 'checks' }] })
+    rerender(<Edge thread={[done, fresh]} />)
+    expect(opened()).toBeNull()
+    expect(pill()?.getAttribute('aria-label')).toBe('Merging: #1230 checks running')
+    act(() => void vi.advanceTimersByTime(3000))
+    expect(pill()?.className).not.toMatch(/going/)
+    expect(opened()).toBeNull()
   })
 
   it('shows nothing for a thread opened once its merges were in', () => {

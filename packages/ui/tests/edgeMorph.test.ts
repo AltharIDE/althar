@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { edgeOf, playEdge, shootEdge } from '../src/lib/edgeMorph'
+import { edgeOf, playEdge, shootEdge, shootEdgeOnce } from '../src/lib/edgeMorph'
 
 /*
  * The composer's edge changing shape in place: each piece glides from where
@@ -284,6 +284,31 @@ describe('the composer’s edge changing shape', () => {
     playEdge(shootEdge(scope)!, scope)
     expect(heard.find((one) => one.el === scope.querySelector('#runs') && one.id === '')?.cancel).not.toHaveBeenCalled()
     expect(other).toBeTruthy()
+  })
+
+  it('reads the edge once for a change, however many pills on it change, and again for the next', async () => {
+    const scope = edge()
+    expect(shootEdgeOnce(scope)).not.toBeNull()
+    expect(shootEdgeOnce(scope)).toBeNull()
+    expect(shootEdgeOnce(null)).toBeNull()
+    await Promise.resolve()
+    expect(shootEdgeOnce(scope)).not.toBeNull()
+  })
+
+  it('reads nothing once more where nothing can move', () => {
+    const still = document.createElement('div')
+    Object.defineProperty(still, 'animate', { value: undefined })
+    expect(shootEdgeOnce(still)).toBeNull()
+  })
+
+  it('passes over a token the pill had no room for: it comes into the card as new', () => {
+    const scope = edge()
+    scope.querySelector('[data-m="merging-label-1"]')!.setAttribute('data-cut', '')
+    const shot = shootEdge(scope)!
+    expect(shot.pieces.has('merging-label-1')).toBe(false)
+    open(scope)
+    playEdge(shot, scope)
+    expect(heard.find((one) => one.el === scope.querySelector('[data-m="merging-label-1"]'))?.frames[0]).toEqual({ opacity: 0 })
   })
 
   it('leaves a piece still where it stands where it stood', () => {

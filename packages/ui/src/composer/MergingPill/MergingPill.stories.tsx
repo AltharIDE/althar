@@ -1,7 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { expect, userEvent, within } from 'storybook/test'
 
+import { OPUS } from '../../fixtures/models'
+import { TaskFace } from '../../thread/TaskFace/TaskFace'
+import { Thread } from '../../thread/Thread/Thread'
+import { Prose, Turn } from '../../thread/Turn/Turn'
+import { You } from '../../thread/You/You'
 import { Behind } from '../Behind/Behind'
 import { Composer } from '../Composer/Composer'
 import type { RunningProcess } from '../Running/Running'
@@ -128,3 +133,115 @@ export const NarrowOpened: Story = {
 
 /** Into a branch that isn't the default, named. */
 export const IntoABranch: Story = { args: { rows: FOUR.slice(0, 2), branch: 'release/0.10' } }
+
+const SAID = [
+  ['Ship it, and merge it once it’s green.', 'Shipped. #1224 is in, #1226 is merging, and #1222 waits its turn in the queue.'],
+  [
+    'While that goes: is the same race anywhere else?',
+    'One more place reads a branch right after writing it: settle. It hasn’t failed in CI, but it can, the same way.',
+  ],
+  ['How long did the stress runs take?', 'About four minutes each, on one worker: 200 runs of each test, 1.2 seconds a run.'],
+  ['And the Windows run?', 'Green on the last two pushes. The one red run before them was the runner’s disk filling up, not the change.'],
+  ['Anything you need from me?', 'Nothing now. I’ll say if one of them comes back from the queue.'],
+] as const
+
+/** A conversation long enough to scroll, on the kit's own face: the pill stays on the composer's edge while the thread scrolls on. With `allIn`, they merge, the pill shows them so for a moment, and goes. */
+function Conversation({ rows, allIn = false }: { readonly rows: ReadonlyArray<MergingRow>; readonly allIn?: boolean }) {
+  const [open, setOpen] = useState<'merging' | 'runs' | null>(null)
+  const opens = (which: 'merging' | 'runs') => (next: boolean) => setOpen((was) => (next ? which : was === which ? null : was))
+  const [phase, setPhase] = useState<'moving' | 'in' | 'going' | 'gone'>('moving')
+  useEffect(() => {
+    if (!allIn) return
+    const steps = [
+      setTimeout(() => setPhase('in'), 1200),
+      setTimeout(() => setPhase('going'), 1200 + 1800),
+      setTimeout(() => setPhase('gone'), 1200 + 1800 + 140),
+    ]
+    return () => steps.forEach(clearTimeout)
+  }, [allIn])
+  const shown = phase === 'moving' ? rows : rows.map((row) => ({ ...row, state: 'merged' as const, reason: undefined }))
+  const back = open !== 'merging' && phase !== 'gone' && shown.some((row) => row.state === 'sent_back')
+  return (
+    <div style={{ height: '100vh' }}>
+      <TaskFace
+        composer={
+          <Composer
+            value=""
+            onChange={() => {}}
+            onSubmit={() => {}}
+            placeholder="Tell the lead"
+            above={
+              <>
+                <Behind processes={[SITE]} open={open === 'runs'} onOpenChange={opens('runs')} />
+                {phase !== 'gone' && (
+                  <MergingPill rows={shown} open={open === 'merging'} onOpenChange={opens('merging')} leaving={phase === 'going'} />
+                )}
+              </>
+            }
+            notice={back ? <MergingBack rows={shown} /> : null}
+          />
+        }
+      >
+        <Thread label="Task">
+          {SAID.map(([asked, answered], at) => (
+            <div key={asked}>
+              <You at={`14:${10 + at * 6}`}>{asked}</You>
+              <Turn model={OPUS} at={`14:${11 + at * 6}`}>
+                <Prose>{answered}</Prose>
+                <Prose>{answered}</Prose>
+              </Turn>
+            </div>
+          ))}
+        </Thread>
+      </TaskFace>
+    </div>
+  )
+}
+
+/** In a conversation that scrolls: the pill on the composer's edge, the thread's end clear of it, the card open or folded. */
+export const InAConversation: Story = {
+  parameters: { layout: 'fullscreen' },
+  args: { rows: SENT_BACK },
+  render: (args) => <Conversation rows={args.rows} />,
+}
+
+/** In a conversation, all of them merging in: the pill shows them in for a moment, then goes. */
+export const AllInAConversation: Story = {
+  parameters: { layout: 'fullscreen' },
+  args: { rows: FOUR.slice(0, 3) },
+  render: (args) => <Conversation rows={args.rows} allIn />,
+}
+
+const QUEUE: ReadonlyArray<MergingRow> = [
+  pull(1230, 'Release notes say what each fix does', 'merging'),
+  pull(1231, 'A worker’s doctor checks its disk', 'checks'),
+  pull(1232, 'Fix runtime flakies: changesMergeNeeds and backToWork', 'queued'),
+  pull(1233, 'Board cards keep their place on a refresh', 'queued'),
+  pull(1234, 'Asides open where the person was', 'queued'),
+  pull(1235, 'The usage line reads per account', 'queued'),
+]
+
+/** Narrow, a long branch and a queue of six: the pill keeps within itself, the branch cut with "…", the tokens with no room waiting in the card. */
+export const NarrowCrowded: Story = {
+  args: { rows: QUEUE, branch: 'release/0.10-cascade-into-main-for-the-windows-fixes' },
+  render: (args) => <Edge {...args} width={380} />,
+}
+
+export const NarrowCrowdedOpened: Story = {
+  args: { rows: QUEUE, branch: 'release/0.10-cascade-into-main-for-the-windows-fixes' },
+  render: (args) => <Edge {...args} width={380} />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /^Merging into/ }))
+    await expect(within(canvasElement).getAllByRole('listitem')).toHaveLength(6)
+  },
+}
+
+/** A long queue in a short window: opened, the card's head stays in view and its rows scroll within it. */
+export const ManyInAShortWindow: Story = {
+  parameters: { layout: 'fullscreen' },
+  args: { rows: [...QUEUE, ...QUEUE.map((row) => ({ ...row, key: `${row.key}b`, label: `#${Number(row.label.slice(1)) + 10}` }))] },
+  render: (args) => <Conversation rows={args.rows} />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /^Merging:/ }))
+  },
+}

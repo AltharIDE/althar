@@ -58,6 +58,41 @@
   font-weight: 550;
   color: var(--t-2);
 }
+/* a long branch gives way first, cut with "…", read whole in the pill's name */
+.pill > .name,
+.head > .name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pill > .name {
+  /* a share of its own of the edge's width, so what it leaves the tokens doesn't change as they are fitted */
+  flex: none;
+  max-width: 40cqi;
+}
+/* the tokens keep to one line inside the pill; those with no room wrap out of sight, and wait in the card */
+.pill > .tokens {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  column-gap: 10px;
+  min-width: 0;
+  height: 18px;
+  overflow: hidden;
+}
+.tokens > [data-cut] {
+  display: none;
+}
+.more {
+  display: none;
+  margin-left: -6px;
+  color: var(--t-3);
+}
+.tokens[data-cutting] + .more {
+  display: inline;
+}
 .mono {
   font-family: var(--mono);
   font-size: 0.92em;
@@ -67,6 +102,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  height: 18px;
   font-variant-numeric: tabular-nums;
   color: var(--t-2);
   transition: color var(--enter) var(--ease-out);
@@ -162,8 +198,12 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
+  /* however many, its head stays in view: the rows scroll within what the conversation has room for */
+  max-height: max(96px, min(44vh, calc(100dvh - 300px)));
   margin: 0;
   padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   list-style: none;
 }
 /* a row: its mark, its number and title, where it stands in a fixed measure so the words keep their place as it changes; why, under it */

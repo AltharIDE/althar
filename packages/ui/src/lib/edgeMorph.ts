@@ -43,7 +43,8 @@ export interface EdgeShot {
 }
 
 const ID = 'edge-morph'
-const shown = (el: Element) => el.getClientRects().length > 0
+/** Drawn, and not a token the pill had no room for (`data-cut`), which waits in the card. */
+const shown = (el: Element) => el.getClientRects().length > 0 && el.closest('[data-cut]') === null
 const animates = (el: Element) => typeof (el as HTMLElement).animate === 'function'
 
 /** Where a piece of the edge reads its neighbours from: the composer's floats, or the piece itself outside a composer. */
@@ -98,6 +99,23 @@ export const shootEdge = (scope: HTMLElement | null): EdgeShot | null => {
     return source === null || !shown(source) ? [] : [{ copy: still(source), rect: source.getBoundingClientRect() }]
   })
   return { pieces, boxes, others, ghosts }
+}
+
+/** Edges read for the change being drawn now: one read, and one play, however many pills on it change. */
+const reading = new WeakSet<HTMLElement>()
+
+/**
+ * Where everything on the edge stands now, read once for a change: where two
+ * pills change together, the second hears null, and the first plays for both.
+ */
+export const shootEdgeOnce = (scope: HTMLElement | null): EdgeShot | null => {
+  if (scope === null || reading.has(scope)) return null
+  const shot = shootEdge(scope)
+  if (shot === null) return null
+  reading.add(scope)
+  // The change is drawn by the time a microtask runs, its plays all asked for.
+  queueMicrotask(() => reading.delete(scope))
+  return shot
 }
 
 const run = (el: HTMLElement, frames: Keyframe[], timing: KeyframeAnimationOptions) => {

@@ -169,6 +169,32 @@ describe('MergingPill’s marks and words', () => {
   })
 })
 
+describe('two pills on one edge, and a narrow one', () => {
+  it('names each pill’s pieces its own, so one’s morph never takes the other’s place', () => {
+    const { container } = render(
+      <>
+        <MergingPill rows={ROWS.slice(0, 1)} />
+        <MergingPill rows={ROWS.slice(0, 1)} branch="release/0.10" />
+      </>,
+    )
+    const boxes = [...container.querySelectorAll<HTMLElement>('[data-m-box]')].map((box) => box.dataset.mBox)
+    expect(new Set(boxes).size).toBe(2)
+    const names = [...container.querySelectorAll<HTMLElement>('[data-m$="name"]')].map((name) => name.dataset.m)
+    expect(new Set(names).size).toBe(2)
+  })
+
+  it('keeps its tokens to one line, marking those with no room, and says there are more', () => {
+    const top = vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.textContent?.startsWith('Workers') === true ? 18 : 0
+    })
+    const { container } = render(<MergingPill rows={ROWS} />)
+    const tokens = [...container.querySelectorAll('[title]')]
+    expect(tokens.map((token) => token.hasAttribute('data-cut'))).toEqual([false, false, true])
+    expect(tokens[0]?.parentElement?.hasAttribute('data-cutting')).toBe(true)
+    top.mockRestore()
+  })
+})
+
 describe('MergingBack', () => {
   it('says why the first one came back, and nothing where none did', () => {
     const { container, rerender } = render(<MergingBack rows={ROWS} />)

@@ -14,6 +14,8 @@ type Notice = Extract<ThreadItem, { kind: 'notice' }>
 export type ErrandMerges = NonNullable<Notice['content']['errand']>
 
 export interface MergingGroup {
+  /** Its card, by its item: a fresh card on the same branch is another pill, with its own life on the edge. */
+  readonly id: string
   readonly key: string
   /** Every one in: the pill shows it so for a moment, where it saw them move, then goes. */
   readonly done: boolean
@@ -38,15 +40,16 @@ export const newestCards = (items: ReadonlyArray<ThreadItem>): ReadonlySet<strin
  * once its last one was called off, is none. `seen` is every pull request on a card of the thread, by its address.
  */
 export const mergingOf = (
-  cards: ReadonlyArray<MergeLine['content']>,
+  cards: ReadonlyArray<{ readonly id: string; readonly card: MergeLine['content'] }>,
   errands: ReadonlyMap<string, ErrandMerges>,
   seen: ReadonlySet<string>,
 ): ReadonlyArray<MergingGroup> => {
-  const groups: Array<MergingGroup> = cards.flatMap((card) =>
+  const groups: Array<MergingGroup> = cards.flatMap(({ id, card }) =>
     card.rows.length === 0
       ? []
       : [
           {
+            id,
             key: card.key,
             branch: card.branch,
             done: allIn(card),
@@ -83,7 +86,7 @@ export const mergingOf = (
   if (kept.length > 0) {
     // A card all in is what happened, not where what waits goes: those wait in a line of their own then.
     const home = groups.findIndex((group) => group.branch === null && !group.done)
-    if (home === -1) groups.push({ key: 'kept', branch: null, done: false, rows: kept })
+    if (home === -1) groups.push({ id: 'kept', key: 'kept', branch: null, done: false, rows: kept })
     else groups[home] = { ...groups[home]!, rows: [...groups[home]!.rows, ...kept] }
   }
   return groups
@@ -92,13 +95,13 @@ export const mergingOf = (
 /** What is on its way in by a thread's items: each branch's newest card, all in or not, and the merges kept for later. */
 export const mergingIn = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<MergingGroup> => {
   const newest = newestCards(items)
-  const cards: Array<MergeLine['content']> = []
+  const cards: Array<{ id: string; card: MergeLine['content'] }> = []
   const seen = new Set<string>()
   const errands = new Map<string, ErrandMerges>()
   for (const item of items) {
     if (item.kind === 'merge_line') {
       for (const row of item.content.rows) seen.add(row.url)
-      if (newest.has(item.id)) cards.push(item.content)
+      if (newest.has(item.id)) cards.push({ id: item.id, card: item.content })
     } else if (item.kind === 'notice' && item.content.errand !== undefined) errands.set(item.content.errand.id, item.content.errand)
   }
   return mergingOf(cards, errands, seen)

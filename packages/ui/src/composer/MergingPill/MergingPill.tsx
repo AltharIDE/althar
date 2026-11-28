@@ -1,9 +1,9 @@
-import { Component, createRef, type ReactNode, useEffect, useId, useRef } from 'react'
+import { Component, createRef, type ReactNode, useEffect, useId, useLayoutEffect, useRef } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
-import { edgeOf, type EdgeShot, playEdge, shootEdge } from '../../lib/edgeMorph'
+import { edgeOf, type EdgeShot, playEdge, shootEdgeOnce } from '../../lib/edgeMorph'
 import { safeHref } from '../../lib/safeHref'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
@@ -108,11 +108,13 @@ function Mark({ row }: { row: MergingRow }) {
  * Reads where everything on the composer's edge stands just before `step`
  * changes, and glides it from there once it has (lib/edgeMorph). A class, as
  * only a class hears of a change before the page is: getSnapshotBeforeUpdate.
+ * Where two pills change at once (one opening as another folds), the first to
+ * read the edge plays the change for both.
  */
 class EdgeMorph extends Component<{ step: string; children: ReactNode }> {
   private readonly ref = createRef<HTMLDivElement>()
   override getSnapshotBeforeUpdate(was: Readonly<{ step: string }>): EdgeShot | null {
-    return was.step === this.props.step ? null : shootEdge(edgeOf(this.ref.current))
+    return was.step === this.props.step ? null : shootEdgeOnce(edgeOf(this.ref.current))
   }
   override componentDidUpdate(_was: unknown, _state: unknown, shot: EdgeShot | null) {
     if (shot !== null) playEdge(shot, edgeOf(this.ref.current))
@@ -142,6 +144,28 @@ export function MergingPill({
   const pill = useRef<HTMLButtonElement>(null)
   const head = useRef<HTMLButtonElement>(null)
   const listId = useId()
+  // Its pieces' names on the edge, its own, so two pills' never meet in a morph.
+  const own = useId()
+  // Folded, the tokens keep to one line inside the pill: those that don't fit wait in the card, and "…" says there are more.
+  const tokens = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    const line = tokens.current
+    if (line === null) return
+    const mark = () => {
+      // Laid out whole first, then those that wrapped past the line are left out, so "…" sits right after the last that fits.
+      for (const token of line.children) token.removeAttribute('data-cut')
+      const top = (line.firstElementChild as HTMLElement | null)?.offsetTop ?? 0
+      const off = [...line.children].filter((token) => (token as HTMLElement).offsetTop > top)
+      for (const token of off) token.setAttribute('data-cut', '')
+      line.toggleAttribute('data-cutting', off.length > 0)
+    }
+    mark()
+    if (typeof ResizeObserver === 'undefined') return
+    // What the pill has room for changes with the edge it sits on, not with the line it holds itself to.
+    const observer = new ResizeObserver(mark)
+    observer.observe(edgeOf(line) ?? line)
+    return () => observer.disconnect()
+  })
   // Focus follows what was pressed into what it became.
   const handed = useRef(false)
   const toggle = (next: boolean) => {
@@ -182,9 +206,9 @@ export function MergingPill({
     <EdgeMorph step={String(open)}>
       {open ? (
         <section className={cx(s.card, leaving && s.going, className)} aria-label={named} data-m-ghost="">
-          <span className={s.surface} data-m-box="merging" aria-hidden="true" />
+          <span className={s.surface} data-m-box={own} aria-hidden="true" />
           <button ref={head} type="button" className={s.head} aria-expanded aria-controls={listId} onClick={() => toggle(false)}>
-            <span className={s.name} data-m="merging-name">
+            <span className={s.name} data-m={`${own}name`}>
               {nameWords}
             </span>
             <span className={s.fold} data-m-in="" aria-hidden="true">
@@ -197,11 +221,11 @@ export function MergingPill({
               const href = row.url === null ? undefined : safeHref(row.url)
               const words = (
                 <>
-                  <span className={s.rowMark} data-m={`merging-mark-${row.key}`} data-m-at="center">
+                  <span className={s.rowMark} data-m={`${own}mark-${row.key}`} data-m-at="center">
                     <Mark row={row} />
                   </span>
                   <span className={s.rowName}>
-                    <span className={cx(s.number, row.url === null && s.unnumbered)} data-m={`merging-label-${row.key}`}>
+                    <span className={cx(s.number, row.url === null && s.unnumbered)} data-m={`${own}label-${row.key}`}>
                       {row.label}
                     </span>
                     {row.title !== '' && (
@@ -246,24 +270,29 @@ export function MergingPill({
           onClick={() => toggle(true)}
           data-m-ghost=""
         >
-          <span className={s.surface} data-m-box="merging" aria-hidden="true" />
-          <span className={s.name} data-m="merging-name">
+          <span className={s.surface} data-m-box={own} aria-hidden="true" />
+          <span className={s.name} data-m={`${own}name`}>
             {nameWords}
           </span>
-          {rows.map((row) => (
-            <span
-              key={row.key}
-              className={cx(s.token, tone(row), later(row) && s.later)}
-              title={row.title === '' ? row.label : `${row.label} ${row.title}`}
-            >
-              <span className={s.mark} data-m={`merging-mark-${row.key}`} data-m-at="center">
-                <Mark row={row} />
+          <span ref={tokens} className={s.tokens}>
+            {rows.map((row) => (
+              <span
+                key={row.key}
+                className={cx(s.token, tone(row), later(row) && s.later)}
+                title={row.title === '' ? row.label : `${row.label} ${row.title}`}
+              >
+                <span className={s.mark} data-m={`${own}mark-${row.key}`} data-m-at="center">
+                  <Mark row={row} />
+                </span>
+                <span className={s.label} data-m={`${own}label-${row.key}`}>
+                  {row.label}
+                </span>
               </span>
-              <span className={s.label} data-m={`merging-label-${row.key}`}>
-                {row.label}
-              </span>
-            </span>
-          ))}
+            ))}
+          </span>
+          <span className={s.more} aria-hidden="true">
+            …
+          </span>
         </button>
       )}
     </EdgeMorph>

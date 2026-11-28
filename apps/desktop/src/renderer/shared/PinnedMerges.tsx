@@ -28,8 +28,8 @@ export function useEdge() {
   return { edge, opens }
 }
 
-/** The key a branch's pill opens by on the edge. */
-const pillOf = (group: MergingGroup) => `merging:${group.key}`
+/** What a pill opens by on the edge: its card's item, so a fresh card on the same branch starts folded. */
+const pillOf = (group: MergingGroup) => `merging:${group.id}`
 
 export function usePinnedMerges(
   items: ReadonlyArray<ThreadItem>,
@@ -37,14 +37,15 @@ export function usePinnedMerges(
   opens: (which: string) => (next: boolean) => void,
 ): { readonly pills: ReactNode; readonly back: ReactNode } {
   const groups = useMemo(() => mergingIn(items), [items])
-  // Those seen moving that are all in now, held for a moment, then going.
+  // Those seen moving that are all in now, held for a moment, then going: by their card's item, never their branch's, which a
+  // fresh card reuses.
   const [ending, setEnding] = useState<ReadonlyMap<string, 'held' | 'going'>>(new Map())
   const [was, setWas] = useState(groups)
   if (was !== groups) {
     setWas(groups)
-    const moved = new Set(was.flatMap((group) => (group.done ? [] : [group.key])))
-    const done = groups.filter((group) => group.done && moved.has(group.key) && !ending.has(group.key))
-    if (done.length > 0) setEnding(new Map([...ending, ...done.map((group) => [group.key, 'held'] as const)]))
+    const moved = new Set(was.flatMap((group) => (group.done ? [] : [group.id])))
+    const done = groups.filter((group) => group.done && moved.has(group.id) && !ending.has(group.id))
+    if (done.length > 0) setEnding(new Map([...ending, ...done.map((group) => [group.id, 'held'] as const)]))
   }
   useEffect(() => {
     const timers = [...ending].map(([key, phase]) =>
@@ -62,7 +63,7 @@ export function usePinnedMerges(
     return () => timers.forEach(clearTimeout)
   }, [ending])
 
-  const shown = groups.filter((group) => !group.done || ending.has(group.key))
+  const shown = groups.filter((group) => !group.done || ending.has(group.id))
   // Why one came back, while its pill is folded: the card says it under its row once opened.
   const folded = shown.filter((group) => edge !== pillOf(group)).flatMap((group) => group.rows)
   const backed = folded.some(
@@ -71,12 +72,12 @@ export function usePinnedMerges(
   return {
     pills: shown.map((group) => (
       <MergingPill
-        key={group.key}
+        key={group.id}
         rows={group.rows}
         branch={group.branch}
         open={edge === pillOf(group)}
         onOpenChange={opens(pillOf(group))}
-        leaving={ending.get(group.key) === 'going'}
+        leaving={ending.get(group.id) === 'going'}
       />
     )),
     back: backed ? <MergingBack rows={folded} /> : null,
