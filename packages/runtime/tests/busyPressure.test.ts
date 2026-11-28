@@ -122,7 +122,20 @@ describe('pressure and the real admission queue', () => {
     // The worker takes the session and keeps it starting: its lead is at work there, on the worker, from then on.
     const opened: Array<string> = []
     const workers: NonNullable<RuntimeOptions['workers']> = {
-      list: () => [{ workerId, providers: ['codex'], busy: false }],
+      // Checked already: its sandbox starts, it has git, and the lead's agent started there once.
+      list: () => [
+        {
+          workerId,
+          providers: ['codex'],
+          busy: false,
+          readiness: {
+            sandbox: { starts: true },
+            tools: [{ name: 'git', version: '2.43.0' }],
+            models: [],
+            agents: [{ providerId: 'codex', starts: true }],
+          },
+        },
+      ],
       enrolled: () => [{ workerId, name: 'build-box', connected: true, busy: false, providers: ['codex'], projectIds: [] }],
       open: (request) =>
         Effect.andThen(

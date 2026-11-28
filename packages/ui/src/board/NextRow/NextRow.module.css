@@ -3,6 +3,20 @@
   font-variant-numeric: tabular-nums;
   color: var(--t-3);
 }
+/* only its place to say over the title: the place leads the title's first line, the title's lines kept beside it */
+.placed {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.placed > .place {
+  flex: none;
+  min-width: 2ch;
+}
+.placed > .title {
+  flex: 1;
+  min-width: 0;
+}
 /* not started: the title is quieter than a running card's until you reach for it */
 .title {
   font-size: 13px;

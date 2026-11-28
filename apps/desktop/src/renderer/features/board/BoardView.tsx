@@ -58,7 +58,16 @@ import { pictureUrl } from '../../../main/pictureAddress'
 import { abandonedBlocker, blockerText, blockerWords } from '../../shared/blockers'
 import { MERGE_QUEUE_STEP, MERGING_STEP } from '../../data/merges'
 import { taskStatusOf } from '../../shared/taskStatus'
-import { atOnceWords, busyWords, externalWaitWords, heldWhyWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
+import {
+  atOnceWords,
+  busyWords,
+  externalWaitWords,
+  heldWhyWords,
+  inLineWords,
+  reconnectsWords,
+  waitsWords,
+  workerWaitWords,
+} from '../../shared/agents'
 import { localText } from '../../shared/local'
 import { askOf, callKindOf, isAnswered, isSettleable, kindWords, takesDone, takesKeep, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
@@ -1332,9 +1341,11 @@ export function BoardView({
     const reason = waits
       ? work.queued === null
         ? text.startsIn(0)
-        : work.inLine === true || held
-          ? inLineWords(index + 1)
-          : busyWords(work.queued)
+        : work.queued.worker !== undefined
+          ? workerWaitWords(work.queued.worker)
+          : work.inLine === true || held
+            ? inLineWords(index + 1)
+            : busyWords(work.queued)
       : pausedRow
         ? work.waitsForCheckout != null
           ? localText.after(work.waitsForCheckout)

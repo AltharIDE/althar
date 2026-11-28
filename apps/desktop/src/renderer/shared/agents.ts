@@ -65,7 +65,17 @@ export const reconnectsWords = (held: HeldForConnection, at: (iso: string) => st
  * busy agents under the number would read as room to spare.
  */
 export const queuedWords = (queued: Queued, where: string = device.this) =>
-  queued.held === undefined ? `Waiting · ${busyWords(queued, where)}` : heldBackWords(queued.held)
+  queued.worker !== undefined
+    ? workerWaitWords(queued.worker)
+    : queued.held === undefined
+      ? `Waiting · ${busyWords(queued, where)}`
+      : heldBackWords(queued.held)
+
+/**
+ * Work placed on one of the home's workers waits for that worker, which runs one task at a time, and for nothing of this
+ * computer's: Waits for build-box.
+ */
+export const workerWaitWords = (worker: string) => `Waits for ${worker}`
 
 /** Why a task is held back, at length, for a hover: This Mac lets 1 agent work at a time, of your 4, until memory frees up. */
 export const heldWhyWords = ({ atOnce, configured, held }: Queued, where: string = device.This): string | undefined =>
@@ -92,8 +102,12 @@ export const inLineWords = (place: number) => `${ordinal(place)} in line`
 export const upNextWords = (place: number) => `${place === 1 ? 'First' : ordinal(place)} in Up next`
 
 /** How busy this computer's agents are, as work that waits for one says it: a count, never the tasks. */
-export const busyWords = ({ busy, atOnce }: Queued, _where: string = device.this) =>
-  busy > atOnce ? `${busy} agents busy, ${atOnce} at a time` : `${busy} ${busy === 1 ? 'agent' : 'agents'} busy`
+export const busyWords = ({ busy, atOnce, worker }: Queued, _where: string = device.this) =>
+  worker !== undefined
+    ? workerWaitWords(worker)
+    : busy > atOnce
+      ? `${busy} agents busy, ${atOnce} at a time`
+      : `${busy} ${busy === 1 ? 'agent' : 'agents'} busy`
 
 /** Which tasks hold the agents, for a hover or a click on the wait line; none where Althar doesn't know. */
 export const holdersWords = ({ holders }: Queued): string | undefined => {
@@ -112,13 +126,15 @@ export const holdersWords = ({ holders }: Queued): string | undefined => {
  * computer's anyway: how many wait, and for what, in the line under the
  * project's name.
  */
-export const queuedOfWords = (n: number, { busy, atOnce, held }: Queued) =>
+export const queuedOfWords = (n: number, { busy, atOnce, held, worker }: Queued) =>
   `${n === 1 ? 'Waiting' : `${n} waiting`} · ${
-    held !== undefined
-      ? `held back ${freesUpWords(held)}`
-      : busy > atOnce
-        ? `${busy} agents busy, ${atOnce} at a time`
-        : `${busy} ${busy === 1 ? 'agent' : 'agents'} busy`
+    worker !== undefined
+      ? `for ${worker}`
+      : held !== undefined
+        ? `held back ${freesUpWords(held)}`
+        : busy > atOnce
+          ? `${busy} agents busy, ${atOnce} at a time`
+          : `${busy} ${busy === 1 ? 'agent' : 'agents'} busy`
   }`
 
 /** What an agent signs in to in the browser, as the window names it: the plan, and the site that asks. */

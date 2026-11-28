@@ -24,6 +24,20 @@ type Story = StoryObj<typeof meta>
 export const AfterATask: Story = {}
 /** Next in line, for a free worker. */
 export const ForAWorker: Story = { args: { ...WORKERS, place: 1 } }
+// As Up next names it, by its title alone: no task word, no kind.
+const BARE = { ...WORKERS, kind: '' }
+const UNNAMED = { task: () => '' }
+/** Nothing to say over its title but its place: the place leads the title's line rather than stand alone above it. */
+export const OnlyItsPlace: Story = {
+  args: { ...BARE, place: 1, reason: 'Next in line', text: UNNAMED },
+  play: async ({ canvasElement }) => {
+    const place = within(canvasElement).getByText('1.')
+    const title = within(canvasElement).getByRole('button', { name: BARE.title })
+    await expect(Math.abs(place.getBoundingClientRect().top - title.getBoundingClientRect().top)).toBeLessThan(6)
+  },
+}
+/** Placed on one of the home's workers by its plan, it waits for that worker, which runs another task, not for this computer. */
+export const ForItsWorker: Story = { args: { ...BARE, place: 1, reason: 'Waits for build-box', text: UNNAMED } }
 /** Held on a call of yours: violet, like the call. */
 export const HeldOnYou: Story = { args: { ...HELD, place: 1 } }
 /** Under way already, waiting for a free worker to go on with its review: it continues, ahead of the line. */
