@@ -591,7 +591,8 @@ export const bringAgent = async (id: string, out: (text: string) => void) => {
     throw failed('CannotDownload', installWords(error), 'sign-in')
   }
   say(out, { step: 'sign-in', kind: 'got', name })
-  await writeAgents(workerFolder(), join(program, 'current'))
+  // Its launch names it now; with no release current yet, nothing launches, and enrolling writes them.
+  if (current !== undefined) await writeAgents(workerFolder(), join(program, 'current'))
 }
 
 /**
