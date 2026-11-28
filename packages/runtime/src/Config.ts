@@ -188,6 +188,11 @@ export interface RuntimeOptions {
   readonly betweenAgents?: Duration.Duration
   /** How often a start looks again for the program Althar brings for its agent, and for how long, while it isn't there yet. */
   readonly programWait?: { readonly every: Duration.Duration; readonly within: Duration.Duration }
+  /**
+   * How often a start asks its agent again for a model it listed lately and doesn't list now, and for how long, before the
+   * step goes to the same model on another agent: every 30 seconds for 6 minutes unless a test says otherwise.
+   */
+  readonly modelWait?: { readonly every: Duration.Duration; readonly within: Duration.Duration }
   /** How a lead's start waits for its worker while another run holds it (workerWait.ts), unless a test says otherwise. */
   readonly workerWait?: WorkerWait
   /**

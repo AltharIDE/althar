@@ -54,7 +54,7 @@ import {
   tailOf,
   uncoloured,
 } from './leftRunning'
-import { Limits, backWords, routeWords } from './Limits'
+import { Limits, backWords, goneWords, routeWords } from './Limits'
 import { type KeptLineComment, withLineComments } from './lineComments'
 import { Live } from './Live'
 import { noteServerStatus } from './mcpHealth'
@@ -70,7 +70,7 @@ import { MERGE_REVIEW, mergeCopyOf, reviewCopyOf } from './reviewCopy'
 import { type InputFile, keptId, requestFilesForTurn } from './sentFiles'
 import type { InputImage } from './sentImages'
 import { makeSessionBriefs } from './sessionBriefs'
-import { Models } from './Models'
+import { Models, isModel } from './Models'
 import { type SessionConnectionsDependencies, makeSessionConnections } from './sessionConnections'
 import {
   AcceptedInput,
@@ -1577,6 +1577,19 @@ export class Sessions extends Context.Service<
         policies,
         questions,
         refreshAgent: (agentId) => Option.match(models, { onNone: () => Effect.void, onSome: (known) => known.refresh(agentId) }),
+        modelGone: (accountId, model) =>
+          Option.match(models, { onNone: () => Effect.void, onSome: (known) => known.gone(accountId, model) }),
+        listedLately: (agentId, model) =>
+          Option.match(models, {
+            onNone: () => Effect.succeed(false),
+            onSome: (known) =>
+              known.catalog.pipe(
+                Effect.map(
+                  (catalog) => catalog.find((one) => one.agentId === agentId)?.models.some((one) => isModel(model, one.id)) ?? false,
+                ),
+                Effect.orElseSucceed(() => false),
+              ),
+          }),
         quietFor,
         signInFault: planUsage.signInFault,
         run,
@@ -2415,17 +2428,9 @@ export class Sessions extends Context.Service<
       ) =>
         Effect.gen(function* () {
           if (!replacing && threads.has(input.threadId)) return { input, said: undefined }
-          const sql = yield* SqlClient.SqlClient
-          const [thread] = yield* sql<{ projectId: string; kind: string; nodeKey: string | null; taskId: string | null }>`
-            SELECT project_id, kind, node_key, task_id FROM threads WHERE id = ${input.threadId}`
+          const thread = yield* placeOf(input.threadId)
           if (thread === undefined) return { input, said: undefined }
-          // A review's thread: the lead it reviews, as it leads now on the task's thread.
-          const [lead] =
-            thread.kind === 'step' && thread.nodeKey === 'review' && thread.taskId !== null
-              ? yield* sql<{ agentId: string; model: string | null }>`
-                  SELECT s.agent_id, s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
-                  WHERE t.task_id = ${thread.taskId} AND t.kind = 'task' ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
-              : []
+          const { lead } = thread
           const way = yield* limits.route({
             agentId: input.agentId,
             model: input.model ?? null,
@@ -2476,7 +2481,86 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const { input, said, refused } = yield* routed(asked, false)
           if (refused !== undefined) return yield* new SessionFailed({ agentId: input.agentId, reason: refused, summary: refused })
-          const sessionId = yield* startOn(input, created, waiting)
+          const sessionId = yield* startOn(input, created, waiting).pipe(
+            Effect.catchTag('SessionFailed', (failed) => elsewhereIfGone(input, failed, (moved) => startOn(moved, created))),
+          )
+          if (said !== undefined) yield* sayRouted(input.threadId, sessionId, said)
+          return sessionId
+        })
+
+      /** A thread's project, and on a review's thread the lead it reviews, as it leads now on the task's thread. */
+      const placeOf = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ projectId: string; kind: string; nodeKey: string | null; taskId: string | null }>`
+            SELECT project_id, kind, node_key, task_id FROM threads WHERE id = ${threadId}`
+          if (thread === undefined) return undefined
+          const [lead] =
+            thread.kind === 'step' && thread.nodeKey === 'review' && thread.taskId !== null
+              ? yield* sql<{ agentId: string; model: string | null }>`
+                  SELECT s.agent_id, s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+                  WHERE t.task_id = ${thread.taskId} AND t.kind = 'task' ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
+              : []
+          return { projectId: thread.projectId, lead }
+        })
+
+      /**
+       * A start whose agent stopped listing its model, and still didn't when asked again a while (`modelGone`,
+       * sessionConnections.ts): the same model through another agent with room, never one the person turned it off for, nor
+       * another model unasked, and never the lead a review reviews; the thread says so. Where none has it, the start fails
+       * saying that too, and its step asks the person. Any other failure stays as it is.
+       */
+      const elsewhereIfGone = <
+        I extends { readonly threadId: string; readonly agentId: string; readonly model?: string; readonly accountId?: string },
+        E,
+        R,
+      >(
+        input: I,
+        failed: SessionFailed,
+        again: (moved: I) => Effect.Effect<string, E, R>,
+      ) =>
+        Effect.gen(function* () {
+          const model = failed.modelGone
+          if (model === undefined) return yield* failed
+          const way = yield* Effect.gen(function* () {
+            const thread = yield* placeOf(input.threadId)
+            if (thread === undefined) return undefined
+            const found = yield* limits.route({
+              agentId: input.agentId,
+              model,
+              projectId: thread.projectId,
+              gone: true,
+              ...(thread.lead === undefined ? {} : { reviewing: thread.lead }),
+            })
+            return found.kind === 'elsewhere' ? found.to : undefined
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.as(Effect.logWarning('Could not look for another agent with a model gone from its own', cause), undefined),
+            ),
+          )
+          if (way === undefined)
+            return yield* new SessionFailed({
+              agentId: failed.agentId,
+              reason: failed.reason,
+              summary: `${failed.summary} No other agent with room offers it.`,
+              modelGone: model,
+            })
+          const { model: _model, accountId: _account, ...rest } = input
+          const moved = {
+            ...rest,
+            agentId: way.agentId,
+            accountId: way.accountId,
+            ...(way.model === null ? {} : { model: way.model }),
+          } as unknown as I
+          const sessionId = yield* again(moved)
+          // Named as the agent taking it over lists it: the one it went from no longer does.
+          const said = yield* Effect.all({
+            from: limits.named(input.agentId, null),
+            to: limits.named(way.agentId, way.model, way.accountId),
+          }).pipe(
+            Effect.map(({ from, to }) => goneWords({ from: { agent: from.agent, model: to.model ?? model }, to })),
+            Effect.orElseSucceed(() => undefined),
+          )
           if (said !== undefined) yield* sayRouted(input.threadId, sessionId, said)
           return sessionId
         })
@@ -2551,7 +2635,9 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const { input, said, refused } = yield* routed(asked, true)
           if (refused !== undefined) return yield* new SessionFailed({ agentId: input.agentId, reason: refused, summary: refused })
-          const sessionId = yield* switchOn(input)
+          const sessionId = yield* switchOn(input).pipe(
+            Effect.catchTag('SessionFailed', (failed) => elsewhereIfGone(input, failed, switchOn)),
+          )
           if (said !== undefined) yield* sayRouted(input.threadId, sessionId, said)
           return sessionId
         })
