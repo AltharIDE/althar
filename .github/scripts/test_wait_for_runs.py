@@ -14,12 +14,15 @@ CANCELLED = dict(status='completed', conclusion='cancelled', url='https://exampl
 
 
 class Tests(unittest.TestCase):
-    def wait(self, *workflows, **reads):
+    def wait(self, *workflows, late=0, **reads):
         """Each workflow's reads, in order, the last one repeating; the seconds slept, once all have passed."""
         self.now = 0
 
         def read(workflow, sha):
             self.assertEqual(sha, SHA)
+            # `late` is what the first read takes, so the polls don't fall on the limit exactly.
+            nonlocal late
+            self.now, late = self.now + late, 0
             answers = reads[workflow]
             answer = answers.pop(0) if len(answers) > 1 else answers[0]
             if isinstance(answer, Exception):
@@ -61,7 +64,16 @@ class Tests(unittest.TestCase):
     def test_gives_up_after_the_limit(self):
         with self.assertRaisesRegex(module.Failed, '^Gave up on post after 120 minutes. post has not passed$'):
             self.wait(post=[[RUNNING]])
-        self.assertLess(self.now, module.LIMIT)
+        self.assertEqual(self.now, module.LIMIT)
+
+    def test_a_pass_in_the_last_stretch_before_the_limit_counts(self):
+        polls = module.LIMIT // module.EVERY
+        self.assertEqual(self.wait(late=10, post=[*[[RUNNING]] * polls, [PASSED]]), module.LIMIT)
+
+    def test_a_run_still_going_after_a_late_start_gives_up_at_the_limit(self):
+        with self.assertRaisesRegex(module.Failed, '^Gave up on post'):
+            self.wait(late=10, post=[[RUNNING]])
+        self.assertEqual(self.now, module.LIMIT)
 
     def test_a_read_that_fails_is_tried_again(self):
         self.assertEqual(self.wait(post=[RuntimeError('502'), [PASSED]]), 30)
@@ -70,6 +82,18 @@ class Tests(unittest.TestCase):
         with self.assertRaisesRegex(module.Failed, "Couldn't read post's runs"):
             self.wait(post=[RuntimeError('502')])
         self.assertEqual(self.now, (module.FAILED_READS - 1) * module.EVERY)
+
+    def test_another_workflows_good_reads_do_not_reset_the_count(self):
+        with self.assertRaisesRegex(module.Failed, "Couldn't read host's runs"):
+            self.wait(post=[[RUNNING]], host=[RuntimeError('502')])
+        self.assertEqual(self.now, (module.FAILED_READS - 1) * module.EVERY)
+
+    def test_failed_reads_are_not_added_up_across_workflows(self):
+        error = RuntimeError('502')
+        # More failures between them than the limit, but neither alone reaches it.
+        reads = [error] * (module.FAILED_READS - 1)
+        self.assertEqual(self.wait(post=[*reads, [PASSED]], host=[*reads, [PASSED]]),
+                         (module.FAILED_READS - 1) * module.EVERY)
 
 
 if __name__ == '__main__':

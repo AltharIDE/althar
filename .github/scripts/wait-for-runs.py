@@ -17,7 +17,8 @@ import time
 # it ten minutes more (timeout-minutes).
 LIMIT = 120 * 60
 EVERY = 30
-# Reads of GitHub that may fail in a row before it gives up: one that fails during a long wait says nothing of the runs.
+# Reads of one workflow's runs that may fail in a row before it gives up: one that fails during a long wait says
+# nothing of the runs.
 FAILED_READS = 5
 
 
@@ -36,19 +37,19 @@ def runs(workflow, sha):
 def wait(workflows, sha, error, read=runs, clock=time.monotonic, sleep=time.sleep):
     deadline = clock() + LIMIT
     pending = list(workflows)
-    failed_reads = 0
+    failed_reads = dict.fromkeys(pending, 0)
     said = set()
     while True:
         for workflow in list(pending):
             try:
                 found = read(workflow, sha)
             except (RuntimeError, subprocess.TimeoutExpired, ValueError) as problem:
-                failed_reads += 1
+                failed_reads[workflow] += 1
                 print(f"Couldn't read {workflow}'s runs: {problem}", flush=True)
-                if failed_reads >= FAILED_READS:
+                if failed_reads[workflow] >= FAILED_READS:
                     raise Failed(f"Couldn't read {workflow}'s runs on {sha[:8]} from GitHub. Re-run this.")
                 continue
-            failed_reads = 0
+            failed_reads[workflow] = 0
             # One pass is enough, whatever other runs on the commit did.
             if any(run['conclusion'] == 'success' for run in found):
                 print(f'{workflow} passed on {sha[:8]}', flush=True)
@@ -67,10 +68,11 @@ def wait(workflows, sha, error, read=runs, clock=time.monotonic, sleep=time.slee
                     print(f"Waiting for {workflow}: {run['url']}", flush=True)
         if not pending:
             return
-        if clock() + EVERY >= deadline:
+        # Read once more at the deadline itself: a run that passed in the last stretch still counts.
+        if clock() >= deadline:
             waited = ' and '.join(pending)
             raise Failed(f'Gave up on {waited} after {LIMIT // 60} minutes. ' + error.format(workflow=pending[0]))
-        sleep(EVERY)
+        sleep(min(EVERY, deadline - clock()))
 
 
 def main():
