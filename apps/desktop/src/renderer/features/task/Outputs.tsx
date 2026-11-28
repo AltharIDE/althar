@@ -556,7 +556,12 @@ export function Outputs({
         ...(one.target === undefined ? {} : { target: one.target }),
         ...(one.checks == null ? {} : { checks: one.checks.list.map(checkOf) }),
         ...(one.conflicts === true ? { conflicts: true } : {}),
-        ...(refusedAt === one.url && error !== null ? { refused: error } : backOf(one) !== null ? { refused: backOf(one) ?? '' } : {}),
+        ...(refusedAt === one.url && error !== null
+          ? { refused: error }
+          : backOf(one) !== null
+            ? // The track says Not merged itself.
+              { refused: (backOf(one) ?? '').replace(/^Not merged: /, '') }
+            : {}),
         files: filesIn(task.files, folder, true).map((file) => ({ ...file, path: file.path.slice(folder.length + 1) })),
         folder,
       }
