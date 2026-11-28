@@ -1852,6 +1852,7 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
       const said: Array<string> = []
       const conflicts: Array<string> = []
       const opens: Array<string> = []
+      let moved = 0
       for (const row of rows) {
         const toward = yield* towardIn({ ...row, workToward: null }, asked)
         if (toward === row.toward) continue
@@ -1908,6 +1909,7 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
           }
           branch = fresh
         }
+        moved += 1
         const now = yield* commitOf(row.path, 'HEAD')
         const copies =
           stopped.length > 0
@@ -1950,6 +1952,8 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
             title: said.at(-1) ?? '',
           })
       }
+      // Nothing moved, each kept where it was for its conflicts: refused, so whoever asked keeps the branch they named, and why.
+      if (moved === 0 && said.length > 0) return yield* new ToolRefused({ message: said.join(' ') })
       yield* touchCard(taskId)
       return { said, opens, conflicts }
     })

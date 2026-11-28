@@ -1356,7 +1356,7 @@ describe('a task’s pull request', () => {
     // From its worktree, among its parts before the faces (ADR-097).
     await userEvent.click(await screen.findByRole('button', { name: /^Parts, / }))
     await userEvent.click(await screen.findByRole('button', { name: 'Worktree' }))
-    expect(await screen.findByText('2 files changed')).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Show the 2 files' })).toBeTruthy()
     await userEvent.click(await screen.findByRole('button', { name: /^See the changes/ }))
     const view = await screen.findByRole('dialog', { name: 'Changes' })
     expect(within(view).getByText('althar/retry into main')).toBeTruthy()

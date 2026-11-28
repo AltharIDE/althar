@@ -249,8 +249,8 @@ export interface TaskModel {
   readonly move: (to: 'worktree' | 'checkout', consent?: { readonly branch: string | null; readonly head: string }) => Promise<void>
   /** Calls off a move that waits: the task stays where it works. */
   readonly dropMove: () => Promise<void>
-  /** Points the running task at another branch to work toward, or its default with null. */
-  readonly workToward: (toward: string | null) => Promise<void>
+  /** Points the running task at another branch to work toward, or its default with null: why it was refused, or null. */
+  readonly workToward: (toward: string | null) => Promise<string | null>
   /** Run it, on the pull request a review task reviews: as far as `how` trusts it, the team's own fully. */
   readonly runIt: (how?: 'safe' | 'full') => Promise<void>
   /** Stop running it: the pull request's copy read only again, and its lead a reader. */
@@ -1141,7 +1141,18 @@ export const useTask = (threadId: string): TaskModel => {
     answerCheckout: (attentionId, answer) => act(() => client.answerCheckout({ attentionId, answer })),
     move: (to, consent) => onTask((taskId) => client.moveTask({ taskId, to, ...(consent === undefined ? {} : { consent }) })),
     dropMove: () => onTask((taskId) => client.dropMove(taskId)),
-    workToward: (toward) => onTask((taskId) => client.workToward(taskId, toward)),
+    // A refusal goes back to the field it was asked from, with the name kept there, rather than to the composer.
+    workToward: async (toward) => {
+      let refused = null as string | null
+      await onTask(async (taskId) => {
+        try {
+          await client.workToward(taskId, toward)
+        } catch (failure) {
+          refused = messageOf(failure)
+        }
+      })
+      return refused
+    },
     runIt: (how) => onTask((taskId) => client.runIt(taskId, how)),
     stopRunning: () => onTask((taskId) => client.stopRunning(taskId)),
     shelve: (shelf) =>
