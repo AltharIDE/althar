@@ -90,6 +90,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'composer/ContextRing/ContextRing.tsx': 'the ring',
   'chrome/LoadMeter/LoadMeter.tsx': 'the meters, drawn in steps as the ring is drawn',
   'chrome/PlanGauge/PlanGauge.tsx': 'the plan gauge, drawn in steps as the load meters are',
+  'chrome/Updates/Updates.tsx': 'the updates glyph, drawn turning, marked or as the problem mark by what is under it, beside the meters',
   'composer/Composer/Composer.tsx': 'the dictation button, drawn as your voice',
   'thread/Shots/Shots.tsx': 'a screenshot’s thumbnail',
   'thread/Gallery/Gallery.tsx': 'a screenshot, large, which opens full size',

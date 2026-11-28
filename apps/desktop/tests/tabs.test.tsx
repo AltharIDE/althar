@@ -21,6 +21,8 @@ import { brandOf } from '../src/renderer/shared/agents'
 import { moved } from '../src/renderer/features/tabs/store'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
 import type { Host } from '../src/renderer/data/services'
+import { forgetHiddenUpdates } from '../src/renderer/features/updates/hidden'
+import { forgetPressed } from '../src/renderer/shared/workerUpdates'
 import { card, changed, fakeClient, fakeHost, home, load, onLinuxHome, project, remoteConnection } from './fixtures'
 import { withServices } from './render'
 
@@ -435,8 +437,12 @@ describe('the window’s tabs', () => {
     release: '0.2.2',
     updatesOnRequest: true,
   }
-  /** A window whose home has hermes-box on 0.2.2, with 0.3.0 out for workers. */
+  /** A window whose home has hermes-box on 0.2.2, with 0.3.0 out for workers: nothing put aside or pressed before it. */
   const withWorkers = () => {
+    act(() => {
+      forgetHiddenUpdates()
+      forgetPressed()
+    })
     const host = fakeHost({
       workers: {
         release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.3.0', base: 'https://x' })),
@@ -470,7 +476,6 @@ describe('the window’s tabs', () => {
   })
 
   it('put an update aside until its next release, saying where it still is', async () => {
-    window.localStorage.removeItem('althar.updates.hidden')
     withWorkers()
     await userEvent.click(await screen.findByRole('button', { name: 'Updates: hermes-box' }))
     await userEvent.click(
@@ -479,7 +484,7 @@ describe('the window’s tabs', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: /^Updates:/ })).toBeNull())
     expect(screen.getByRole('button', { name: 'Still in Settings › Computers' })).toBeTruthy()
     expect(JSON.parse(window.localStorage.getItem('althar.updates.hidden') ?? '{}')).toEqual({ workers: '0.3.0' })
-    window.localStorage.removeItem('althar.updates.hidden')
+    act(() => forgetHiddenUpdates())
   })
 })
 

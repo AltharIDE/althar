@@ -48,3 +48,14 @@ const subscribe = (listener: () => void) => {
 
 /** What's put aside now, by kind: the release each was put aside at. */
 export const useHiddenUpdates = (): Hidden => useSyncExternalStore(subscribe, () => current)
+
+/** For tests: forgets what's put aside, here and where it's kept. */
+export const forgetHiddenUpdates = (): void => {
+  current = {}
+  try {
+    window.localStorage.removeItem(KEY)
+  } catch {
+    // Nothing kept to forget.
+  }
+  for (const listener of listeners) listener()
+}
