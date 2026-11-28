@@ -28,6 +28,8 @@ export interface Ran {
   readonly code: number | null
   readonly stdout: string
   readonly stderr: string
+  /** Stopped at its deadline: whatever code it then exited with (OpenSSH says 255) is the deadline's, not its own. */
+  readonly timedOut?: boolean
 }
 export interface RunOptions {
   readonly input?: string
@@ -739,7 +741,11 @@ export const runProgram = (program: string, args: ReadonlyArray<string>, { input
         child.kill()
       }
     }
-    const deadline = setTimeout(kill, timeout)
+    let timedOut = false
+    const deadline = setTimeout(() => {
+      timedOut = true
+      kill()
+    }, timeout)
     signal.addEventListener('abort', kill, { once: true })
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
@@ -761,7 +767,7 @@ export const runProgram = (program: string, args: ReadonlyArray<string>, { input
       signal.removeEventListener('abort', kill)
       if (partial !== '') line?.(partial)
       partial = ''
-      resolve({ code, stdout, stderr })
+      resolve({ code, stdout, stderr, ...(timedOut ? { timedOut } : {}) })
     }
     child.once('error', () => end(255))
     child.once('close', (code) => end(code))

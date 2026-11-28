@@ -50,8 +50,9 @@ else
 fi
 codex=$(device_bin codex)
 if [ -n "$codex" ]; then
-  # The bridge itself, end to end: the adapter's handshake is answered by the device's Codex over flatpak-spawn.
-  bridge=$(run "{ printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":1,\"clientCapabilities\":{},\"clientInfo\":{\"name\":\"smoke\",\"title\":\"Smoke\",\"version\":\"0\"}}}'; sleep 8; } | timeout 25 /app/bin/althar-host-codex app-server" | head -c 500)
+  # The bridge itself, end to end: the adapter's handshake is answered by the device's Codex over flatpak-spawn, the one
+  # it is told, as Althar tells it the copy it found.
+  bridge=$(run "{ printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":1,\"clientCapabilities\":{},\"clientInfo\":{\"name\":\"smoke\",\"title\":\"Smoke\",\"version\":\"0\"}}}'; sleep 8; } | ALTHAR_CODEX_PROGRAM='$codex' timeout 25 /app/bin/althar-host-codex app-server" | head -c 500)
   case "$bridge" in *'"result"'*) ok "the Codex bridge answers over flatpak-spawn (ACP initialize)";; *) bad "the Codex bridge answers";; esac
 else
   echo "SKIP: no Codex on this device"

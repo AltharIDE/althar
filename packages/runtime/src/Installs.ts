@@ -3,6 +3,10 @@ import { createHash, randomUUID } from 'node:crypto'
 import {
   chmodSync,
   closeSync,
+  copyFileSync,
+  linkSync,
+  readFileSync,
+  statfsSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -15,6 +19,7 @@ import {
   writeFileSync,
   writeSync,
 } from 'node:fs'
+import { open } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
@@ -27,6 +32,7 @@ import {
   type LaunchSpec,
   locate,
   type Located,
+  type NpmDownload,
   type PinnedDownload,
   programName,
   removeFully,
@@ -121,7 +127,48 @@ interface Release {
 }
 
 /** A download from its maker's own address, pinned, rather than a GitHub release. */
-const pinned = (download: AgentDownload): download is PinnedDownload => 'version' in download
+const pinned = (download: AgentDownload): download is PinnedDownload => 'version' in download && !('npm' in download)
+
+/** The exact npm package the lockfile pins (Claude Code's and Codex's programs). */
+const fromNpm = (download: AgentDownload): download is NpmDownload => 'npm' in download
+
+/** Hears a download's bytes as they come, and its whole where known. */
+export type Progress = (received: number, total: number | undefined) => void
+
+/** The bytes free on the disk a folder is on; undefined where that can't be said. */
+const freeBytes = (folder: string): number | undefined => {
+  try {
+    mkdirSync(folder, { recursive: true })
+    const found = statfsSync(folder)
+    return found.bavail * found.bsize
+  } catch {
+    return undefined
+  }
+}
+
+/** A copy of a folder that costs nothing on the same disk: each file hard-linked, or copied where it can't be; no links. */
+const lendInto = (from: string, to: string): void => {
+  mkdirSync(to, { recursive: true, mode: 0o700 })
+  for (const entry of readdirSync(from, { withFileTypes: true })) {
+    const source = join(from, entry.name)
+    const target = join(to, entry.name)
+    if (entry.isDirectory()) lendInto(source, target)
+    else if (entry.isFile())
+      try {
+        linkSync(source, target)
+      } catch {
+        copyFileSync(source, target)
+        chmodSync(target, lstatSync(source).mode & 0o777)
+      }
+  }
+}
+
+/** About how big a download is, as the person reads it. */
+const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`
+
+/** Ten minutes, or as long as the download takes at 128 KiB/s where that's longer: a slow line still gets it. */
+const downloadWithin = (bytes: number | undefined) =>
+  bytes === undefined ? DOWNLOAD_WITHIN : Duration.max(DOWNLOAD_WITHIN, Duration.seconds(Math.ceil(bytes / 131_072)))
 
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 
@@ -231,8 +278,12 @@ export class Installs extends Context.Service<
     version(definition: AgentDefinition): Effect.Effect<string | null>
     /** Where its command is, looked up now: the person's, or Althar's copy. */
     locate(definition: AgentDefinition): Located | null
-    /** Downloads its latest release, checks it and makes it the copy in use. */
-    install(definition: AgentDefinition): Effect.Effect<void, InstallFailed>
+    /** Where Althar's own copy of its command is kept, whether or not it is there yet; null where Althar keeps none. */
+    keptAt(definition: AgentDefinition): string | null
+    /** Downloads its latest release, checks it and makes it the copy in use; `progress` hears the bytes as they come. */
+    install(definition: AgentDefinition, progress?: Progress): Effect.Effect<void, InstallFailed>
+    /** Keeps the pinned package from a folder already here, as its download would have (`adopt` above); false where it isn't one. */
+    adopt(definition: AgentDefinition, from: string): Effect.Effect<boolean, InstallFailed>
   }
 >()('@althar/runtime/Installs') {
   static readonly layer = (options: InstallsOptions): Layer.Layer<Installs> =>
@@ -263,15 +314,29 @@ export class Installs extends Context.Service<
             }),
           )
 
-        /** Where Althar's downloaded copy of the agent's command is, whether or not it is there. */
-        const kept = (definition: AgentDefinition, name: string) =>
-          root === undefined ? null : join(root, definition.id, 'current', programName(name, platform))
+        /**
+         * Where Althar's downloaded copy of the agent's command is, whether or not it is there: in a package it keeps
+         * whole, where the package has it. One pinned at a version (the package an adapter's lockfile names, or a pinned
+         * archive) is found in that version's own folder only, never through `current`: once its pin moves, the copy before
+         * it is no copy of it, so nothing finds or drives it, and its first use brings the one pinned.
+         */
+        const kept = (definition: AgentDefinition, name: string) => {
+          if (root === undefined) return null
+          const spec = definition.cli?.download
+          if (spec !== undefined && fromNpm(spec)) {
+            const asset = assetOf(spec.assets)
+            return asset === undefined ? null : join(root, definition.id, asset.version, ...asset.program.split('/'))
+          }
+          if (spec !== undefined && pinned(spec)) return join(root, definition.id, spec.version, programName(name, platform))
+          return join(root, definition.id, 'current', programName(name, platform))
+        }
 
         const locateOf = (definition: AgentDefinition): Located | null => {
           const cli = definition.cli
           if (cli === undefined) return null
           if (cli.managed === true)
             return locate(cli.name, { bundled: cli.bundled?.() ?? null, kept: kept(definition, cli.name) }, { platform, env: {}, dirs: [] })
+          const fits = cli.fits === undefined ? {} : { fits: cli.fits }
           const onDevice = options.onDevice
           const outThere = (command: string): Located =>
             onDevice === undefined
@@ -285,11 +350,12 @@ export class Installs extends Context.Service<
               keptCopy === null ? null : locate(cli.name, { bundled: null, kept: keptCopy }, { platform, env: {}, dirs: [] })
             if (downloaded !== null) return downloaded
             const there = onDevice.where(cli.name)
-            if (there !== null) return outThere(there)
+            if (there !== null && (cli.fits === undefined || cli.fits(there))) return outThere(there)
           }
           const copies = { bundled: cli.bundled?.() ?? null, kept: keptCopy }
           const here = locate(cli.name, copies, {
             platform,
+            ...fits,
             ...(options.search === undefined ? {} : { env: options.search.env, dirs: options.search.dirs }),
           })
           if (here !== null || onDevice === undefined || onDevice.reachable) return here
@@ -298,7 +364,7 @@ export class Installs extends Context.Service<
         }
 
         /** The agent's latest release, or the newest on its line, and its file for this device with the digest GitHub gives it. */
-        const latest = (definition: AgentDefinition, install: Exclude<AgentDownload, PinnedDownload>) =>
+        const latest = (definition: AgentDefinition, install: Exclude<AgentDownload, PinnedDownload | NpmDownload>) =>
           Effect.gen(function* () {
             const asset = assetOf(install.assets)
             if (asset === undefined) return yield* fail(definition.id, `There's no ${definition.name} for this computer to download.`)
@@ -363,18 +429,109 @@ export class Installs extends Context.Service<
             : Effect.succeed({ tag: install.version, url: asset.url, digest: asset.sha256 } satisfies Release)
         }
 
-        const download = (definition: AgentDefinition, name: string, install: AgentDownload, folder: string) =>
+        /**
+         * The package the lockfile pins for this platform, streamed to disk as its sha512 is taken, so a large one is
+         * never whole in memory; kept only where that is the integrity pinned; unpacked whole, what never runs
+         * removed, and its program asked its version, so one that doesn't run here is never kept.
+         */
+        const npmPackage = (definition: AgentDefinition, install: NpmDownload, folder: string, progress?: Progress) =>
           Effect.gen(function* () {
+            const asset = assetOf(install.assets)
+            if (asset === undefined) return yield* fail(definition.id, `There's no ${definition.name} for this computer to download.`)
+            // Room for the package and what it unpacks to, at once, before any of it comes: else it would fail part-way.
+            if (asset.bytes !== undefined && root !== undefined) {
+              const needed = asset.bytes * 4
+              const free = yield* Effect.sync(() => freeBytes(root))
+              if (free !== undefined && free < needed)
+                return yield* fail(definition.id, `${definition.name} needs ${megabytes(needed)} free on this computer to download.`)
+            }
+            const archive = join(folder, 'package.tgz')
+            const integrity = yield* within(
+              Effect.tryPromise({
+                try: async (signal) => {
+                  const response = await fetch(asset.tarball, { headers: { 'User-Agent': 'Althar' }, signal })
+                  if (!response.ok || response.body === null)
+                    throw fail(definition.id, `${definition.name} couldn't be downloaded.`, response.status)
+                  const hash = createHash('sha512')
+                  // Each write awaited on the file's own handle, so a disk that refuses it (full, not writable) fails the
+                  // install here, as the network failing does, never as an error nothing hears.
+                  const out = await open(archive, 'w', 0o600).catch((error: unknown) => {
+                    throw fail(definition.id, `${definition.name} couldn't be kept on this computer.`, error)
+                  })
+                  let received = 0
+                  try {
+                    for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+                      hash.update(chunk)
+                      received += chunk.length
+                      progress?.(received, asset.bytes)
+                      await out.write(chunk).catch((error: unknown) => {
+                        throw fail(definition.id, `${definition.name} couldn't be kept on this computer.`, error)
+                      })
+                    }
+                  } catch (error) {
+                    throw error instanceof InstallFailed
+                      ? error
+                      : fail(definition.id, `${definition.name}'s download stopped part-way.`, error)
+                  } finally {
+                    await out.close().catch(() => undefined)
+                  }
+                  return `sha512-${hash.digest('base64')}`
+                },
+                catch: (error) =>
+                  error instanceof InstallFailed ? error : fail(definition.id, `${definition.name} couldn't be downloaded.`, error),
+              }),
+              downloadWithin(asset.bytes),
+              fail(definition.id, `Downloading ${definition.name} took too long. Try again.`),
+            )
+            // Nothing in it runs unless it is exactly the package the adapter's lockfile pins.
+            if (integrity !== asset.integrity)
+              return yield* fail(definition.id, `${definition.name}'s download didn't match the one Althar pins, so Althar didn't keep it.`)
+            const unpacked = join(folder, 'unpacked')
+            mkdirSync(unpacked)
+            yield* run(tarHere, ['-xzf', archive, '-C', unpacked], 300_000).pipe(
+              Effect.mapError((error) => fail(definition.id, `${definition.name}'s download couldn't be unpacked.`, error)),
+            )
+            // npm packs a package under `package/`.
+            const whole = join(unpacked, 'package')
+            for (const part of asset.prune)
+              yield* removeFully(join(whole, ...part.split('/'))).pipe(
+                Effect.mapError((failed) => fail(definition.id, `${definition.name} couldn't be kept on this computer.`, failed.reason)),
+              )
+            const command = join(whole, ...asset.program.split('/'))
+            if (!existsSync(command) || lstatSync(command).isSymbolicLink())
+              return yield* fail(definition.id, `${definition.name}'s download has no ${asset.program} in it.`)
+            chmodSync(command, 0o755)
+            yield* run(command, ['--version'], 60_000).pipe(
+              Effect.mapError((error) => fail(definition.id, `The downloaded ${definition.name} wouldn't run on this computer.`, error)),
+            )
+            return { release: { tag: asset.version, url: asset.tarball, digest: asset.integrity } satisfies Release, command, whole }
+          })
+
+        const download = (definition: AgentDefinition, name: string, install: AgentDownload, folder: string, progress?: Progress) =>
+          Effect.gen(function* () {
+            if (fromNpm(install)) return yield* npmPackage(definition, install, folder, progress)
             const release = pinned(install) ? yield* pinnedRelease(definition, install) : yield* latest(definition, install)
             const bytes = yield* within(
               Effect.tryPromise({
                 try: async (signal) => {
                   const response = await fetch(release.url, { headers: { 'User-Agent': 'Althar' }, signal })
-                  if (!response.ok) throw fail(definition.id, `${definition.name} couldn't be downloaded.`, response.status)
-                  const body = await response.arrayBuffer().catch((error: unknown) => {
+                  if (!response.ok || response.body === null)
+                    throw fail(definition.id, `${definition.name} couldn't be downloaded.`, response.status)
+                  // Read as it comes, so whoever asked hears how far it has got, out of what its server says it is.
+                  const said = Number(response.headers.get('content-length'))
+                  const total = Number.isSafeInteger(said) && said > 0 ? said : undefined
+                  const chunks: Uint8Array[] = []
+                  let received = 0
+                  try {
+                    for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+                      chunks.push(chunk)
+                      received += chunk.length
+                      progress?.(received, total)
+                    }
+                  } catch (error) {
                     throw fail(definition.id, `${definition.name}'s download stopped part-way.`, error)
-                  })
-                  return Buffer.from(body)
+                  }
+                  return Buffer.concat(chunks)
                 },
                 catch: (error) =>
                   error instanceof InstallFailed ? error : fail(definition.id, `${definition.name} couldn't be downloaded.`, error),
@@ -424,53 +581,128 @@ export class Installs extends Context.Service<
             return { release, command, whole: undefined }
           })
 
-        const install = (definition: AgentDefinition): Effect.Effect<void, InstallFailed> =>
+        /**
+         * Makes `tag`'s folder the copy in use: what `place` puts there, then `current` moved to it in one step, and the
+         * versions before it gone, with what any earlier download left; one an agent still runs from stays.
+         */
+        const keep = (definition: AgentDefinition, tag: string, place: (version: string) => void) =>
+          Effect.gen(function* () {
+            const home = join(root ?? '', definition.id)
+            const version = join(home, tag)
+            yield* removeFully(version).pipe(
+              Effect.mapError((failed) => fail(definition.id, `${definition.name} couldn't be kept on this computer.`, failed.reason)),
+            )
+            place(version)
+            const next = join(home, `.current-${randomUUID()}`)
+            // A junction on Windows, which needs no administrator, and an absolute target; a relative link elsewhere.
+            if (platform === 'win32') symlinkSync(version, next, 'junction')
+            else symlinkSync(tag, next)
+            // Windows can't rename over a junction, so the old one goes first; elsewhere the rename replaces it in one step.
+            // The link alone, never recursively, so nothing of the version it points at goes with it; a step of the install's own.
+            // oxlint-disable-next-line althar/one-removal
+            if (platform === 'win32') rmSync(join(home, 'current'), { force: true })
+            renameSync(next, join(home, 'current'))
+            for (const entry of readdirSync(home))
+              if (entry !== tag && entry !== 'current' && !entry.startsWith('.'))
+                yield* cleanUp(join(home, entry), `an earlier ${definition.name} Althar downloaded`)
+          })
+
+        /** Runs `work` as the agent's one install under way, and leaves its scratch folder clean however it ends. */
+        const asTheInstall = <A>(definition: AgentDefinition, scratch: string, work: Effect.Effect<A, InstallFailed>) =>
+          Effect.gen(function* () {
+            const already = yield* Ref.modify(installing, (now) => [now.has(definition.id), new Set([...now, definition.id])])
+            if (already) return yield* fail(definition.id, `${definition.name} is already downloading.`)
+            return yield* Effect.suspend(() => {
+              mkdirSync(scratch, { recursive: true })
+              return work
+            }).pipe(
+              Effect.catchDefect((defect) =>
+                Effect.fail(fail(definition.id, `${definition.name} couldn't be kept on this computer.`, defect)),
+              ),
+              Effect.ensuring(cleanUp(scratch, `where ${definition.name} was downloaded`)),
+              Effect.ensuring(Ref.update(installing, (now) => new Set([...now].filter((id) => id !== definition.id)))),
+            )
+          })
+
+        const install = (definition: AgentDefinition, progress?: Progress): Effect.Effect<void, InstallFailed> =>
           Effect.gen(function* () {
             const cli = definition.cli
             const spec = cli?.download
             if (cli === undefined || spec === undefined || root === undefined)
               return yield* fail(definition.id, `Althar can't download ${definition.name}.`)
-            const already = yield* Ref.modify(installing, (now) => [now.has(definition.id), new Set([...now, definition.id])])
-            if (already) return yield* fail(definition.id, `${definition.name} is already downloading.`)
-            const home = join(root, definition.id)
-            const folder = join(home, `.download-${randomUUID()}`)
-            yield* Effect.gen(function* () {
-              mkdirSync(folder, { recursive: true })
-              const { release, command, whole } = yield* download(definition, cli.name, spec, folder)
-              // The version's folder holds the command alone, or all a pinned archive held; `current` moves to it in one step.
-              const version = join(home, release.tag)
-              yield* removeFully(version).pipe(
-                Effect.mapError((failed) => fail(definition.id, `${definition.name} couldn't be kept on this computer.`, failed.reason)),
-              )
-              if (whole !== undefined) renameSync(whole, version)
-              else {
-                mkdirSync(version)
-                renameSync(command, join(version, programName(cli.name, platform)))
-              }
-              const next = join(home, `.current-${randomUUID()}`)
-              // A junction on Windows, which needs no administrator, and an absolute target; a relative link elsewhere.
-              if (platform === 'win32') symlinkSync(version, next, 'junction')
-              else symlinkSync(release.tag, next)
-              // Windows can't rename over a junction, so the old one goes first; elsewhere the rename replaces it in one step.
-              // The link alone, never recursively, so nothing of the version it points at goes with it; a step of the install's own.
-              // oxlint-disable-next-line althar/one-removal
-              if (platform === 'win32') rmSync(join(home, 'current'), { force: true })
-              renameSync(next, join(home, 'current'))
-              // Versions before the one in use go, with what any earlier download left; one an agent still runs from stays.
-              for (const entry of readdirSync(home))
-                if (entry !== release.tag && entry !== 'current')
-                  yield* cleanUp(join(home, entry), `an earlier ${definition.name} Althar downloaded`)
-            }).pipe(
-              Effect.catchDefect((defect) =>
-                Effect.fail(fail(definition.id, `${definition.name} couldn't be kept on this computer.`, defect)),
-              ),
-              Effect.ensuring(cleanUp(folder, `where ${definition.name} was downloaded`)),
-              Effect.ensuring(Ref.update(installing, (now) => new Set([...now].filter((id) => id !== definition.id)))),
+            const folder = join(root, definition.id, `.download-${randomUUID()}`)
+            yield* asTheInstall(
+              definition,
+              folder,
+              Effect.gen(function* () {
+                const { release, command, whole } = yield* download(definition, cli.name, spec, folder, progress)
+                // The version's folder holds the command alone, or all a pinned archive or package held.
+                yield* keep(definition, release.tag, (version) => {
+                  if (whole !== undefined) renameSync(whole, version)
+                  else {
+                    mkdirSync(version)
+                    renameSync(command, join(version, programName(cli.name, platform)))
+                  }
+                })
+              }),
             )
           })
 
+        /**
+         * Keeps the package the lockfile pins from a folder already on this computer (a worker's release from before
+         * programs came on first use carries it), without downloading it: only where it is that package at that version
+         * with its program, linked rather than copied where the disk allows. False where it isn't, or Althar keeps none.
+         */
+        const adopt = (definition: AgentDefinition, from: string): Effect.Effect<boolean, InstallFailed> =>
+          Effect.gen(function* () {
+            const spec = definition.cli?.download
+            if (spec === undefined || !fromNpm(spec) || root === undefined) return false
+            const asset = assetOf(spec.assets)
+            if (asset === undefined) return false
+            const manifest = yield* Effect.sync(() => {
+              try {
+                return JSON.parse(readFileSync(join(from, 'package.json'), 'utf8')) as {
+                  readonly name?: unknown
+                  readonly version?: unknown
+                }
+              } catch {
+                return undefined
+              }
+            })
+            // The package's own manifest names it as the lockfile does (Codex's platform packages are `@openai/codex` too).
+            if (manifest?.name !== asset.name || manifest.version !== asset.version) return false
+            const program = join(from, ...asset.program.split('/'))
+            if (!existsSync(program) || lstatSync(program).isSymbolicLink()) return false
+            const folder = join(root, definition.id, `.adopt-${randomUUID()}`)
+            yield* asTheInstall(
+              definition,
+              folder,
+              Effect.gen(function* () {
+                const staged = join(folder, 'package')
+                yield* Effect.sync(() => lendInto(from, staged))
+                for (const part of asset.prune)
+                  yield* removeFully(join(staged, ...part.split('/'))).pipe(
+                    Effect.mapError((failed) =>
+                      fail(definition.id, `${definition.name} couldn't be kept on this computer.`, failed.reason),
+                    ),
+                  )
+                yield* keep(definition, asset.version, (version) => renameSync(staged, version))
+              }),
+            )
+            return true
+          })
+
+        /** How big its download is here: a pinned package's own size, else what its maker's release is about. */
+        const sizeOf = (spec: AgentDownload | undefined): string | null => {
+          if (spec === undefined) return null
+          if (!fromNpm(spec)) return spec.size
+          const bytes = assetOf(spec.assets)?.bytes
+          return bytes === undefined ? null : megabytes(bytes)
+        }
+
         return Installs.of({
           locate: locateOf,
+          keptAt: (definition) => (definition.cli?.download === undefined ? null : kept(definition, definition.cli.name)),
           version,
           state: (definition) =>
             Effect.map(Ref.get(installing), (now) => ({
@@ -479,16 +711,20 @@ export class Installs extends Context.Service<
                 definition.cli?.download !== undefined &&
                 root !== undefined &&
                 assetOf<unknown>(definition.cli.download.assets) !== undefined,
-              size: definition.cli?.download?.size ?? null,
-              pinned: definition.cli?.download !== undefined && pinned(definition.cli.download) ? definition.cli.download.version : null,
+              size: sizeOf(definition.cli?.download),
+              pinned:
+                definition.cli?.download !== undefined && (pinned(definition.cli.download) || fromNpm(definition.cli.download))
+                  ? definition.cli.download.version
+                  : null,
               installing: now.has(definition.id),
               noBuild:
                 definition.cli?.download !== undefined &&
                 definition.cli.guide === undefined &&
                 assetOf<unknown>(definition.cli.download.assets) === undefined,
             })),
-          install: (definition) =>
-            install(definition).pipe(
+          adopt,
+          install: (definition, progress) =>
+            install(definition, progress).pipe(
               Effect.tap(() =>
                 versionChecks.withLock(
                   definition.id,

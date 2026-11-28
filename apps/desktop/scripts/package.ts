@@ -8,7 +8,7 @@ import { build } from 'electron-builder'
 
 import { adapterPatchFor, applyAdapterPatch, assertAdapterPatched } from './adapterPatch.ts'
 import { LIPO_ARCH, macBuild, wrongArchs } from './archs.ts'
-import { ADAPTERS, binariesFor, NATIVE, prunePrebuilds, speechPackage } from './binaries.ts'
+import { ADAPTERS, assertNoAgentPrograms, binariesFor, NATIVE, pruneAgentPrograms, prunePrebuilds, speechPackage } from './binaries.ts'
 import { entitlementsFor } from './entitlements.ts'
 import { joinFeeds, refresh } from './feed.ts'
 import { fetchNode, NODE_IN_APP, nodeProgram } from './node.ts'
@@ -92,7 +92,10 @@ const ALTHAR_IDENTITY = 'Balazs Otakomaiya (59A9XM7G7P)'
 /** Where updates come from: the repository's GitHub Releases (ADR-024). */
 const RELEASES = { provider: 'github', owner: 'AltharIDE', repo: 'althar' } as const
 
-/** The packages that carry the agents' binaries, by the adapter that brings each; their platform packages are pinned by them. */
+/**
+ * The packages that name the agents' own programs, by the adapter that brings each: pinned at the versions the workspace
+ * runs, so the program Althar downloads on first use (pinned from the same lockfile) is the one its adapter was built for.
+ */
 const BINARIES: Record<string, string> = {
   '@openai/codex': '@agentclientprotocol/codex-acp',
   '@anthropic-ai/claude-agent-sdk': '@agentclientprotocol/claude-agent-acp',
@@ -232,6 +235,8 @@ const stageFor = (arch: string) => {
     adapterPatchFor(join(desktop, '..', '..'), own.dependencies['@agentclientprotocol/claude-agent-acp']),
   )
   prunePrebuilds(stage, process.platform, arch)
+  // The agents' own programs, which npm installed with their adapters: they come on first use, pinned, and never ship.
+  pruneAgentPrograms(stage)
   // node-pty's helper that starts a shell comes from the registry without leave to run, so no terminal would open; it is given it here.
   for (const helper of globSync('node_modules/node-pty/prebuilds/*/spawn-helper', { cwd: stage })) chmodSync(join(stage, helper), 0o755)
   for (const [name, version] of Object.entries(pinned)) {
@@ -240,6 +245,7 @@ const stageFor = (arch: string) => {
   }
 
   assertPlatformBinaries(stage, arch)
+  assertNoAgentPrograms(stage)
   return stage
 }
 
@@ -380,6 +386,7 @@ for (const arch of arches) {
     const packaged = join(app, 'Contents', 'Resources', 'app')
     assertAdapterPatched(join(packaged, CLAUDE_ADAPTER))
     assertPlatformBinaries(packaged, arch)
+    assertNoAgentPrograms(packaged)
     const { read, wrong } = wrongArchs(app, arch)
     if (wrong.length > 0)
       throw new Error(
@@ -405,6 +412,7 @@ if (mac) {
   const packaged = join(dist, 'win-unpacked', 'resources', 'app')
   assertAdapterPatched(join(packaged, CLAUDE_ADAPTER))
   assertPlatformBinaries(packaged, 'x64')
+  assertNoAgentPrograms(packaged)
   process.stdout.write(`\n${installer}\n${installer}.blockmap\n${join(dist, 'latest.yml')}\n`)
 } else {
   const made = readdirSync(dist).filter((name) => /\.(AppImage|deb|rpm)$/.test(name))
@@ -418,6 +426,7 @@ if (mac) {
     const packaged = join(dist, name, 'resources', 'app')
     assertAdapterPatched(join(packaged, CLAUDE_ADAPTER))
     assertPlatformBinaries(packaged, process.arch)
+    assertNoAgentPrograms(packaged)
   }
   for (const name of made) process.stdout.write(`${join(dist, name)}\n`)
   process.stdout.write(`${feed}\n`)

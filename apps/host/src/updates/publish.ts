@@ -7,7 +7,7 @@ import { c } from 'tar'
 
 import type { HostOptions } from '../options'
 import { privateDirectory, writePrivate } from '../privateFiles'
-import { assembleBundle, assembleWorkerBundle, type BundleSource } from './bundle'
+import { assembleBundle, assembleWorkerBundle, type BundleSource, type WorkerPart } from './bundle'
 import { releaseInfo } from './info'
 import { httpsURL, releaseIdentity, verifyRelease, type ReleaseManifest } from './release'
 import { newUpdateId, updateError } from './store'
@@ -31,9 +31,29 @@ const inventory = async (folder: string): Promise<{ files: number; bytes: number
   }
   return { files, bytes }
 }
+/** A folder's contents as a tar archive at `file`, but what `keep` leaves out: its size and SHA-256. */
+const pack = async (folder: string, file: string, keep: (path: string) => boolean = () => true) => {
+  const options = { file, cwd: folder, portable: true, noMtime: true, filter: (path: string) => keep(path) }
+  await c({ ...options, gzip: true }, await fs.readdir(folder))
+  const input = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW)
+  const hash = createHash('sha256')
+  const size = (await input.stat()).size
+  try {
+    for await (const chunk of input.createReadStream({ autoClose: false })) {
+      if (!Buffer.isBuffer(chunk)) throw updateError('UpdateFailed', 'The release archive could not be hashed as bytes.')
+      hash.update(chunk)
+    }
+    await input.sync()
+  } finally {
+    await input.close()
+  }
+  return { size, sha256: hash.digest('hex') }
+}
+
 export interface PublishDependencies {
   readonly assemble?: typeof assembleBundle
-  readonly assembleWorker?: typeof assembleWorkerBundle
+  /** A worker's release, and where in it its parts are, if it has any (parts.ts). */
+  readonly assembleWorker?: (source: BundleSource, folder: string) => Promise<{ readonly parts?: ReadonlyArray<WorkerPart> } | void>
   readonly source: BundleSource
   readonly signingKey: string | undefined
   readonly now?: number
@@ -77,31 +97,50 @@ export const packageRelease = async (options: HostOptions, dependencies: Publish
   const sequence = options.releaseSequence
   const now = dependencies.now ?? Date.now()
   /** One product's archive and its signed manifest, in `output`; each is written once, never over another. */
-  const one = async (product: 'host' | 'worker', assemble: (folder: string) => Promise<void>, check: (folder: string) => Promise<void>) => {
+  const one = async (
+    product: 'host' | 'worker',
+    assemble: (folder: string) => Promise<{ readonly parts?: ReadonlyArray<WorkerPart> } | void>,
+    check: (folder: string) => Promise<void>,
+  ) => {
     const scratch = join(output, `.package-${newUpdateId()}`)
     await privateDirectory(scratch, true)
-    const file = `althar-${product}-${info.version}-linux-${info.arch}.tar.gz`
+    const named = (suffix: string) => `althar-${product}-${info.version}-linux-${info.arch}${suffix}`
+    const file = named('.tar.gz')
     const archive = join(output, file)
     const manifestPath = join(output, `althar-${product}-linux-${info.arch}.json`)
     try {
       const folder = join(scratch, 'release')
-      await assemble(folder)
+      const parts = (await assemble(folder))?.parts ?? []
       await syncReleaseTree(folder)
       await check(folder)
       const counts = await inventory(folder)
       const temporary = join(scratch, 'release.tar.gz')
-      await c({ file: temporary, cwd: folder, gzip: true, portable: true, noMtime: true }, await fs.readdir(folder))
-      const input = await fs.open(temporary, constants.O_RDONLY | constants.O_NOFOLLOW)
-      const hash = createHash('sha256')
-      const size = (await input.stat()).size
-      try {
-        for await (const chunk of input.createReadStream({ autoClose: false })) {
-          if (!Buffer.isBuffer(chunk)) throw updateError('UpdateFailed', 'The release archive could not be hashed as bytes.')
-          hash.update(chunk)
+      const { size, sha256 } = await pack(folder, temporary)
+      /** Each archive made here, where it goes in `output`. */
+      const made = [{ from: temporary, to: archive }]
+      // A worker's release without its agents' own programs too (docs/plans/agents-on-first-use.md): its base, gzipped
+      // for the bootstrap's own tar, which a worker or window that knows it takes; each agent's program then comes on
+      // first use. The whole archive keeps them, for host 0.3.0's updater and windows from before.
+      let without: ReleaseManifest['base']
+      if (parts.length > 0) {
+        const inPart = (path: string) => parts.some((part) => path === part.path || path.startsWith(`${part.path}/`))
+        let partFiles = 0
+        let partBytes = 0
+        for (const part of parts) {
+          const held = await inventory(join(folder, part.path))
+          partFiles += held.files
+          partBytes += held.bytes
         }
-        await input.sync()
-      } finally {
-        await input.close()
+        const baseName = named('-base.tar.gz')
+        const packed = await pack(folder, join(scratch, baseName), (path) => !inPart(path))
+        made.push({ from: join(scratch, baseName), to: join(output, baseName) })
+        without = {
+          url: new URL(baseName, base).href,
+          sha256: packed.sha256,
+          bytes: packed.size,
+          files: counts.files - partFiles,
+          unpackedBytes: counts.bytes - partBytes,
+        }
       }
       const manifest: ReleaseManifest = {
         format: 1,
@@ -114,7 +153,10 @@ export const packageRelease = async (options: HostOptions, dependencies: Publish
         updaterProtocol: 1,
         apiVersion: info.apiVersion,
         storage: info.storage,
-        archive: { url: new URL(file, base).href, bytes: size, sha256: hash.digest('hex') },
+        // Before `archive`: a script that reads the payload's fields by their last mention (bootstrap/ssh.sh) reads the
+        // whole archive's.
+        ...(without === undefined ? {} : { base: without }),
+        archive: { url: new URL(file, base).href, bytes: size, sha256 },
         files: counts.files,
         unpackedBytes: counts.bytes,
         // A home's manifest says nothing of what it is, as before workers had their own: older verifiers take it as one.
@@ -130,15 +172,16 @@ export const packageRelease = async (options: HostOptions, dependencies: Publish
         }),
       )
       verifyRelease(envelope, { keys: [publicKey], arch: info.arch, minimumSequence: 0, installedVersion: '0.0.0', now, product })
-      try {
-        await fs.access(archive)
-        throw updateError(
-          'UpdateFailed',
-          'This release archive already exists. Use a fresh output directory; release versions are immutable.',
-        )
-      } catch (error) {
-        if (typeof error !== 'object' || error === null || !('code' in error) || error.code !== 'ENOENT') throw error
-      }
+      for (const { to } of made)
+        try {
+          await fs.access(to)
+          throw updateError(
+            'UpdateFailed',
+            'This release archive already exists. Use a fresh output directory; release versions are immutable.',
+          )
+        } catch (error) {
+          if (typeof error !== 'object' || error === null || !('code' in error) || error.code !== 'ENOENT') throw error
+        }
       if (
         await fs.lstat(manifestPath).then(
           () => true,
@@ -149,10 +192,10 @@ export const packageRelease = async (options: HostOptions, dependencies: Publish
         )
       )
         throw updateError('UpdateFailed', 'This output directory already holds a release manifest. Use a fresh directory.')
-      await fs.link(temporary, archive)
+      for (const { from, to } of made) await fs.link(from, to)
       if (!(await writePrivate(manifestPath, envelope, false)))
         throw updateError('UpdateFailed', 'A release manifest was published concurrently. Nothing was overwritten.')
-      return { archive, manifest: manifestPath }
+      return { archive, manifest: manifestPath, ...(made.length > 1 ? { parts: made.slice(1).map(({ to }) => to) } : {}) }
     } finally {
       await fs.rm(scratch, { recursive: true, force: true }).catch(() => undefined)
     }

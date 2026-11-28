@@ -2,7 +2,7 @@ import { accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, dirname, isAbsolute, posix, win32 } from 'node:path'
 
-import type { AgentDefinition, LaunchSpec, OutOnDevice } from './registry'
+import type { AgentCli, AgentDefinition, LaunchSpec, OutOnDevice } from './registry'
 
 /*
  * Finding an agent's command, on a Mac, Windows or Linux (ADR-012's "the
@@ -96,11 +96,14 @@ export interface LocateOptions {
   readonly isExecutable?: (path: string) => boolean
   /** On Windows, a `.cmd` or `.bat` counts too: for a caller that runs it through a shell. */
   readonly scripts?: boolean
+  /** Whether a copy of the person's, at this path, is one Althar can run (`AgentCli.fits`); any is, without it. */
+  readonly fits?: (path: string) => boolean
 }
 
 /**
- * Where a command is: the person's, on the PATH or in a usual place; else
- * the copy that ships with Althar; else the one it downloaded; null where
+ * Where a command is: the person's, on the PATH or in a usual place, where it
+ * fits (a version its adapter can drive); else the copy that ships with
+ * Althar, where a build still does; else the one it downloaded; null where
  * there is none. On Windows always by its full path, as a program started
  * without a shell finds no `.cmd` by its bare name.
  */
@@ -115,8 +118,9 @@ export const locate = (
   const names = namesOf(command, platform, env, options.scripts === true)
   // Each system's own: the one asked about, not necessarily this one.
   const paths = platform === 'win32' ? win32 : posix
+  const fits = options.fits ?? (() => true)
   const inDirs = (dirs: ReadonlyArray<string>) =>
-    dirs.flatMap((dir) => (dir === '' ? [] : names.map((name) => paths.join(dir, name)))).find(isExecutable)
+    dirs.flatMap((dir) => (dir === '' ? [] : names.map((name) => paths.join(dir, name)))).find((path) => isExecutable(path) && fits(path))
   const onPath = inDirs((env.PATH ?? env.Path ?? '').split(paths.delimiter))
   if (onPath !== undefined) return { command: platform === 'win32' ? onPath : command, whose: 'theirs' }
   const usual = inDirs(options.dirs ?? usualDirs(platform, homedir(), env))
@@ -148,15 +152,18 @@ const inATerminal = (found: Located, flatpakId: string | undefined): string =>
 
 /**
  * An adapter that drives the agent's command rather than being it, told by
- * its variable (`AgentCli.drivenBy`) to drive the person's own copy where
- * they have one here: by its full path where it was found off the PATH. A
- * copy out on the device (a Flatpak's host) is reached its own way; without
- * one of theirs, the adapter drives the copy it ships with, as before.
+ * its variable (`AgentCli.drivenBy`) which copy to drive: the person's own
+ * where they have one here that fits, else the one Althar downloaded, by its
+ * full path. A copy out on the device (a Flatpak's host) is reached its own
+ * way, unless what the adapter drives is a bridge that runs it there
+ * (`AgentCli.drivesOutThere`), which is told it; where the copy is the one
+ * beside the adapter, it drives that, as before.
  */
-const drivingTheirs = (spec: LaunchSpec, variable: string | undefined, find: () => Located | null): LaunchSpec => {
+const drivingTheirs = (spec: LaunchSpec, cli: AgentCli, find: () => Located | null): LaunchSpec => {
+  const variable = cli.drivenBy
   if (variable === undefined) return spec
   const found = find()
-  if (found === null || found.whose !== 'theirs' || found.out !== undefined) return spec
+  if (found === null || found.whose === 'bundled' || (found.out !== undefined && cli.drivesOutThere !== true)) return spec
   return { ...spec, env: { ...spec.env, [variable]: found.command } }
 }
 
@@ -179,7 +186,7 @@ export const usingLocated = (
     <A extends ReadonlyArray<unknown>>(make: (...args: A) => LaunchSpec) =>
     (...args: A): LaunchSpec => {
       const spec = make(...args)
-      if (spec.command !== cli.name) return drivingTheirs(spec, cli.drivenBy, find)
+      if (spec.command !== cli.name) return drivingTheirs(spec, cli, find)
       const found = find()
       if (found === null) return spec
       // An npm-installed Node script found off the PATH finds the Node beside it, as it would in the terminal that installed it.

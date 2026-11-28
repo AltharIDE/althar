@@ -164,6 +164,7 @@ a.issue:hover .pixels {
 .foot {
   display: flex;
   align-items: center;
-  padding: 6px 10px 7px;
+  /* in from the edge as far as the mark above, so the two line up */
+  padding: 8px 12px;
   border-top: 1px solid var(--line);
 }

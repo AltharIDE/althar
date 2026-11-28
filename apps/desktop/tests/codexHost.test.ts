@@ -76,12 +76,15 @@ const bridge = join(import.meta.dirname, '..', 'flatpak', 'codex-host.sh')
 const uid = process.getuid?.() ?? 1000
 
 interface At {
+  /** Where the device's Codex is: on its session PATH, where an installer put it, or nowhere. */
   readonly codex?: 'bins' | 'home' | 'none'
+  /** Whether the bridge is told the Codex Althar found (`ALTHAR_CODEX_PROGRAM`); it is, wherever there is one, unless said. */
+  readonly told?: boolean
   readonly deny?: boolean
 }
 
 /** A device to run the bridge against: its stub commands, its own session (home and PATH), and a place for the calls it records. */
-const device = ({ codex = 'bins', deny = false }: At = {}) => {
+const device = ({ codex = 'bins', told = codex !== 'none', deny = false }: At = {}) => {
   const root = mkdtempSync(join(tmpdir(), 'althar-bridge-'))
   const bins = join(root, 'device-bin')
   mkdirSync(bins)
@@ -114,6 +117,8 @@ const device = ({ codex = 'bins', deny = false }: At = {}) => {
     ALTHAR_FAKE_PATH: codex === 'home' ? '/usr/bin:/bin' : `${bins}:/usr/bin:/bin`,
     ALTHAR_FAKE_LOG: log,
     ...(deny ? { ALTHAR_FAKE_DENY: '1' } : {}),
+    // The Codex Althar found and checked, as its launch names it.
+    ...(told ? { ALTHAR_CODEX_PROGRAM: join(codexBin, 'codex') } : {}),
     CODEX_HOME: codexHome,
     CODEX_CONFIG: codexConfig,
     GH_CONFIG_DIR: ghConfig,
@@ -195,7 +200,7 @@ describe.skipIf(process.platform === 'win32')('the Codex host bridge', () => {
     expect(calls).toContain(JSON.stringify('--env=GIT_CONFIG_VALUE_0='))
   })
 
-  it('finds a Codex where an installer put it, when the device’s session PATH has none', () => {
+  it('runs the Codex it is told, where an installer put it, when the device’s session PATH has none', () => {
     const at = device({ codex: 'home' })
     const { output, failed } = said(at)
     expect(failed).toBeNull()
@@ -225,11 +230,15 @@ describe.skipIf(process.platform === 'win32')('the Codex host bridge', () => {
     expect(existsSync(calls)).toBe(false)
   })
 
-  it('says Codex has to be installed there when the device has none', () => {
-    const at = device({ codex: 'none' })
-    const { failed } = said(at)
-    expect(failed?.stderr ?? '').toContain('Codex has to be installed on this computer')
-    expect(failed?.stderr ?? '').not.toContain('org.freedesktop.Flatpak')
+  it('says Codex isn’t on this computer yet when it is told none, and never runs one of its own finding', () => {
+    const none = said(device({ codex: 'none' }))
+    expect(none.failed?.stderr ?? '').toContain('Codex isn’t on this computer yet')
+    expect(none.failed?.stderr ?? '').not.toContain('org.freedesktop.Flatpak')
+    // A Codex on the device's PATH that Althar passed over (a version its adapter can't drive) doesn't run.
+    const passedOver = device({ codex: 'bins', told: false })
+    const { output, failed } = said(passedOver)
+    expect(failed?.stderr ?? '').toContain('Codex isn’t on this computer yet')
+    expect(output).toBe('')
   })
 
   it('says what to put right when the device cannot be reached at all', () => {

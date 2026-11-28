@@ -91,6 +91,12 @@ export interface WorkerLog {
  * What of a program's words may go to the log: never a one-time code, the home's grant or anything as long as a key or
  * a token (base64 of 40 characters or more), and its last lines only.
  */
+/**
+ * How long a release's transfer to a worker may take, with unpacking and checking it: ten minutes, and as long as its bytes
+ * take at 128 KiB/s, the slowest the worker's own downloads allow (apps/host/src/updates/network.ts `downloadTime`).
+ */
+export const transferTime = (bytes: number) => 10 * 60_000 + Math.ceil(bytes / 131_072) * 1000
+
 export const forTheLog = (text: string, lines = 20) =>
   text
     .replaceAll(/althar-worker1\.[A-Za-z0-9._-]+/g, 'althar-worker1.…')
@@ -143,6 +149,15 @@ export const workerSshArgs = (target: SshHomeTarget, verbose = false) => {
 
 /** A worker's SSH address as the home keeps it, `user@host` or `user@host:port`, and back. */
 export const sshAddressOf = (target: SshHomeTarget) => (target.port === undefined ? target.target : `${target.target}:${target.port}`)
+/**
+ * The line a person runs in a terminal here to run `command` on the worker at this SSH address, with a terminal of its
+ * own there (`-t`), as an agent's own sign-in needs: by its address, its port where it has one.
+ */
+export const terminalLine = (address: string, command: string) => {
+  const target = sshTargetOf(address)
+  return ['ssh', '-t', ...(target.port === undefined ? [] : ['-p', String(target.port)]), target.target, quote(command)].join(' ')
+}
+
 export const sshTargetOf = (address: string): SshHomeTarget => {
   const match = /^(.*?)(?::(\d{1,5}))?$/u.exec(address)
   const port = match?.[2] === undefined ? undefined : Number(match[2])
@@ -190,7 +205,18 @@ export const workerSetups = (
     operation: string,
     args: ReadonlyArray<string>,
     signal: AbortSignal,
-    { verbose = false, timeout = 60_000, event }: { verbose?: boolean; timeout?: number; event?: (event: Event) => void } = {},
+    {
+      verbose = false,
+      timeout = 60_000,
+      event,
+      late,
+    }: {
+      verbose?: boolean
+      timeout?: number
+      event?: (event: Event) => void
+      /** What it stopping at its deadline means, where that isn't the connection's failure. */
+      late?: () => Stopped
+    } = {},
   ) => {
     const ran = await system.run('ssh', [...workerSshArgs(target, verbose), `sh -s -- ${[operation, ...args].map(quote).join(' ')}`], {
       input: script,
@@ -218,6 +244,8 @@ export const workerSetups = (
         stderr: forTheLog(ran.stderr),
       })
     else log.info('Worker SSH call done', { operation, target: sshAddressOf(target) })
+    // Its deadline, before what SSH exits with when stopped (255, as for a connection that failed).
+    if (ran.timedOut === true && late !== undefined && !events.some((one) => one.state === 'failed')) throw late()
     if (ran.code === 255 && !events.some((one) => one.state === 'failed')) {
       const words = lastWords(ran.stderr)
       if (/HOST IDENTIFICATION HAS CHANGED/i.test(ran.stderr)) throw new Stopped('HostKeyChanged', STEP.reach, words)
@@ -346,12 +374,19 @@ export const workerSetups = (
       throw new Stopped(error instanceof ReleaseProblem ? error.code : 'ReleaseRejected', STEP.get)
     }
     const release = found
-    set({ version: release.version, progress: { bytes: 0, total: release.bytes } })
+    // Downloaded on the machine, a release comes as its base where it has one: each agent's program follows with its sign-in.
+    // Sent from here, it goes whole.
+    const base = release.base
+    set({ version: release.version, progress: { bytes: 0, total: base?.bytes ?? release.bytes } })
     const signed = [release.sha256, String(release.bytes), String(release.unpackedBytes)]
     const trust = [Buffer.from(release.envelope).toString('base64'), Buffer.from(release.key).toString('base64')]
     const install = async (method: 'download' | 'upload', source: string) => {
-      const ran = await bootstrap(target, 'worker-install', [method, ...signed, source, ...trust], signal, {
-        timeout: 15 * 60_000,
+      const asked = method === 'download' && base !== undefined ? [base.sha256, String(base.bytes), String(base.unpackedBytes)] : signed
+      const total = method === 'download' && base !== undefined ? base.bytes : release.bytes
+      const ran = await bootstrap(target, 'worker-install', [method, ...asked, source, ...trust], signal, {
+        timeout: transferTime(total),
+        // Still downloading at its deadline: sent from here instead.
+        ...(method === 'download' ? { late: () => new Stopped('CannotDownload', STEP.get) } : {}),
         event: (one) => {
           if (one.step === 'get' && typeof one.bytes === 'number' && typeof one.totalBytes === 'number')
             set({ progress: { bytes: one.bytes, total: one.totalBytes } })
@@ -364,7 +399,7 @@ export const workerSetups = (
     }
     try {
       say(`Release ${release.version}: downloading on the machine`)
-      return await install('download', release.url)
+      return await install('download', base?.url ?? release.url)
     } catch (error) {
       if (!(error instanceof Stopped) || error.code !== 'CannotDownload') throw error
     }
@@ -391,7 +426,7 @@ export const workerSetups = (
           ...(target.port === undefined ? [] : ['-P', String(target.port)]),
           target.target,
         ],
-        { input: `put "${file}" "${started.uploadPath}"\n`, signal, timeout: 15 * 60_000 },
+        { input: `put "${file}" "${started.uploadPath}"\n`, signal, timeout: transferTime(release.bytes) },
       )
       if (signal.aborted) throw signal.reason
       if (sent.code !== 0) {
@@ -575,14 +610,21 @@ export const workerSetups = (
           changed(null)
       }
     },
-    /** The worker's agents and their sign-ins, checked over SSH. */
+    /**
+     * The worker's agents and their sign-ins, by its whole check over SSH: each signed in started once, as a task would
+     * start it, which also says its models to the home. One that can't say whether it is signed in (Junie, Qwen Code, Mistral
+     * Vibe, signed in in a terminal) is signed in only once it starts.
+     */
     agents: async (ssh: string) => {
       const controller = new AbortController()
-      const ran = await bootstrap(sshTargetOf(ssh), 'worker-agents', [], controller.signal, { timeout: 60_000 }).catch((error: unknown) => {
-        log.warn('A worker’s agents couldn’t be checked', { target: ssh, code: error instanceof Stopped ? error.code : String(error) })
-        throw error
-      })
-      return agentsOf(ran.events.find((one) => one.step === 'agents' && one.state === 'done')?.agents)
+      const ran = await bootstrap(sshTargetOf(ssh), 'worker-check', [], controller.signal, { timeout: 5 * 60_000 }).catch(
+        (error: unknown) => {
+          log.warn('A worker’s agents couldn’t be checked', { target: ssh, code: error instanceof Stopped ? error.code : String(error) })
+          throw error
+        },
+      )
+      const check = checkOf(ran.events.findLast((one) => one.step === 'check' && one.state === 'done'))
+      return (check?.agents ?? []).map(({ id, name, signedIn }) => ({ id, name, signedIn }))
     },
     signIn: (ssh: string, agent: string, way: 'browser' | 'device') => {
       signingIn?.controller.abort()
@@ -607,7 +649,10 @@ export const workerSetups = (
             // words go in, cut as every line is.
             if (one.kind === 'failed') log.warn('Worker sign-in failed', { target: ssh, agent, message: forTheLog(textOf(one.message), 3) })
             else log.info('Worker sign-in', { target: ssh, agent, kind: one.kind })
-            said(one as unknown as WorkerSignInEvent)
+            // Its own command, to run on the worker: given as the line that reaches it over this SSH address.
+            if (one.kind === 'terminal' && typeof one.command === 'string')
+              said({ kind: 'terminal', command: terminalLine(ssh, one.command) })
+            else said(one as unknown as WorkerSignInEvent)
           } else if (one.step === 'agents' && one.state === 'done') said({ kind: 'agents', agents: agentsOf(one.agents) })
           else if (one.step === 'check' && one.state === 'done') {
             const check = checkOf(one)

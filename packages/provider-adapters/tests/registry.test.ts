@@ -127,7 +127,7 @@ describe('the agent registry', () => {
 
   it('downloads Antigravity’s server only from Google, at one version, each archive and both its programs pinned, Windows’ too', () => {
     const download = agents.antigravity.cli?.download
-    if (download === undefined || !('version' in download)) return assert.fail('Antigravity has a pinned download')
+    if (download === undefined || !('version' in download) || 'npm' in download) return assert.fail('Antigravity has a pinned download')
     assert.strictEqual(download.version, '1.3.0')
     assert.deepStrictEqual(Object.keys(download.assets).sort(), [
       'darwin-arm64',

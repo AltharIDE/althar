@@ -1,5 +1,5 @@
 #!/bin/sh
-# The Codex an adapter drives, out on the device: the person's own install.
+# The Codex an adapter drives, out on the device: the person's own install, or Althar's copy.
 # The Flatpak's own sandbox cannot run Codex's sandbox — it needs user
 # namespaces, which no Flatpak may make — so Codex runs where its sandbox
 # works, on the computer, and Althar speaks to it over flatpak-spawn (the
@@ -7,8 +7,8 @@
 # other own tools. The environment is built here, not inherited: the device
 # session's ssh agent and signed-in tools stay out of agents (ADR-011),
 # while the account's home, Althar's settings and the names every process
-# needs (the device's home, PATH, runtime directory) cross. Without Codex on
-# the computer there is nothing to run: that is said, and the session stops.
+# needs (the device's home, PATH, runtime directory) cross. Told no Codex to
+# run, there is nothing to run: that is said, and the session stops.
 set -u
 # A picked folder's path is the document portal's inside the sandbox; the device has its own form of it.
 # The translation is also its own small utility (`--portal-path`), so it can be tested on its own.
@@ -27,20 +27,13 @@ if ! flatpak-spawn --host true 2>/dev/null; then
   echo 'Althar can’t reach this computer from inside its Flatpak sandbox. Give the Flatpak permission to talk to org.freedesktop.Flatpak (flatpak override --user --talk-name=org.freedesktop.Flatpak dev.althar.app), then try again.' >&2
   exit 1
 fi
-# The usual install places too, as the device lookup names them (`onDevice.ts`'s
-# `whereScript`, from provider-adapters' `usualDirs`): a person's Codex may be
-# somewhere their session PATH doesn't have.
-codex="$(flatpak-spawn --host sh -c '
-  found="$(command -v codex 2>/dev/null || true)"
-  if [ -z "$found" ]; then
-    for dir in "/home/linuxbrew/.linuxbrew/bin" "/usr/local/bin" "$HOME/.local/bin" "$HOME/.opencode/bin" "$HOME/.bun/bin"; do
-      if [ -x "$dir/codex" ]; then found="$dir/codex"; break; fi
-    done
-  fi
-  printf "%s" "$found"
-' 2>/dev/null)" || true
+# The Codex to run, as Althar found and checked it (provider-adapters' registry names it here, as `drivenBy`): the
+# person's own on the computer where its adapter can drive it, else the copy Althar downloaded, kept in the Flatpak's own
+# data folder, which the computer sees at the same path. Never one of this bridge's own finding: one Althar passed over
+# (a version its adapter can't drive) never runs, and with none named Althar downloads its own at the first start.
+codex="${ALTHAR_CODEX_PROGRAM:-}"
 if [ -z "$codex" ]; then
-  echo 'Codex has to be installed on this computer for Althar to run it in its Flatpak. Install Codex there, then try again.' >&2
+  echo 'Codex isn’t on this computer yet. Download it in Settings › Agents, or install Codex there, then try again.' >&2
   exit 1
 fi
 # The device's own session, so Codex starts where its configuration lives.

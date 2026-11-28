@@ -1,5 +1,6 @@
 import { X509Certificate, createPrivateKey, createPublicKey } from 'node:crypto'
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -7,16 +8,7 @@ import { createInterface } from 'node:readline'
 import { request } from 'node:https'
 import { promisify } from 'node:util'
 
-import {
-  agents,
-  bundledClaude,
-  bundledCodex,
-  signInCheck,
-  startSignInFlow,
-  usingLocated,
-  type AgentDefinition,
-  type SignInWay,
-} from '@althar/provider-adapters'
+import { signInCheck, startSignInFlow, type AgentDefinition, type AgentId, type SignInWay } from '@althar/provider-adapters'
 import { workerCodeOf } from '@althar/runtime/workerHome'
 import { newKey } from '@althar/transport-node'
 import { Effect } from 'effect'
@@ -26,6 +18,8 @@ import { privateDirectory, readPrivate, writePrivate } from './privateFiles'
 import { authenticateRelease, verifyRelease } from './updates/release'
 import { downloadRelease, getUpdateBytes } from './updates/network'
 import { extractRelease } from './updates/archive'
+import { bringProgram, workerAgentsIn } from './workerAgents'
+import type { Progress } from '@althar/runtime/installs'
 import { checkHere, checkWorker, linkShipped, shippedSandbox, workerPath, type CheckSystem } from './workerCheck'
 import { installTools } from './workerTools'
 
@@ -37,13 +31,17 @@ import { installTools } from './workerTools'
  * - `install --program <release>`: points the worker's `current` program at the release it was just given, makes the
  *   worker's own P-256 key where it has none, and says its public key. The key never leaves the worker.
  * - `enroll --grant <base64url>`: what the home gave once it signed that key, written to the worker's folder; its
- *   agents, from the release (the ACP adapters and the agents' own programs ship in it); and its services, started.
+ *   agents, every one Althar runs, each launched as it finds its program (workerAgents.ts); and its services, started.
  * - `join --code <code>`: a code's way to the same, asking the home itself.
  * - `agents`: which agents it has and which are signed in, kept where the worker reads it with its heartbeats.
- * - `sign-in --agent <id> --way <browser|device>`: the agent's own sign-in, as Althar runs it on a home, its steps
- *   said as JSON lines; a code pasted back comes in on stdin.
+ * - `sign-in --agent <id> --way <browser|device>`: the agent's own program first, where it isn't on the worker yet
+ *   (adopted from a release here, or downloaded); then its own sign-in, as Althar runs it on a home, its steps said as
+ *   JSON lines; a code pasted back comes in on stdin.
  * - `update`: its timer's, hourly: a newer signed worker release, from where the home's come from, verified, unpacked
- *   and switched to while the worker runs no task, and the worker started again on it; and its check again.
+ *   and switched to while the worker runs no task, and the worker started again on it; and its check again. One that
+ *   knows it comes as its base, without the agents' own programs, and readies those of the agents signed in here by its
+ *   own commands (`prepare`) before the worker moves to it.
+ * - `prepare`: the programs of the agents signed in here, for this release: each adopted or downloaded.
  * - `check`: whether its agents' sandbox starts, its tools, and each signed-in agent started once, which says its
  *   models (workerCheck.ts); kept where the worker reads it with its heartbeats. Setup ends with it.
  * - `sandbox`: what only root may do to let the sandbox start (newer Ubuntu's AppArmor rule for bubblewrap), with
@@ -64,24 +62,40 @@ export const programFolder = (env: NodeJS.ProcessEnv = process.env) => join(data
 const unitsFolder = (env: NodeJS.ProcessEnv = process.env) => join(env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'systemd', 'user')
 const SERVICE = 'althar-worker.service'
 
+/** The system's processor, as releases name it. */
+const ARCH = process.arch === 'arm64' ? 'arm64' : 'x64'
+
 const say = (out: (text: string) => void, value: Record<string, unknown>) => out(`${JSON.stringify({ protocol: 1, ...value })}\n`)
 
-/** The agents a worker runs from its release: its ACP adapter and the agent's own program, both shipped in it. */
-const shipped = (): ReadonlyArray<{
-  readonly id: 'claude-code' | 'codex'
+/** An agent a worker runs: how it starts, where its own program is, and whether Althar can bring it there. */
+export interface ShippedAgent {
+  readonly id: AgentId
   readonly definition: AgentDefinition
+  /** Its program as its launch names it: where it is, else where it will be. */
   readonly program: string
-}> =>
-  (
-    [
-      ['claude-code', bundledClaude()],
-      ['codex', bundledCodex()],
-    ] as const
-  ).flatMap(([id, program]) =>
-    program === null
-      ? []
-      : [{ id, program, definition: usingLocated(agents[id], () => ({ command: program, whose: 'bundled' as const })) }],
-  )
+  /** Whether its program is on the worker; false where it isn't yet. */
+  readonly installed?: boolean
+  /** Althar can download it for this worker. */
+  readonly downloadable?: boolean
+  /** Its maker's page on installing it, for one Althar can't download. */
+  readonly guide?: string
+}
+
+/**
+ * Every agent a worker runs, as `release` has it (the one this runs from unless said): its adapter or its own ACP
+ * program, found through the worker's PATH, a release that still carries it, or the worker's own folder (workerAgents.ts).
+ */
+export const shipped = (release: string = running()): ReadonlyArray<ShippedAgent> => {
+  const folder = workerFolder()
+  return workerAgentsIn(folder, release, workerPath(folder, join(programFolder(), 'current'))).map((agent) => ({
+    id: agent.id,
+    definition: agent.definition,
+    program: agent.located?.command ?? agent.definition.cli?.name ?? agent.id,
+    installed: agent.located !== null,
+    downloadable: agent.downloadable,
+    ...(agent.guide === undefined ? {} : { guide: agent.guide }),
+  }))
+}
 
 /** The release this runs from: `dist/althar-host.js`'s folder's parent. */
 const running = () => resolve(dirname(process.argv[1] ?? ''), '..')
@@ -93,39 +107,69 @@ const running = () => resolve(dirname(process.argv[1] ?? ''), '..')
 const stable = (path: string, release: string, current: string) =>
   path.startsWith(`${release}/`) ? `${current}${path.slice(release.length)}` : path
 
+/** A command as the worker's shell takes it, its home folder said `~`, which that shell expands: shorter to read and to copy. */
+export const homeSaid = (command: string, home: string = homedir()) =>
+  command.startsWith(`${home}/`) ? `~${command.slice(home.length)}` : command
+
 const shellQuoted = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
 
-/** Each shipped agent as a small program of its own, as `agents.conf` names it: the launch Althar gives it on a home. */
+/**
+ * Each agent the release `current` names has the program of, as a small program of its own, as `agents.conf` names it:
+ * the launch Althar gives it on a home. An update runs it from the release before, for the release it moves to.
+ */
 const writeAgents = async (folder: string, current: string) => {
-  const release = await fs.realpath(running())
+  const releases = [...new Set([await fs.realpath(running()), await fs.realpath(current)])]
+  const at = (path: string) => releases.reduce((value, release) => stable(value, release, current), path)
   const node = join(current, 'node', 'bin', 'node')
   const programs = join(folder, 'agents')
   await privateDirectory(programs, true)
   const lines: string[] = [join(folder, 'workspaces')]
-  for (const agent of system.agents()) {
+  const had = new Set(await fs.readdir(programs).catch(() => [] as string[]))
+  // Every agent, its program there or not yet: the home sees each the worker can run, and places a task only on one
+  // signed in and started by its check. Bringing a program later changes its launch, never this list.
+  for (const agent of system.agents(await fs.realpath(current))) {
+    had.delete(agent.id)
     const spec = agent.definition.launch(node)
     const { PATH: _path, ...rest } = spec.env ?? {}
     const env = Object.entries(rest)
-      .map(([name, value]) => `export ${name}=${shellQuoted(stable(value, release, current))}`)
+      .map(([name, value]) => `export ${name}=${shellQuoted(at(value))}`)
       .join('\n')
     // The worker gives each run its PATH (agent_setup.rs `worker_path`): the tools installed for it first, the sandbox's.
     const keepPath = `if [ -z "\${PATH:-}" ]; then PATH=${shellQuoted(workerPath(folder, current))}; fi\nexport PATH`
-    const command = [stable(spec.command, release, current), ...spec.args.map((arg) => stable(arg, release, current))]
+    const command = [at(spec.command), ...spec.args.map(at)]
     const script = `#!/bin/sh\n${env}${env === '' ? '' : '\n'}${keepPath}\nexec ${command.map(shellQuoted).join(' ')} "$@"\n`
     const path = join(programs, agent.id)
     await writePrivate(path, script, true)
     await fs.chmod(path, 0o700)
     lines.push(`*\t${agent.id}\t${path}`)
   }
+  // An agent whose program the release no longer has runs no more here.
+  for (const gone of had) await fs.rm(join(programs, gone), { force: true })
   await writePrivate(join(folder, 'agents.conf'), `${lines.join('\n')}\n`, true)
 }
 
 /** Which shipped agents are signed in, kept where the worker reads it at each hello; says each. */
 const checkAgents = async (folder: string) => {
+  // An agent that can't say whether it is signed in counts as signed in once the worker's check started it and it
+  // offered its models (`check`), until a check finds it doesn't start.
+  const started = new Set(((await readPrivate(join(folder, 'started'), 4096))?.toString('utf8') ?? '').split('\n'))
   const checked = await Promise.all(
-    system
-      .agents()
-      .map(async (agent) => ({ id: agent.id, name: agent.definition.name, signedIn: await system.signedIn(agent.definition) })),
+    system.agents().map(async (agent) => {
+      // One whose program isn't here yet comes with its sign-in, and runs nothing till then.
+      const status = agent.installed === false ? false : await system.signedIn(agent.definition)
+      return {
+        id: agent.id,
+        name: agent.definition.name,
+        installed: agent.installed !== false,
+        downloadable: agent.downloadable === true,
+        signedIn: status === true || (status === 'unknown' && started.has(agent.id)),
+        unknown: status === 'unknown',
+        // Its own sign-in where it has none inside Althar: the command to run on the worker, as it would be typed there.
+        ...(agent.definition.signIn.inApp === undefined && agent.definition.signIn.login !== ''
+          ? { login: homeSaid(agent.definition.signIn.login) }
+          : {}),
+      }
+    }),
   )
   const signedIn = checked.flatMap((agent) => (agent.signedIn ? [agent.id] : []))
   const was = (await readPrivate(join(folder, 'signed-in'), 4096))?.toString('utf8') ?? null
@@ -151,22 +195,46 @@ const systemctl = (...args: string[]) => system.systemctl(args)
 export interface WorkerSystem {
   /** `systemctl --user` with these arguments: what it printed. */
   readonly systemctl: (args: ReadonlyArray<string>) => Promise<string>
-  readonly signedIn: (agent: AgentDefinition) => Promise<boolean>
-  readonly agents: typeof shipped
+  /** Whether the agent is signed in; `unknown` where it can't say (its own status command reads nothing). */
+  readonly signedIn: (agent: AgentDefinition) => Promise<boolean | 'unknown'>
+  /** The agents a release has, the one this runs from unless said. */
+  readonly agents: (release?: string) => ReadonlyArray<ShippedAgent>
   /** What its check runs on (workerCheck.ts). */
   readonly check: CheckSystem
   /** `sudo -n sh -c <script>`: whether it ran, without a password. */
   readonly sudo: (script: string) => Promise<boolean>
   /** Where its release ships each program its agents' sandbox needs. */
   readonly shipped: (current: string) => Readonly<Partial<Record<string, string>>>
+  /**
+   * Brings an agent's program onto the worker (workerAgents.ts `bringProgram`): adopted from one of `releases` that
+   * carries the one pinned, else downloaded; `progress` hears a download's bytes.
+   */
+  readonly bring: (id: AgentId, releases: ReadonlyArray<string>, progress?: Progress) => Promise<'adopted' | 'downloaded'>
+  /** Readies a release just unpacked, by its own commands, before the worker moves to it (`prepare`); throws where it can't. */
+  readonly prepare: (release: string) => Promise<void>
 }
+/** A sign-in check's status as the worker keeps it: signed in, not, or `unknown` where the agent can't say. */
+export const signedInAs = (status: string): boolean | 'unknown' =>
+  status === 'signed_in' ? true : status === 'unknown' ? 'unknown' : false
+
+/** Readies a release just unpacked by its own commands (`prepare`), with its own Node; one from before has none to run. */
+export const prepareRelease = async (release: string) => {
+  if (!existsSync(join(release, 'dist', 'althar-worker.js'))) return
+  await run(join(release, 'node', 'bin', 'node'), [join(release, 'dist', 'althar-worker.js'), 'prepare'], { timeout: 60 * 60_000 })
+}
+
 let system: WorkerSystem = {
   systemctl: async (args) => (await run('systemctl', ['--user', ...args], { timeout: 30_000 })).stdout,
-  signedIn: async (agent) => (await Effect.runPromise(signInCheck(agent, process.execPath))).status === 'signed_in',
+  signedIn: async (agent) => signedInAs((await Effect.runPromise(signInCheck(agent, process.execPath))).status),
   agents: shipped,
   check: checkHere,
   sudo: async (script) => (await checkHere.run('sudo', ['-n', 'sh', '-c', script], { timeout: 30_000 })).ok,
   shipped: (current) => shippedSandbox(current),
+  bring: (id, releases, progress) => {
+    const folder = workerFolder()
+    return bringProgram(folder, workerPath(folder, join(programFolder(), 'current')), id, releases, progress)
+  },
+  prepare: (release) => prepareRelease(release),
 }
 /** For tests: the system it runs on, in part; puts it back when called. */
 export const withWorkerSystem = (given: Partial<WorkerSystem>) => {
@@ -235,7 +303,9 @@ const writeUnits = async (folder: string, program: string) => {
   for (const [name, text] of Object.entries(renderUnits(folder, program, commands))) await writePrivate(join(units, name), text, true)
 }
 
-const failed = (code: string, message: string) => Object.assign(new Error(message), { code })
+/** A failure in its own words, by its code; said at `step` where that isn't the command's own. */
+const failed = (code: string, message: string, step?: string) =>
+  Object.assign(new Error(message), { code, ...(step === undefined ? {} : { step }) })
 
 /** Points `current` at a release, atomically: a link made beside it and renamed over it. */
 const pointAt = async (program: string, release: string) => {
@@ -355,7 +425,12 @@ export const check = async (out: (text: string) => void) => {
   const folder = workerFolder()
   const current = join(programFolder(), 'current')
   say(out, { step: 'check', state: 'started' })
-  const signedIn = new Set((await checkAgents(folder)).agents.flatMap((agent) => (agent.signedIn ? [agent.id] : [])))
+  // An agent signed in here whose program went missing comes back first, as an update would have brought it.
+  await prepareAgents(running(), () => undefined).catch(() => 0)
+  const listed = (await checkAgents(folder)).agents
+  const signedIn = new Set(listed.flatMap((agent) => (agent.signedIn ? [agent.id] : [])))
+  // One that can't say is tried: started, it is signed in; not, it isn't.
+  const unknown = new Set<string>(listed.flatMap((agent) => (agent.unknown && agent.installed ? [agent.id] : [])))
   const found = await checkWorker(
     {
       folder,
@@ -365,11 +440,14 @@ export const check = async (out: (text: string) => void) => {
         id: agent.id,
         name: agent.definition.name,
         definition: agent.definition,
-        signedIn: signedIn.has(agent.id),
+        signedIn: signedIn.has(agent.id) || unknown.has(agent.id),
       })),
     },
     system.check,
   )
+  const proven = found.agents.flatMap((agent) => (unknown.has(agent.id) && agent.started === true ? [agent.id] : []))
+  await writePrivate(join(folder, 'started'), proven.map((id) => `${id}\n`).join(''), true)
+  await checkAgents(folder)
   say(out, {
     step: 'check',
     state: 'done',
@@ -380,7 +458,8 @@ export const check = async (out: (text: string) => void) => {
     agents: found.agents.map(({ id, name, signedIn: signed, started, message, models }) => ({
       id,
       name,
-      signedIn: signed,
+      // Tried because it couldn't say: signed in only where it started.
+      signedIn: signed && (!unknown.has(id) || started === true),
       ...(started === undefined ? {} : { started }),
       ...(message === undefined ? {} : { message }),
       models: models.length,
@@ -473,8 +552,82 @@ export const listAgents = async (out: (text: string) => void) => {
   say(out, { step: 'agents', state: 'done', agents: found })
 }
 
+/** What an install's failure is, in a sentence: its own where it has one. */
+const installWords = (error: unknown) =>
+  typeof error === 'object' && error !== null && 'summary' in error && typeof error.summary === 'string'
+    ? error.summary
+    : error instanceof Error
+      ? error.message
+      : 'Its program couldn’t be brought onto this worker.'
+
+/**
+ * An agent's own program onto the worker, where it isn't there yet: Claude Code's or Codex's adopted from a release
+ * here that carries it, else downloaded, checked and kept, said as the sign-in's `getting` steps; then its launch
+ * names it. One Althar can't download is the person's to install there, which it says, with its maker's page.
+ */
+export const bringAgent = async (id: string, out: (text: string) => void) => {
+  const agent = system.agents().find((one) => one.id === id)
+  if (agent === undefined || agent.installed !== false) return
+  const name = agent.definition.name
+  if (agent.downloadable !== true)
+    throw failed(
+      'NotInstalled',
+      `${name} isn’t on this worker, and Althar can’t download it there. Install it on the worker${agent.guide === undefined ? '' : ` (${agent.guide})`}, then sign it in.`,
+      'sign-in',
+    )
+  let said = 0
+  const getting = (bytes: number, totalBytes: number | undefined) =>
+    say(out, { step: 'sign-in', kind: 'getting', name, bytes, ...(totalBytes === undefined ? {} : { totalBytes }) })
+  getting(0, undefined)
+  const program = programFolder()
+  const current = await fs.realpath(join(program, 'current')).catch(() => undefined)
+  try {
+    await system.bring(agent.id, await releasesHere(program, current), (bytes, total) => {
+      if (Date.now() - said < 1000) return
+      said = Date.now()
+      getting(bytes, total)
+    })
+  } catch (error) {
+    throw failed('CannotDownload', installWords(error), 'sign-in')
+  }
+  say(out, { step: 'sign-in', kind: 'got', name })
+  // Its launch names it now; with no release current yet, nothing launches, and enrolling writes them.
+  if (current !== undefined) await writeAgents(workerFolder(), join(program, 'current'))
+}
+
+/**
+ * The programs of the agents signed in here, there for `release` before the worker runs on it: each adopted from a
+ * release here that carries it, else downloaded. The updater runs it with the new release's own commands, whose pins
+ * are the ones it needs; the hourly check runs it too, for one that went missing. An agent that can't be brought is
+ * said, and the rest go on; how many couldn't is what it returns.
+ */
+export const prepareAgents = async (release: string, out: (text: string) => void) => {
+  const folder = workerFolder()
+  const signedIn = ((await readPrivate(join(folder, 'signed-in'), 4096))?.toString('utf8') ?? '').split('\n').filter((line) => line !== '')
+  const listed = system.agents(release)
+  const program = programFolder()
+  const current = await fs.realpath(join(program, 'current')).catch(() => undefined)
+  let missing = 0
+  for (const id of signedIn) {
+    const agent = listed.find((one) => one.id === id)
+    if (agent === undefined || agent.installed !== false || agent.downloadable !== true) continue
+    say(out, { step: 'prepare', state: 'started', agent: id })
+    try {
+      const how = await system.bring(agent.id, await releasesHere(program, current))
+      say(out, { step: 'prepare', state: 'done', agent: id, how })
+    } catch (error) {
+      missing += 1
+      say(out, { step: 'prepare', state: 'failed', agent: id, code: 'CannotDownload', message: installWords(error) })
+    }
+  }
+  return missing
+}
+
 /** An agent's sign-in, as on a home: its steps said, a pasted code read from stdin; checked again once it ends. */
 export const signIn = async (id: string, way: SignInWay, out: (text: string) => void) => {
+  if (system.agents().find((one) => one.id === id) === undefined) throw failed('UnknownAgent', 'This worker has no such agent.')
+  // Its own program first, where the worker hasn't it yet.
+  await bringAgent(id, out)
   const agent = system.agents().find((one) => one.id === id)
   if (agent === undefined) throw failed('UnknownAgent', 'This worker has no such agent.')
   await new Promise<void>((resolve) => {
@@ -493,7 +646,11 @@ export const signIn = async (id: string, way: SignInWay, out: (text: string) => 
       { way, node: process.execPath, openUrl: (url) => say(out, { step: 'sign-in', kind: 'open', url }) },
     )
     if (handle === null) {
-      say(out, { step: 'sign-in', kind: 'failed', message: 'This agent doesn’t sign in that way here.' })
+      // Its sign-in is its own command, in a terminal on the worker: what to run there, as it would be typed. The window
+      // gives it with the SSH address it reaches the worker by, and checks again once it is run.
+      if (agent.definition.signIn.inApp === undefined && agent.definition.signIn.login !== '')
+        say(out, { step: 'sign-in', kind: 'terminal', command: homeSaid(agent.definition.signIn.login) })
+      else say(out, { step: 'sign-in', kind: 'failed', message: 'This agent doesn’t sign in that way on a worker.' })
       lines.close()
       return resolve()
     }
@@ -527,7 +684,7 @@ export const update = async (out: (text: string) => void, fetcher: typeof fetch 
   const program = programFolder()
   const current = await fs.realpath(join(program, 'current'))
   const keys = [(await fs.readFile(join(current, '.release-key'), 'utf8')).trim()]
-  const installed = authenticateRelease(await fs.readFile(join(current, '.manifest')), keys, process.arch === 'arm64' ? 'arm64' : 'x64')
+  const installed = authenticateRelease(await fs.readFile(join(current, '.manifest')), keys, ARCH)
   const moving = (installed.manifest.product ?? 'host') === 'host'
   const feed = (await readPrivate(join(workerFolder(), 'update-feed'), 2048))?.toString('utf8').trim()
   const bytes = feed === undefined || feed === '' ? await latestManifest(fetcher) : await getUpdateBytes(feed, 262_144, fetcher)
@@ -549,15 +706,35 @@ export const update = async (out: (text: string) => void, fetcher: typeof fetch 
     return
   }
   if (await busy()) return say(out, { step: 'update', state: 'waiting', version: verified.manifest.version })
-  const target = join(program, `bundle-${verified.manifest.archive.sha256}`)
+  // A release that knows it comes as its base, without the agents' own programs: those of the agents signed in here are
+  // readied by its own commands before the worker moves to it (`prepare`). One from before comes whole.
+  const first = verified.manifest.base ?? {
+    ...verified.manifest.archive,
+    files: verified.manifest.files,
+    unpackedBytes: verified.manifest.unpackedBytes,
+  }
+  const target = join(program, `bundle-${first.sha256}`)
   const scratch = join(program, `.update-${process.pid}`)
   await fs.rm(scratch, { recursive: true, force: true })
   await privateDirectory(scratch, true)
   try {
-    await downloadRelease(verified.manifest.archive, join(scratch, 'release.tar.gz'), fetcher)
-    await extractRelease(join(scratch, 'release.tar.gz'), join(scratch, 'release'), verified.manifest)
+    await downloadRelease(first, join(scratch, 'release.tar.gz'), fetcher)
+    await extractRelease(join(scratch, 'release.tar.gz'), join(scratch, 'release'), first)
+    await fs.rm(join(scratch, 'release.tar.gz'))
     await fs.writeFile(join(scratch, 'release', '.manifest'), bytes, { mode: 0o600 })
     await fs.writeFile(join(scratch, 'release', '.release-key'), `${keys[0]}\n`, { mode: 0o600 })
+    try {
+      await system.prepare(join(scratch, 'release'))
+    } catch {
+      // Not moved to: the worker runs on as it was, and tries again at its next check.
+      return say(out, {
+        step: 'update',
+        state: 'failed',
+        code: 'NotReady',
+        version: verified.manifest.version,
+        message: 'The agents signed in here couldn’t be readied for the new release. The worker runs on as it was.',
+      })
+    }
     await fs.rm(target, { recursive: true, force: true })
     await fs.rename(join(scratch, 'release'), target)
   } finally {
@@ -579,8 +756,18 @@ export const update = async (out: (text: string) => void, fetcher: typeof fetch 
   say(out, { step: 'update', state: 'done', version: verified.manifest.version })
 }
 
+/** The releases on this computer a part may be lent from: the one it runs first, then the rest. */
+const releasesHere = async (program: string, current?: string) => {
+  const others = (await fs.readdir(program).catch(() => [] as string[]))
+    .filter((entry) => entry.startsWith('bundle-'))
+    // By name: `current` is a real path, which a folder reached through a link doesn't spell the same.
+    .filter((entry) => current === undefined || entry !== basename(current))
+    .map((entry) => join(program, entry))
+  return current === undefined ? others : [current, ...others]
+}
+
 const latestManifest = async (fetcher: typeof fetch) => {
-  const asset = `althar-worker-linux-${process.arch === 'arm64' ? 'arm64' : 'x64'}.json`
+  const asset = `althar-worker-linux-${ARCH}.json`
   const listed = JSON.parse(
     new TextDecoder().decode(
       await getUpdateBytes('https://api.github.com/repos/AltharIDE/althar/releases?per_page=30', 2_097_152, fetcher),
@@ -637,9 +824,12 @@ export const workerMain = async (args: ReadonlyArray<string>, out: (text: string
       case 'check':
         await check(out)
         return 0
+      case 'prepare':
+        // The updater's, with this release's own commands: the programs of the agents signed in here, for it.
+        return (await prepareAgents(running(), out)) === 0 ? 0 : 1
       case 'version':
         // What a release says it is, for its packaging to check against what it signs (updates/publish.ts).
-        say(out, { step: 'version', state: 'done', version: HOST_VERSION, arch: process.arch === 'arm64' ? 'arm64' : 'x64' })
+        say(out, { step: 'version', state: 'done', version: HOST_VERSION, arch: ARCH })
         return 0
       case 'sandbox':
         await allowSandbox(out)
@@ -659,8 +849,9 @@ export const workerMain = async (args: ReadonlyArray<string>, out: (text: string
     }
   } catch (error) {
     const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'Failed'
+    const step = error instanceof Error && 'step' in error && typeof error.step === 'string' ? error.step : command
     const message = error instanceof Error ? error.message : 'The worker couldn’t be set up.'
-    say(out, { step: command ?? 'worker', state: 'failed', code, message })
+    say(out, { step: step ?? 'worker', state: 'failed', code, message })
     return 1
   }
 }

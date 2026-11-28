@@ -1803,7 +1803,7 @@ export function TaskView({
             // The task's tie to it names it alone: two trackers may share its key.
             const tie = issue.link ?? `${issue.product}:${issue.ref}`
             return (
-              <div key={tie} className={s.issue}>
+              <div key={tie}>
                 {/* A task with a merge says at its issue's foot whether that closes it or leaves it open. */}
                 {merges ? (
                   <IssuePart

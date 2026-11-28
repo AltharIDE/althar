@@ -254,6 +254,65 @@ export const WorkerSigningIn: Story = {
   },
 }
 
+/** Signing Codex in on a worker that hasn't its program yet: it downloads to the worker first. */
+export const WorkerAgentDownloading: Story = {
+  args: {
+    opened: ADDED.id,
+    workers: { enabled: true, list: [{ ...ADDED, projects: ['meridian'], projectIds: ['proj_meridian'] }] },
+    allProjects: PROJECTS,
+    onProjects: fn(),
+    onSignIn: fn(),
+    onCancelSignIn: fn(),
+    onOpenLink: fn(),
+    signingIn: { workerId: ADDED.id, agent: 'codex', step: { kind: 'getting', percent: 42 } },
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Downloading to the worker')).toBeInTheDocument()
+    await expect(c.getByText('42%')).toBeInTheDocument()
+  },
+}
+
+/** Signing OpenCode in on a worker: its sign-in is its own command, run on the worker from a terminal here, then Check. */
+export const WorkerAgentSignsInInATerminal: Story = {
+  args: {
+    opened: ADDED.id,
+    workers: {
+      enabled: true,
+      list: [
+        {
+          ...ADDED,
+          projects: ['meridian'],
+          projectIds: ['proj_meridian'],
+          agents: [...ADDED.agents, { id: 'opencode', name: 'OpenCode', mark: Brand.OpenCode, signedIn: false }],
+        },
+      ],
+    },
+    allProjects: PROJECTS,
+    onProjects: fn(),
+    onSignIn: fn(),
+    onCheckSignIn: fn(),
+    onCancelSignIn: fn(),
+    onOpenLink: fn(),
+    signingIn: {
+      workerId: ADDED.id,
+      agent: 'opencode',
+      step: {
+        kind: 'terminal',
+        command: "ssh -t althar@build-box '~/.local/share/althar-worker/programs/opencode/current/opencode auth login --standalone'",
+        notYet: true,
+      },
+    },
+  },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/ssh -t althar@build-box '.*opencode auth login --standalone'/u)).toBeInTheDocument()
+    await expect(c.getByText('Not signed in yet')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Check' }))
+    await expect(args.onCheckSignIn).toHaveBeenCalled()
+  },
+}
+
 /** A worker added with a code whose check found newer Ubuntu keeps its sandbox from starting: what to run there, to copy. */
 export const WorkerNotReady: Story = {
   args: {

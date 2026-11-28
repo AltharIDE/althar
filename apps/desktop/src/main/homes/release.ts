@@ -35,6 +35,17 @@ export interface HostRelease {
   readonly sha256: string
   readonly bytes: number
   readonly unpackedBytes: number
+  /**
+   * A worker's release without its agents' own programs: its base, which the machine downloads, each program then
+   * coming with its agent's sign-in (apps/host/src/workerAgents.ts). The whole archive above is what goes where the
+   * machine can't download.
+   */
+  readonly base?: {
+    readonly url: string
+    readonly sha256: string
+    readonly bytes: number
+    readonly unpackedBytes: number
+  }
 }
 
 export class ReleaseProblem extends Error {
@@ -114,9 +125,15 @@ export const authenticateRelease = (
       (manifest.product ?? 'host') !== product
     )
       throw rejected()
-    const url = new URL(archive.url)
-    if (url.protocol !== 'https:' || url.username !== '' || url.password !== '' || url.hash !== '') throw rejected()
+    const https = (value: unknown) => {
+      if (typeof value !== 'string') throw rejected()
+      const at = new URL(value)
+      if (at.protocol !== 'https:' || at.username !== '' || at.password !== '' || at.hash !== '') throw rejected()
+      return at
+    }
+    const url = https(archive.url)
     return {
+      ...(product === 'worker' ? baseOf(manifest.base, https) : {}),
       envelope: bytes,
       key,
       version: manifest.version,
@@ -129,6 +146,21 @@ export const authenticateRelease = (
     }
   } catch (error) {
     throw error instanceof ReleaseProblem ? error : rejected()
+  }
+}
+
+/** A worker release's base, without its agents' own programs, where it says one; nothing where it doesn't. */
+const baseOf = (value: unknown, https: (value: unknown) => URL): Pick<HostRelease, 'base'> => {
+  if (typeof value !== 'object' || value === null) return {}
+  const fields = value as Record<string, unknown>
+  if (typeof fields.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(fields.sha256)) throw rejected()
+  return {
+    base: {
+      url: https(fields.url).href,
+      sha256: fields.sha256,
+      bytes: natural(fields.bytes, MAX_ARCHIVE_BYTES),
+      unpackedBytes: natural(fields.unpackedBytes, MAX_UNPACKED_BYTES),
+    },
   }
 }
 

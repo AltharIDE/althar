@@ -136,6 +136,13 @@ export interface ComputersText {
     send: string
     cancel: string
     starting: string
+    /** The agent's own program, downloading to the worker first: how far, in whole percent. */
+    getting: string
+    /** Its sign-in in a terminal here, by the line that runs it on the worker. */
+    terminal: string
+    check: string
+    checking: string
+    notYet: string
   }
   /** How many of the home's workers are connected. */
   connected: (connected: number, all: number) => string
@@ -220,6 +227,11 @@ export const computersText: ComputersText = {
     send: 'Continue',
     cancel: 'Cancel',
     starting: 'Starting its sign-in…',
+    getting: 'Downloading to the worker',
+    terminal: 'Run this in a terminal, sign in there, then check.',
+    check: 'Check',
+    checking: 'Checking…',
+    notYet: 'Not signed in yet',
   },
   connected: (connected, all) => `${connected} of ${all} connected`,
   noWorkers: 'None',
@@ -402,6 +414,8 @@ export interface ComputersProps {
   /** An agent's sign-in under way on a worker. */
   signingIn?: WorkerSignInView | null | undefined
   onPaste?: ((code: string) => void) | undefined
+  /** Reads who is signed in again, for an agent signed in in a terminal on the worker. */
+  onCheckSignIn?: (() => void) | undefined
   onCancelSignIn?: (() => void) | undefined
   /** Opens a sign-in's page in the person's browser. */
   onOpenLink?: ((url: string) => void) | undefined
@@ -432,6 +446,7 @@ export function Computers({
   onSignIn,
   signingIn,
   onPaste,
+  onCheckSignIn,
   onCancelSignIn,
   onOpenLink,
   homeSettings,
@@ -467,6 +482,7 @@ export function Computers({
           onSignIn={onSignIn === undefined ? undefined : (agent) => onSignIn(worker.id, agent)}
           signingIn={signingIn?.workerId === worker.id ? signingIn : null}
           onPaste={onPaste}
+          onCheckSignIn={onCheckSignIn}
           onCancelSignIn={onCancelSignIn}
           onOpenLink={onOpenLink}
           t={t}
@@ -593,6 +609,7 @@ function WorkerSheet({
   onSignIn,
   signingIn,
   onPaste,
+  onCheckSignIn,
   onCancelSignIn,
   onOpenLink,
   t,
@@ -611,6 +628,7 @@ function WorkerSheet({
   onSignIn: ((agent: string) => void) | undefined
   signingIn: WorkerSignInView | null
   onPaste: ((code: string) => void) | undefined
+  onCheckSignIn: (() => void) | undefined
   onCancelSignIn: (() => void) | undefined
   onOpenLink: ((url: string) => void) | undefined
   t: ComputersText
@@ -677,6 +695,7 @@ function WorkerSheet({
                     onSignIn={onSignIn}
                     signingIn={signingIn}
                     onPaste={onPaste}
+                    onCheck={onCheckSignIn}
                     onCancel={onCancelSignIn}
                     onOpenLink={onOpenLink}
                     t={t}
@@ -767,6 +786,10 @@ export interface WorkerSignInView {
   agent: string
   step:
     | { kind: 'starting' }
+    /** Its own program, downloading to the worker before its sign-in starts. */
+    | { kind: 'getting'; percent: number }
+    /** Its sign-in is its own command: the line that runs it on the worker, for a terminal here, then Check. */
+    | { kind: 'terminal'; command: string; checking?: boolean; notYet?: boolean }
     | { kind: 'code'; code: string; page: string }
     | { kind: 'browser'; link: string | null; paste: boolean; refused?: string | null | undefined }
     | { kind: 'failed'; message: string }
@@ -778,6 +801,7 @@ function Agents({
   onSignIn,
   signingIn,
   onPaste,
+  onCheck,
   onCancel,
   onOpenLink,
   t,
@@ -786,6 +810,7 @@ function Agents({
   onSignIn: ((agent: string) => void) | undefined
   signingIn: WorkerSignInView | null
   onPaste: ((code: string) => void) | undefined
+  onCheck: (() => void) | undefined
   onCancel: (() => void) | undefined
   onOpenLink: ((url: string) => void) | undefined
   t: ComputersText
@@ -818,6 +843,30 @@ function Agents({
                     <Spinner size="small" />
                     {t.signInSteps.starting}
                   </span>
+                )}
+                {signing.step.kind === 'getting' && (
+                  <span className={s.making}>
+                    <Spinner size="small" />
+                    {t.signInSteps.getting}
+                    <span className={s.percent}>{`${signing.step.percent}%`}</span>
+                  </span>
+                )}
+                {signing.step.kind === 'terminal' && (
+                  <>
+                    <span className={s.addressHint}>{t.signInSteps.terminal}</span>
+                    <span className={s.commandRow}>
+                      <code className={s.signInCommand}>{signing.step.command}</code>
+                      <CopyButton value={signing.step.command} ghost />
+                    </span>
+                    <span className={s.signInRow}>
+                      {onCheck !== undefined && (
+                        <LinkButton onClick={onCheck} disabled={signing.step.checking === true}>
+                          {signing.step.checking === true ? t.signInSteps.checking : t.signInSteps.check}
+                        </LinkButton>
+                      )}
+                      {signing.step.notYet === true && <span className={s.agentState}>{t.signInSteps.notYet}</span>}
+                    </span>
+                  </>
                 )}
                 {signing.step.kind === 'code' && (
                   <>
