@@ -61,6 +61,7 @@ import {
   toolRoleOf,
   upFrontSaid,
 } from './sessionState'
+import { recordPlaces, sweepPlaces } from './sandboxLeftovers'
 import { type RunSkills, refusalOf, runSkills } from './Skills'
 import { blockGoalAfterDisconnect } from './threadGoals'
 import { addItem, betweenTurns, recorder } from './threads'
@@ -281,6 +282,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
             yield* blockGoalAfterDisconnect(running.thread.threadId, running.sessionId)
         }),
       )
+      // Its process has gone: what its sandbox left where nothing was takes nothing of the person's (sandboxLeftovers.ts).
+      yield* sweepPlaces()
       // An idle disconnect lost no work. Only an interrupted turn needs a warning and a way out.
       if (state === 'lost' && interrupted)
         yield* addItem({ projectId: running.thread.projectId, threadId: running.thread.threadId, sessionId: running.sessionId }, 'notice', {
@@ -507,6 +510,10 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           state: 'launching',
           launchedAt: yield* timestamp,
         })}`
+        // Where its sandbox may leave a placeholder that isn't there now, taken away once it has gone (sandboxLeftovers.ts).
+        yield* recordPlaces(processId, foldersOf(thread), definition.id).pipe(
+          Effect.catchCause((cause) => Effect.logWarning('Could not record where its sandbox may leave placeholders', cause)),
+        )
       }
       // Read again once the agent is spawned, before it asks anything: the rules then know its temp folder.
       let requestContext: RequestContext = {
@@ -891,6 +898,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
             yield* sessionFact(thread, sessionId, revision, 'provider_session.failed', { reason })
           }),
         )
+        yield* sweepPlaces()
         // The thread says why nothing happened, as well as the call that asked.
         yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
           source: 'runtime',
@@ -1065,6 +1073,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           yield* sessionFact(thread, sessionId, revision, `provider_session.${state}`, { reason: Cause.pretty(cause) })
         }),
       )
+      yield* sweepPlaces()
     }).pipe(Effect.catchCause((left) => Effect.logWarning('Could not let go of a session that never took over', left)))
 
   /** Runs what comes between a session starting and its taking over the thread; should it fail, the session is let go. */

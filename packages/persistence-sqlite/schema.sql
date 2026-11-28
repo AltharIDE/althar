@@ -1944,3 +1944,11 @@ CREATE TABLE canvas_saves (
   ) STRICT;
 
 CREATE INDEX tasks_by_artifact ON tasks (artifact_canvas_id) WHERE artifact_canvas_id IS NOT NULL;
+
+CREATE TABLE sandbox_places (
+    path TEXT NOT NULL,
+    process_id TEXT NOT NULL REFERENCES processes(id) ON DELETE CASCADE,
+    PRIMARY KEY (path, process_id)
+  ) STRICT;
+
+CREATE INDEX sandbox_places_by_process ON sandbox_places (process_id);
