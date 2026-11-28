@@ -1573,12 +1573,10 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
       const valid = yield* gitOutcome(repository.root, 'check-ref-format', `refs/tags/${tag}`)
       if (tag === '' || tag.startsWith('-') || valid.code !== 0)
         return yield* new ToolRefused({ message: `\`${tag}\` isn't a name git takes for a tag.` })
-      const [commit = null] = yield* commitsOf(repository.worktree, [`refs/tags/${tag}`])
-      // The tag itself, as made: an annotated tag's own object, which is what goes up, so a tag moved meanwhile can't.
-      const object =
-        commit === null
-          ? null
-          : (yield* gitOutcome(repository.worktree, 'rev-parse', '--verify', '--quiet', `refs/tags/${tag}`)).stdout.trim() || null
+      // The tag read once, as made: an annotated tag's own object, which is what goes up, and the commit it is on, peeled
+      // from that same object, so a tag moved meanwhile can't go up under what was read.
+      const object = (yield* gitOutcome(repository.worktree, 'rev-parse', '--verify', '--quiet', `refs/tags/${tag}`)).stdout.trim() || null
+      const [commit = null] = object === null ? [null] : yield* commitsOf(repository.worktree, [object])
       return { tag, repository, commit, object }
     })
 
