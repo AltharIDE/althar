@@ -57,11 +57,15 @@ const WHERES: ReadonlyArray<{ value: Where; label: string; kbd: string }> = [
   { value: 'task', label: 'Task', kbd: 'T' },
 ]
 
+/** What is open on the composer's edge: one at a time, so opening one folds the others. */
+type Edge = 'merge' | 'runs' | 'goal' | null
+const EDGES: ReadonlyArray<{ value: Exclude<Edge, null> }> = [{ value: 'merge' }, { value: 'runs' }, { value: 'goal' }]
+
 interface Chosen {
   d: Direction
   m: Moment
   w: Where
-  open: boolean
+  edge: Edge
   narrow: boolean
   up: boolean
   dark: boolean
@@ -70,17 +74,18 @@ interface Chosen {
 const params = new URLSearchParams(location.search)
 const pick = <T extends string>(value: string | null, from: ReadonlyArray<{ value: T }>, fallback: T): T =>
   from.some((one) => one.value === value) ? (value as T) : fallback
+const opened = params.get('open')
 const first: Chosen = {
   d: pick(params.get('d'), DIRECTIONS, 'pill'),
   m: pick(params.get('m'), MOMENTS, 'several'),
   w: pick(params.get('w'), WHERES, 'coordinator'),
-  open: params.get('open') === '1',
+  edge: opened === '1' ? 'merge' : EDGES.some((one) => one.value === opened) ? (opened as Edge) : null,
   narrow: params.get('narrow') === '1',
   up: params.get('up') !== '0',
   dark: params.get('theme') === 'dark',
 }
 const remember = (c: Chosen) => {
-  const p = new URLSearchParams({ d: c.d, m: c.m, w: c.w, open: c.open ? '1' : '0', narrow: c.narrow ? '1' : '0', up: c.up ? '1' : '0' })
+  const p = new URLSearchParams({ d: c.d, m: c.m, w: c.w, open: c.edge ?? '0', narrow: c.narrow ? '1' : '0', up: c.up ? '1' : '0' })
   if (c.dark) p.set('theme', 'dark')
   history.replaceState(null, '', `?${p}`)
 }
@@ -420,7 +425,11 @@ function useLeaving(moment: Moment, replay: number) {
 
 /* ——— The face ——— */
 
-function Face({ c, replay, setOpen }: { c: Chosen; replay: number; setOpen: (open: boolean) => void }) {
+function Face({ c, replay, setEdge }: { c: Chosen; replay: number; setEdge: (edge: (was: Edge) => Edge) => void }) {
+  const open = c.edge === 'merge'
+  /** Opens `which`, folding whatever else was open there; closing it closes only it. */
+  const opens = (which: Exclude<Edge, null>) => (next: boolean) => setEdge((was) => (next ? which : was === which ? null : was))
+  const setOpen = opens('merge')
   const [value, setValue] = useState('')
   const rows = rowsOf(c.w, c.m).slice(0, c.m === 'one' ? 1 : undefined)
   const phase = useLeaving(c.m, replay)
@@ -428,7 +437,7 @@ function Face({ c, replay, setOpen }: { c: Chosen; replay: number; setOpen: (ope
   const folded = c.m === 'merged' && (c.d === 'now' || !shown)
 
   // Today: the line at the thread's foot, scrolled away with it; gone once all are in.
-  const foot = c.d === 'now' && c.m !== 'merged' && <MergingLine key={String(c.open)} rows={rows} open={c.open} />
+  const foot = c.d === 'now' && c.m !== 'merged' && <MergingLine key={String(open)} rows={rows} open={open} />
 
   const goal =
     c.w === 'task' ? (
@@ -443,8 +452,8 @@ function Face({ c, replay, setOpen }: { c: Chosen; replay: number; setOpen: (ope
           waiting: false,
         }}
         objectiveLimit={4000}
-        expanded={false}
-        onExpand={noop}
+        expanded={c.edge === 'goal'}
+        onExpand={opens('goal')}
         onPause={noop}
         onResume={noop}
         onEdit={noop}
@@ -454,20 +463,20 @@ function Face({ c, replay, setOpen }: { c: Chosen; replay: number; setOpen: (ope
   // The run chip glides too, where what opens or folds moves it.
   const behind = (
     <div className={s.behind} data-m="behind">
-      <Behind processes={[SITE_RUN]} onStop={noop} onOpenUrl={noop} />
+      <Behind processes={[SITE_RUN]} onStop={noop} onOpenUrl={noop} open={c.edge === 'runs'} onOpenChange={opens('runs')} />
     </div>
   )
   const pinned =
     !shown || c.d === 'now' ? null : c.d === 'first' ? (
       <div className={[s.firstPin, phase === 'leaving' ? s.firstGoing : ''].join(' ')}>
-        <FirstChip rows={rows} open={c.open} onOpen={setOpen} />
+        <FirstChip rows={rows} open={open} onOpen={setOpen} />
       </div>
     ) : (
-      <Morph step={String(c.open)}>
-        <Pill rows={rows} open={c.open} onOpen={setOpen} leaving={phase === 'leaving'} />
+      <Morph step={String(open)}>
+        <Pill rows={rows} open={open} onOpen={setOpen} leaving={phase === 'leaving'} />
       </Morph>
     )
-  const notice = c.d !== 'now' && shown && !c.open ? backNotice(rows) : null
+  const notice = c.d !== 'now' && shown && !open ? backNotice(rows) : null
 
   return (
     <TaskFace
@@ -546,7 +555,7 @@ function Lab() {
       if (d) set({ d: d.value })
       else if (m) set({ m: m.value })
       else if (key === 't') setC((was) => ({ ...was, w: was.w === 'task' ? 'coordinator' : 'task' }))
-      else if (key === 'o') setC((was) => ({ ...was, open: !was.open }))
+      else if (key === 'o') setC((was) => ({ ...was, edge: was.edge === 'merge' ? null : 'merge' }))
       else if (key === 'n') setC((was) => ({ ...was, narrow: !was.narrow }))
       else if (key === 'u') setC((was) => ({ ...was, up: !was.up }))
       else if (key === 'd') setC((was) => ({ ...was, dark: !was.dark }))
@@ -562,7 +571,12 @@ function Lab() {
     <div className={s.page}>
       <div className={s.stage}>
         <div ref={frame} className={[s.frame, c.narrow ? s.narrow : ''].join(' ')}>
-          <Face key={`${c.d}-${c.w}-${c.m}-${replay}`} c={c} replay={replay} setOpen={(open) => set({ open })} />
+          <Face
+            key={`${c.d}-${c.w}-${c.m}-${replay}`}
+            c={c}
+            replay={replay}
+            setEdge={(edge) => setC((was) => ({ ...was, edge: edge(was.edge) }))}
+          />
         </div>
       </div>
       <div className={s.switcher}>
@@ -570,7 +584,7 @@ function Lab() {
         <Segmented label="Moment" options={MOMENTS} value={c.m} onChange={(m) => set({ m })} />
         <Segmented label="Thread" options={WHERES} value={c.w} onChange={(w) => set({ w })} />
         <div className={s.toggles}>
-          <Toggle on={c.open} label="Opened" kbd="O" onChange={(open) => set({ open })} />
+          <Toggle on={c.edge === 'merge'} label="Opened" kbd="O" onChange={(open) => set({ edge: open ? 'merge' : null })} />
           <Toggle on={c.up} label="Scrolled up" kbd="U" onChange={(up) => set({ up })} />
           <Toggle on={c.narrow} label="Narrow" kbd="N" onChange={(narrow) => set({ narrow })} />
           <Toggle on={c.dark} label="Dark" kbd="D" onChange={(dark) => set({ dark })} />

@@ -5,7 +5,7 @@ The merge line ("Merging ✓ #1232 ● #1168 ○ #1270") held above the composer
 Run it from Althar's Run list ("Pinned merge line lab"), or from `apps/desktop`:
 `../../node_modules/.bin/vp dev --config lab/pinned-merge/vite.config.ts`, then open http://localhost:6143/.
 
-- **Pill** (A): the pill on the composer's edge. Pressed, it morphs into a card the composer's width: its surface reshapes from the pill into the card, each pull request's mark and number travel up into their row, and the titles, where each stands and why one came back fade in once they've landed. Its head, or Escape, folds it back the same way; a press mid-way turns it back from where it is (morph.ts). What came back says why on the composer's notice line while it's folded.
+- **Pill** (A): the pill on the composer's edge. Pressed, it morphs into a card the composer's width: its surface reshapes from the pill into the card, each pull request's mark and number travel up into their row, and the titles, where each stands and why one came back fade in once they've landed. Its head, or Escape, folds it back the same way; a press mid-way turns it back from where it is (morph.ts). What came back says why on the composer's notice line while it's folded. One thing is open on the composer's edge at a time: opening the run chip's list, or a task's goal, folds the card back into its pill, and opening the pill closes them.
 - **Pill, first pass** (F): the chip as first shown, swapped for the line's card when opened.
 - **Today** (0): the line at the thread's foot, scrolled away with it.
 
