@@ -84,7 +84,7 @@ import { text as stuckText } from '../task/StuckCall'
 import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
 import { arrivesQuietly, markArrived, watch } from './arrived'
 import s from './Board.module.css'
-import { type Lanes, movesInLine, runningIn, type Waiting, yoursOf } from './lanes'
+import { type Lanes, movesInLine, type RunningOrder, type Waiting, yoursOf } from './lanes'
 import { useRunningOrder } from './runningOrder'
 import type { LineActions } from './useBoard'
 import type { WorkActions } from './useWorkActions'
@@ -523,7 +523,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
   const status = taskStatusOf(work)
   const still: Pick<Card, 'status' | 'word' | 'why'> | null =
     status === TaskStatus.Running && work.externalWait !== undefined
-      ? { status, word: 'Waiting', why: externalWaitWords(work.externalWait, clock) }
+      ? { status, word: text.status[TaskStatus.Queued], why: externalWaitWords(work.externalWait, clock) }
       : status === TaskStatus.Paused && work.waits !== null
         ? {
             status,
@@ -591,6 +591,45 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
       return unreachable(work.kind)
   }
 }
+
+/**
+ * The words a card in Running says, in the order Status puts them: what an agent or Althar is at work on, in the order the
+ * work goes; then what waits on something. "Waiting" is what waits outside and what waits for a free agent alike.
+ */
+const SAID_IN_ORDER: ReadonlyArray<string | undefined> = [
+  text.settingUp.install,
+  text.settingUp.kept,
+  text.conversation,
+  text.step.implement,
+  text.followUp,
+  text.working,
+  text.step.review,
+  text.reading,
+  stepNow('conflict'),
+  stepNow('checks'),
+  stepNow('publish'),
+  stepNow('publish', 'ready'),
+  stepNow('pushing'),
+  stepNow('merging'),
+  stepNow('checks_running'),
+  stepNow('publish', 'merge'),
+  stepNow('merge_queue'),
+  text.status[TaskStatus.Queued],
+  text.status[TaskStatus.Paused],
+]
+
+/** Where a card in Running goes by Status, from what it says: by its word; after those, one that needs the person; stopped last. */
+const saidRank = (work: BoardTask): number => {
+  const { status, word } = runningCard(work, '', () => '')
+  if (status === TaskStatus.Stopped) return SAID_IN_ORDER.length + 1
+  // A conflict its lead wasn't asked to resolve: its card says why, with Resolve now for the person.
+  if (work.conflictUnsent != null) return SAID_IN_ORDER.length
+  return SAID_IN_ORDER.indexOf(word)
+}
+
+/** Running's cards in the order the person picked; by status, each keeps its place among those that say what it does. */
+export const runningIn = (running: ReadonlyArray<BoardTask>, order: RunningOrder): ReadonlyArray<BoardTask> =>
+  order === 'oldest' ? running : running.toSorted((a, b) => saidRank(a) - saidRank(b))
 
 /** Who stopped a task and the reason they gave, or the task its work went on in, under its title; nothing where nothing says. */
 const whyStopped = (work: BoardTask): Pick<Card, 'why'> => {
