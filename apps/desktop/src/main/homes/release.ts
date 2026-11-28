@@ -35,6 +35,18 @@ export interface HostRelease {
   readonly sha256: string
   readonly bytes: number
   readonly unpackedBytes: number
+  /**
+   * A worker's release in parts: its base, without its agents' own programs, which the release's install downloads on the
+   * machine (apps/host/src/updates/parts.ts); `totalBytes`, the base's and the parts' archives together. The whole
+   * archive above is what goes where the machine can't download.
+   */
+  readonly base?: {
+    readonly url: string
+    readonly sha256: string
+    readonly bytes: number
+    readonly unpackedBytes: number
+    readonly totalBytes: number
+  }
 }
 
 export class ReleaseProblem extends Error {
@@ -114,9 +126,15 @@ export const authenticateRelease = (
       (manifest.product ?? 'host') !== product
     )
       throw rejected()
-    const url = new URL(archive.url)
-    if (url.protocol !== 'https:' || url.username !== '' || url.password !== '' || url.hash !== '') throw rejected()
+    const https = (value: unknown) => {
+      if (typeof value !== 'string') throw rejected()
+      const at = new URL(value)
+      if (at.protocol !== 'https:' || at.username !== '' || at.password !== '' || at.hash !== '') throw rejected()
+      return at
+    }
+    const url = https(archive.url)
     return {
+      ...(product === 'worker' ? baseOf(manifest.parts, https) : {}),
       envelope: bytes,
       key,
       version: manifest.version,
@@ -129,6 +147,30 @@ export const authenticateRelease = (
     }
   } catch (error) {
     throw error instanceof ReleaseProblem ? error : rejected()
+  }
+}
+
+/** A worker release's base, where it comes in parts; nothing where it doesn't, or where they aren't what they should be. */
+const baseOf = (value: unknown, https: (value: unknown) => URL): Pick<HostRelease, 'base'> => {
+  if (typeof value !== 'object' || value === null) return {}
+  const { base, of } = value as Record<string, unknown>
+  if (typeof base !== 'object' || base === null || !Array.isArray(of) || of.length === 0) return {}
+  const fields = base as Record<string, unknown>
+  if (typeof fields.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(fields.sha256)) throw rejected()
+  let parts = 0
+  for (const part of of as ReadonlyArray<unknown>) {
+    if (typeof part !== 'object' || part === null) throw rejected()
+    parts += natural((part as Record<string, unknown>).bytes, MAX_ARCHIVE_BYTES)
+  }
+  const bytes = natural(fields.bytes, MAX_ARCHIVE_BYTES)
+  return {
+    base: {
+      url: https(fields.url).href,
+      sha256: fields.sha256,
+      bytes,
+      unpackedBytes: natural(fields.unpackedBytes, MAX_UNPACKED_BYTES),
+      totalBytes: bytes + parts,
+    },
   }
 }
 

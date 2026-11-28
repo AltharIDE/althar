@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve } from 'node:path'
 
+import { claudeProgram, codexProgram } from '@althar/provider-adapters'
 import { Schema } from 'effect'
 
 import { HostError } from '../errors'
@@ -45,6 +46,7 @@ const packageAt = async (from: string, name: string): Promise<string | undefined
 /** Copy the actual locked dependency graph, including Bun's applied patches; never resolve fresh npm ranges. */
 export const copyDependencies = async (from: string, destination: string, names: ReadonlyArray<string>) => {
   const placements = new Map<string, string>()
+  const placedAs = new Map<string, string>()
   const root = join(destination, 'node_modules')
   const place = async (name: string, source: string, consumer: string, optional = false): Promise<void> => {
     const metadata = decodePackage(JSON.parse(await fs.readFile(join(source, 'package.json'), 'utf8')))
@@ -70,6 +72,7 @@ export const copyDependencies = async (from: string, destination: string, names:
     const target = placements.has(global) ? join(consumer, 'node_modules', name) : global
     if (placements.has(target)) throw failed()
     placements.set(target, source)
+    placedAs.set(target, name)
     await fs.mkdir(dirname(target), { recursive: true, mode: 0o700 })
     await fs.cp(source, target, {
       recursive: true,
@@ -102,6 +105,8 @@ export const copyDependencies = async (from: string, destination: string, names:
     if (source === undefined) throw failed()
     await place(name, source, destination)
   }
+  /** Where each package went, relative to `destination`, by its name. */
+  return [...placedAs.entries()].map(([target, name]) => ({ name, path: relative(destination, target).split(/[\\/]/).join('/') }))
 }
 
 export interface BundleSource {
@@ -201,18 +206,49 @@ export const assembleBundle = async (source: BundleSource, destination: string) 
 }
 
 /**
- * A worker's own release: its native program, Node, its setup's commands (`dist/althar-worker.js`), the agents it runs
- * and its sandbox's tools. None of the home: no runtime, store or pictures.
+ * The packages that bring the agents' own programs for this system, as their adapters find them: nearly all of a worker's
+ * release, and each a part of its own (parts.ts).
  */
-export const assembleWorkerBundle = async (source: BundleSource, destination: string) => {
+const agentPrograms = (platform: string = process.platform, arch: string = process.arch) =>
+  new Set([...claudeProgram(platform, arch, false).platforms, ...(codexProgram(platform, arch)?.platforms ?? [])])
+
+/**
+ * What Codex's package brings that a worker never runs: its voice, a program and the GStreamer libraries it plays sound
+ * with (51 MB, 17 MB of the download). Codex talks only where a person speaks to it.
+ */
+const pruneCodex = async (folder: string) => {
+  const vendor = join(folder, 'vendor')
+  for (const target of await fs.readdir(vendor).catch(() => [] as string[]))
+    await fs.rm(join(vendor, target, 'codex-resources', 'voice'), { recursive: true, force: true })
+}
+
+/**
+ * A worker's own release: its native program, Node, its setup's commands (`dist/althar-worker.js`), the agents it runs
+ * and its sandbox's tools. None of the home: no runtime, store or pictures. Says where its agents' own programs are, the
+ * release's parts.
+ */
+export const assembleWorkerBundle = async (
+  source: BundleSource,
+  destination: string,
+): Promise<{ readonly parts: ReadonlyArray<WorkerPart> }> => {
   if (source.workerEntry === undefined || source.worker === undefined || source.workerTools === undefined) throw failed()
   const dist = await emptyDestination(destination)
   await fs.copyFile(source.workerEntry, join(dist, 'althar-worker.js'), constants.COPYFILE_EXCL)
   await copyHostAssets(source.workerEntry, dist)
   await copyNotices(source.workerEntry, destination)
   await copyNode(source, destination, '@althar/worker-release')
-  await copyDependencies(source.entry, destination, AGENT_ADAPTERS)
+  const placed = await copyDependencies(source.entry, destination, AGENT_ADAPTERS)
   await copyWorker(source, destination)
+  const programs = agentPrograms()
+  const parts = placed.filter((one) => programs.has(one.name))
+  for (const part of parts) if (part.name.startsWith('@openai/codex-')) await pruneCodex(join(destination, part.path))
+  return { parts: parts.map((part) => ({ name: part.name.replace(/^@[^/]+\//u, ''), path: part.path })) }
+}
+
+/** An agent's own program in a worker's release: its name, as its archive says it, and its folder there. */
+export interface WorkerPart {
+  readonly name: string
+  readonly path: string
 }
 
 /** Publicly readable is fine; another user must not be able to change the selected trust anchor. */

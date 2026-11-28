@@ -1,13 +1,14 @@
 import { generateKeyPairSync } from 'node:crypto'
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
 import { parseOptions } from '../src/options'
 import { packageRelease } from '../src/updates/publish'
+import { treeDigest } from '../src/updates/parts'
 import { authenticateRelease, digest } from '../src/updates/release'
-import { inspectArchive } from '../src/updates/archive'
+import { extractRelease, inspectArchive } from '../src/updates/archive'
 import { releaseInfo } from '../src/updates/info'
 import { fixtureFiles, NOW } from './updateFixture'
 import { temporary } from './support'
@@ -116,6 +117,83 @@ describe('signed host release production', () => {
         dependencies(JSON.stringify({ step: 'version', state: 'done', version: '0.0.1', arch: releaseInfo().arch })),
       ),
     ).rejects.toThrow('does not say the version')
+  })
+
+  it('signs a worker’s release in parts too: its base, and each agent’s program on its own, beside the whole', async () => {
+    const root = temporary()
+    const pair = generateKeyPairSync('ed25519')
+    const signingKey = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
+    const publicKey = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString()
+    const options = parseOptions(
+      [
+        'package-release',
+        '--release-base-url',
+        'https://releases.example/host-v0.1.0',
+        '--release-sequence',
+        '5',
+        '--output',
+        join(root, 'out'),
+      ],
+      {},
+      root,
+    )
+    const program = 'node_modules/@openai/codex-test/vendor/bin/codex'
+    const result = await packageRelease(options, {
+      source: {
+        node: '/fixture/node',
+        entry: '/fixture/entry',
+        version: releaseInfo().version,
+        worker: '/fixture/althar-worker',
+        workerTools: '/fixture/tools',
+        workerEntry: '/fixture/worker/althar-worker.js',
+      },
+      signingKey,
+      now: NOW,
+      assemble: async (_: unknown, folder: string) => {
+        fixtureFiles(folder)
+      },
+      assembleWorker: async (_: unknown, folder: string) => {
+        fixtureFiles(folder)
+        rmSync(join(folder, 'dist/althar-host.js'))
+        writeFileSync(join(folder, 'dist/althar-worker.js'), 'worker commands', { mode: 0o600 })
+        writeFileSync(join(folder, 'althar-worker'), 'worker', { mode: 0o700 })
+        mkdirSync(join(folder, program, '..'), { recursive: true })
+        writeFileSync(join(folder, program), 'Codex '.repeat(1000), { mode: 0o700 })
+        writeFileSync(join(folder, 'node_modules/@openai/codex-test/package.json'), '{}', { mode: 0o600 })
+        return { parts: [{ name: 'codex-test', path: 'node_modules/@openai/codex-test' }] }
+      },
+      execute: async (_: string, args: ReadonlyArray<string>) =>
+        args.includes('version')
+          ? JSON.stringify({ step: 'version', state: 'done', version: releaseInfo().version, arch: releaseInfo().arch })
+          : JSON.stringify(releaseInfo()),
+    })
+    if (result.worker === undefined) throw new Error('No worker release was signed')
+    const envelope = readFileSync(result.worker.manifest)
+    const { manifest } = authenticateRelease(envelope, [publicKey], releaseInfo().arch)
+    const parts = manifest.parts
+    if (parts === undefined) throw new Error('No parts were signed')
+    const named = `althar-worker-${releaseInfo().version}-linux-${releaseInfo().arch}`
+    expect(parts.base.url).toBe(`https://releases.example/host-v0.1.0/${named}-base.tar.gz`)
+    expect(parts.of).toEqual([
+      expect.objectContaining({ name: 'codex-test', path: 'node_modules/@openai/codex-test', files: 2, unpackedBytes: 6002 }),
+    ])
+    expect(result.worker.parts?.map((file) => file.split('/').at(-1))).toEqual([`${named}-codex-test.tar.zst`, `${named}-base.tar.gz`])
+    // Each archive is what the manifest says, and together they hold what the whole one does.
+    const [part, base] = result.worker.parts ?? []
+    expect(digest(readFileSync(part ?? ''))).toBe(parts.of[0]?.sha256)
+    expect(digest(readFileSync(base ?? ''))).toBe(parts.base.sha256)
+    await inspectArchive(base ?? '', parts.base)
+    await inspectArchive(part ?? '', parts.of[0] ?? parts.base)
+    await inspectArchive(result.worker.archive, manifest)
+    expect(parts.base.files + (parts.of[0]?.files ?? 0)).toBe(manifest.files)
+    expect(parts.base.unpackedBytes + (parts.of[0]?.unpackedBytes ?? 0)).toBe(manifest.unpackedBytes)
+    const unpacked = join(root, 'part')
+    await extractRelease(part ?? '', unpacked, parts.of[0] ?? parts.base)
+    expect(await treeDigest(unpacked)).toBe(parts.of[0]?.tree)
+    // A script that reads the payload's fields by their last mention reads the whole archive's.
+    const payload = Buffer.from(JSON.parse(envelope.toString()).payload, 'base64url').toString()
+    expect(payload.indexOf('"parts"')).toBeLessThan(payload.indexOf('"archive"'))
+    expect(/.*"sha256":"([a-f0-9]+)"/u.exec(payload)?.[1]).toBe(manifest.archive.sha256)
   })
 
   it('requires a protected Ed25519 signing key and explicit release metadata', async () => {

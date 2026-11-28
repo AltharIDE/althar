@@ -126,8 +126,18 @@ describe('locked host dependency bundles', () => {
     writeFileSync(join(root, 'worker', 'THIRD_PARTY_NOTICES.txt'), 'Worker notices')
     writeFileSync(node, 'node binary')
     writeFileSync(join(root, 'node/LICENSE'), 'Node license')
-    pkg(root, '@agentclientprotocol/claude-agent-acp')
-    pkg(root, '@agentclientprotocol/codex-acp')
+    // Each adapter brings its agent's own program for this system, an optional dependency of the agent's package.
+    const system = `${process.platform}-${process.arch}`
+    pkg(root, '@agentclientprotocol/claude-agent-acp', { '@anthropic-ai/claude-agent-sdk': '1' })
+    pkg(root, '@agentclientprotocol/codex-acp', { '@openai/codex': '1' })
+    pkg(root, '@anthropic-ai/claude-agent-sdk', { [`@anthropic-ai/claude-agent-sdk-${system}`]: '1' })
+    pkg(root, '@openai/codex', { [`@openai/codex-${system}`]: '1' })
+    writeFileSync(join(pkg(root, `@anthropic-ai/claude-agent-sdk-${system}`), 'claude'), 'Claude Code')
+    const codex = join(pkg(root, `@openai/codex-${system}`), 'vendor', 'target')
+    for (const folder of ['bin', 'codex-resources/voice/bin']) mkdirSync(join(codex, folder), { recursive: true })
+    writeFileSync(join(codex, 'bin', 'codex'), 'Codex')
+    writeFileSync(join(codex, 'codex-resources', 'bwrap'), 'bubblewrap')
+    writeFileSync(join(codex, 'codex-resources', 'voice', 'bin', 'codex-voice-host'), 'voice')
     pkg(root, 'sharp')
     writeFileSync(join(root, 'althar-worker'), 'worker binary')
     for (const part of ['bin', 'licenses']) mkdirSync(join(root, 'tools', part), { recursive: true })
@@ -142,7 +152,23 @@ describe('locked host dependency bundles', () => {
       workerEntry,
     }
     const destination = join(temporary(), 'release')
-    await assembleWorkerBundle(source, destination)
+    const { parts } = await assembleWorkerBundle(source, destination)
+    // Its agents' own programs are its parts, each where its adapter finds it; Codex without its voice, which no worker
+    // runs, and with the bubblewrap its sandbox does.
+    expect(parts).toEqual(
+      expect.arrayContaining([
+        { name: `claude-agent-sdk-${system}`, path: `node_modules/@anthropic-ai/claude-agent-sdk-${system}` },
+        { name: `codex-${system}`, path: `node_modules/@openai/codex-${system}` },
+      ]),
+    )
+    expect(parts).toHaveLength(2)
+    expect(readFileSync(join(destination, parts.find((part) => part.name.startsWith('claude'))?.path ?? '', 'claude'), 'utf8')).toBe(
+      'Claude Code',
+    )
+    const shipped = join(destination, `node_modules/@openai/codex-${system}/vendor/target`)
+    expect(readFileSync(join(shipped, 'codex-resources', 'bwrap'), 'utf8')).toBe('bubblewrap')
+    expect(existsSync(join(shipped, 'codex-resources', 'voice'))).toBe(false)
+    expect(existsSync(join(root, `node_modules/@openai/codex-${system}/vendor/target/codex-resources/voice`))).toBe(true)
     expect(readFileSync(join(destination, 'dist/althar-worker.js'), 'utf8')).toBe('worker commands')
     expect(readFileSync(join(destination, 'THIRD_PARTY_NOTICES.txt'), 'utf8')).toBe('Worker notices')
     expect(readFileSync(join(destination, 'althar-worker'), 'utf8')).toBe('worker binary')

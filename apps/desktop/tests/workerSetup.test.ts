@@ -333,3 +333,75 @@ it('ends with the worker’s check: stays at it where its sandbox can’t start,
   expect(told.at(-1)).toMatchObject({ phase: 'done', at: 5, checking: false })
   expect(asked).toContain('worker-sandbox')
 })
+
+it('takes a worker release in parts by its base, and leaves a malformed or home’s one whole', async () => {
+  const signal = new AbortController().signal
+  const pair = generateKeyPairSync('ed25519')
+  const parts = {
+    base: { url: 'https://x.test/base.tar.gz', sha256: 'e'.repeat(64), bytes: 50, files: 3, unpackedBytes: 500 },
+    of: [{ name: 'codex-linux-x64', path: 'node_modules/@openai/codex-linux-x64', url: 'https://x.test/codex.tar.zst', bytes: 70 }],
+  }
+  const own = (extra: Record<string, unknown>, product = 'worker') => ({
+    keys: [signed('0.3.1', {}, pair).pem],
+    manifest: 'http://127.0.0.1:8080/r/m.json',
+    fetch: vi.fn(async () => new Response(signed('0.3.1', { product, ...extra }, pair).envelope)),
+    now: () => now,
+  })
+  expect(await findWorkerRelease('x64', own({ parts }), signal)).toMatchObject({
+    url: 'https://example.test/a.tar.gz',
+    base: { url: 'https://x.test/base.tar.gz', sha256: 'e'.repeat(64), bytes: 50, unpackedBytes: 500, totalBytes: 120 },
+  })
+  expect((await findWorkerRelease('x64', own({}), signal)).base).toBeUndefined()
+  await expect(
+    findWorkerRelease('x64', own({ parts: { ...parts, base: { ...parts.base, url: 'http://x.test/b' } } }), signal),
+  ).rejects.toThrow(/failed its check/)
+})
+
+it('downloads a release in parts on the machine by its base, and sends the whole one where the machine can’t download', async () => {
+  const event = (step: string, state: string, more: Record<string, unknown> = {}) => JSON.stringify({ protocol: 1, step, state, ...more })
+  const installs: Array<ReadonlyArray<string>> = []
+  const { system: given, log } = machine({})
+  const system: SetupSystem = {
+    ...given,
+    run: async (program: string, args: ReadonlyArray<string>, _options: RunOptions) => {
+      const operation = program !== 'ssh' ? program : (/^sh -s -- '([a-z-]+)'/.exec(args.at(-1) ?? '')?.[1] ?? 'resolve')
+      const answers: Record<string, string> = {
+        probe: [event('reach', 'done'), event('look', 'done', { arch: 'x64', freeKiB: 65_000_000, linger: true })].join('\n'),
+        'worker-prepare-upload': event('get', 'started', { uploadId: 'abcdefgh', uploadPath: '/u/archive.partial' }),
+      }
+      if (operation === 'worker-install') {
+        installs.push(
+          args
+            .at(-1)
+            ?.split(' ')
+            .map((one) => one.replace(/^'|'$/gu, '')) ?? [],
+        )
+        const stdout =
+          installs.length === 1 ? event('install', 'failed', { code: 'CannotDownload' }) : event('key', 'done', { publicKey: 'PUBLIC' })
+        return { code: installs.length === 1 ? 1 : 0, stdout, stderr: '' }
+      }
+      return { code: 0, stdout: answers[operation] ?? '', stderr: '' }
+    },
+  }
+  vi.mocked(system.release).mockResolvedValue({
+    envelope: new Uint8Array([1]),
+    key: 'KEY',
+    version: '0.3.1',
+    url: 'https://x.test/whole.tar.gz',
+    sha256: 'a'.repeat(64),
+    bytes: 400,
+    unpackedBytes: 1000,
+    apiVersion: 1,
+    storage: 'c'.repeat(64),
+    base: { url: 'https://x.test/base.tar.gz', sha256: 'e'.repeat(64), bytes: 50, unpackedBytes: 200, totalBytes: 300 },
+  })
+  vi.mocked(system.scratch).mockResolvedValue({ path: '/scratch', remove: async () => {} })
+  const told: Array<WorkerSetup | null> = []
+  const release = vi.fn(async () => ({ kind: 'ready' as const, version: '0.3.1', base: 'https://x.test' }))
+  workerSetups(system, vi.fn(), (setup) => told.push(setup), vi.fn(), { log, release }).start({ target: 'build@box' }, true)
+  await vi.waitFor(() => expect(told.at(-1)?.phase).toBe('enroll'))
+  // On the machine, the base; sent from here, the whole release, which needs nothing more.
+  expect(installs[0]?.slice(4, 9)).toEqual(['download', 'e'.repeat(64), '50', '200', 'https://x.test/base.tar.gz'])
+  expect(installs[1]?.slice(4, 9)).toEqual(['upload', 'a'.repeat(64), '400', '1000', 'abcdefgh'])
+  expect(vi.mocked(system.fetchArchive).mock.calls[0]?.[0]).toMatchObject({ url: 'https://x.test/whole.tar.gz', sha256: 'a'.repeat(64) })
+})

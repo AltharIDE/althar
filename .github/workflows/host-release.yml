@@ -88,7 +88,8 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    # Its worker's parts are compressed with zstd at level 19, a few minutes each.
+    timeout-minutes: 45
     environment: release
     defaults:
       run:
@@ -180,7 +181,9 @@ jobs:
           RELEASE_VERSION: ${{ needs.check.outputs.version }}
         run: |
           set -euo pipefail
-          test "$(find host-release -type f | wc -l)" -eq 10
+          # Per architecture: the home's archive and manifest; the worker's whole archive, its manifest, its base and its two
+          # agents' parts (apps/host/src/updates/parts.ts). Then the bootstrap and the key.
+          test "$(find host-release -type f | wc -l)" -eq 16
           gh release create "$RELEASE_TAG" host-release/* --target "$GITHUB_SHA" \
             --draft --latest=false --title "Althar host $RELEASE_VERSION" \
             --notes-file "apps/host/release-notes/$RELEASE_VERSION.md"

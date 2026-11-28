@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, sign, X509Certificate } from 'node:crypto'
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:https'
 import { join } from 'node:path'
 
@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { HOST_VERSION } from '../src/home'
 import type { CheckSystem } from '../src/workerCheck'
+import { treeDigest } from '../src/updates/parts'
 import { releaseIdentity } from '../src/updates/release'
 import {
   enroll,
@@ -858,5 +859,182 @@ describe('its check, and letting its sandbox start', () => {
     const lines: string[] = []
     expect(await workerMain(['tools', 'cargo@1'], (text) => lines.push(text))).toBe(1)
     expect(lines.join('')).toBe('cargo@1 isn’t a tool a worker installs.\n')
+  })
+})
+
+describe('a release in parts', () => {
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
+  const claude = 'node_modules/@anthropic-ai/claude-agent-sdk-test'
+  const codex = 'node_modules/@openai/codex-test'
+  /** A folder of files, made: each path's text, executable where it says. */
+  const tree = (folder: string, files: Record<string, string>) => {
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(join(folder, path, '..'), { recursive: true, mode: 0o700 })
+      writeFileSync(join(folder, path), text, { mode: path.endsWith('.json') ? 0o600 : 0o700 })
+    }
+    return folder
+  }
+  const archived = async (folder: string, file: string, zstd: boolean) => {
+    await c({ file, cwd: folder, portable: true, noMtime: true, ...(zstd ? { zstd: true } : { gzip: true }) }, readdirSync(folder))
+    const bytes = readFileSync(file)
+    return { bytes, sha256: createHash('sha256').update(bytes).digest('hex') }
+  }
+  const countOf = (files: Record<string, string>) => ({
+    files: Object.keys(files).length,
+    unpackedBytes: Object.values(files).reduce((sum, text) => sum + Buffer.byteLength(text), 0),
+  })
+
+  /** The newer release, as its base and its two parts, signed, and served from one place; what was asked for, kept. */
+  const published = async (pair = generateKeyPairSync('ed25519'), tamper = false) => {
+    const publicKey = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString()
+    const root = temporary()
+    const baseFiles = { 'dist/althar-worker.js': 'worker commands', 'althar-worker': 'worker' }
+    const claudeFiles = { 'package.json': '{"version":"0.3.331"}', claude: 'Claude Code 0.3.331' }
+    const codexFiles = { 'package.json': '{"version":"0.173.0"}', 'vendor/bin/codex': 'Codex 0.173.0' }
+    const base = await archived(tree(join(root, 'base'), baseFiles), join(root, 'base.tar.gz'), false)
+    const parts = [
+      { name: 'claude-agent-sdk-test', path: claude, files: claudeFiles },
+      { name: 'codex-test', path: codex, files: codexFiles },
+    ]
+    const served = new Map<string, Buffer>()
+    served.set('https://updates.example/base.tar.gz', base.bytes)
+    const of = []
+    for (const part of parts) {
+      const folder = tree(join(root, part.name), part.files)
+      const packed = await archived(folder, join(root, `${part.name}.tar.zst`), true)
+      const url = `https://updates.example/${part.name}.tar.zst`
+      served.set(url, packed.bytes)
+      of.push({
+        name: part.name,
+        path: part.path,
+        tree: tamper && part.name === 'codex-test' ? 'f'.repeat(64) : await treeDigest(folder),
+        url,
+        sha256: packed.sha256,
+        bytes: packed.bytes.length,
+        ...countOf(part.files),
+      })
+    }
+    const [major, minor, patch] = HOST_VERSION.split('.').map(Number)
+    const version = `${major}.${minor}.${(patch ?? 0) + 1}`
+    const payload = Buffer.from(
+      JSON.stringify({
+        format: 1,
+        version,
+        sequence: 2,
+        publishedAt: new Date(Date.now() - 1000).toISOString(),
+        expiresAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+        platform: 'linux',
+        arch,
+        updaterProtocol: 1,
+        apiVersion: 1,
+        storage: 'a'.repeat(64),
+        parts: {
+          base: { url: 'https://updates.example/base.tar.gz', sha256: base.sha256, bytes: base.bytes.length, ...countOf(baseFiles) },
+          of,
+        },
+        archive: { url: 'https://updates.example/whole.tar.gz', sha256: 'c'.repeat(64), bytes: 1000 },
+        files: 6,
+        unpackedBytes: 1000,
+        product: 'worker',
+      }),
+    )
+    const envelope = JSON.stringify({
+      format: 1,
+      keyId: releaseIdentity(publicKey),
+      payload: payload.toString('base64url'),
+      signature: sign(null, payload, pair.privateKey).toString('base64url'),
+    })
+    const asked: string[] = []
+    const fetcher = (async (input: string) => {
+      asked.push(input)
+      if (input.endsWith('manifest.json')) return new Response(envelope)
+      const body = served.get(input)
+      return body === undefined ? new Response('', { status: 404 }) : new Response(body)
+    }) as unknown as typeof fetch
+    return { publicKey, pair, envelope, base, version, asked, fetcher, served }
+  }
+
+  it('updates by its base and only the parts the release it runs hasn’t got, lending the rest without a copy', async () => {
+    const pair = generateKeyPairSync('ed25519')
+    const newer = await published(pair)
+    // What it runs: Claude Code's the same as the newer release's, Codex's older.
+    const folder = release()
+    await install(folder, out)
+    tree(join(folder, claude), { 'package.json': '{"version":"0.3.331"}', claude: 'Claude Code 0.3.331' })
+    tree(join(folder, codex), { 'package.json': '{"version":"0.172.0"}', 'vendor/bin/codex': 'Codex 0.172.0' })
+    const installedPayload = Buffer.from(
+      JSON.stringify({
+        ...JSON.parse(Buffer.from(JSON.parse(newer.envelope).payload, 'base64url').toString('utf8')),
+        version: HOST_VERSION,
+        sequence: 1,
+        parts: undefined,
+      }),
+    )
+    writeFileSync(
+      join(folder, '.manifest'),
+      JSON.stringify({
+        format: 1,
+        keyId: releaseIdentity(newer.publicKey),
+        payload: installedPayload.toString('base64url'),
+        signature: sign(null, installedPayload, pair.privateKey).toString('base64url'),
+      }),
+      { mode: 0o600 },
+    )
+    writeFileSync(join(folder, '.release-key'), newer.publicKey, { mode: 0o600 })
+    writeFileSync(join(data, 'althar-worker', 'update-feed'), 'https://updates.example/manifest.json', { mode: 0o600 })
+    await update(out, newer.fetcher)
+    expect(said.at(-1)).toMatchObject({
+      step: 'update',
+      state: 'done',
+      version: newer.version,
+      lent: ['claude-agent-sdk-test'],
+      downloaded: ['codex-test'],
+    })
+    expect(newer.asked).not.toContain('https://updates.example/claude-agent-sdk-test.tar.zst')
+    expect(newer.asked).not.toContain('https://updates.example/whole.tar.gz')
+    const program = join(data, 'althar-worker-program')
+    const target = join(program, `bundle-${newer.base.sha256}`)
+    expect(readlinkSync(join(program, 'current'))).toBe(target)
+    expect(readFileSync(join(target, codex, 'vendor/bin/codex'), 'utf8')).toBe('Codex 0.173.0')
+    expect(readFileSync(join(target, 'dist/althar-worker.js'), 'utf8')).toBe('worker commands')
+    // Lent: the same file, linked, not a second copy; and it still runs.
+    expect(statSync(join(target, claude, 'claude')).ino).toBe(statSync(join(folder, claude, 'claude')).ino)
+    expect(statSync(join(target, claude, 'claude')).mode & 0o777).toBe(0o700)
+    expect(statSync(join(target, codex, 'vendor/bin/codex')).mode & 0o777).toBe(0o700)
+  })
+
+  it('makes a release the bootstrap unpacked from its base whole as it installs, saying the download as it goes', async () => {
+    const newer = await published()
+    const folder = release(`bundle-${newer.base.sha256}`)
+    tree(folder, { 'dist/althar-worker.js': 'worker commands' })
+    writeFileSync(join(folder, '.manifest'), newer.envelope, { mode: 0o600 })
+    writeFileSync(join(folder, '.release-key'), newer.publicKey, { mode: 0o600 })
+    await install(folder, out, newer.fetcher)
+    expect(readFileSync(join(folder, claude, 'claude'), 'utf8')).toBe('Claude Code 0.3.331')
+    expect(readFileSync(join(folder, codex, 'vendor/bin/codex'), 'utf8')).toBe('Codex 0.173.0')
+    const total = [...newer.served.values()].reduce((sum, bytes) => sum + bytes.length, 0)
+    expect(said.findLast((one) => one.step === 'get')).toMatchObject({ state: 'done', bytes: total, totalBytes: total })
+    expect(said.at(-1)).toMatchObject({ step: 'key', state: 'done' })
+    expect(readdirSync(join(data, 'althar-worker-program')).filter((name) => name.startsWith('.install-'))).toEqual([])
+    // Installed again, as Try again does: it has them, and asks for nothing.
+    newer.asked.length = 0
+    await install(folder, out, newer.fetcher)
+    expect(newer.asked).toEqual([])
+  })
+
+  it('refuses a part that doesn’t hold what it should, and says it can’t download one it can’t reach', async () => {
+    const tampered = await published(undefined, true)
+    const folder = release(`bundle-${tampered.base.sha256}`)
+    writeFileSync(join(folder, '.manifest'), tampered.envelope, { mode: 0o600 })
+    writeFileSync(join(folder, '.release-key'), tampered.publicKey, { mode: 0o600 })
+    await expect(install(folder, out, tampered.fetcher)).rejects.toMatchObject({ code: 'ReleaseRejected' })
+    expect(existsSync(join(folder, codex))).toBe(false)
+    const unreachable = await published()
+    unreachable.served.delete('https://updates.example/codex-test.tar.zst')
+    const other = release(`bundle-${unreachable.base.sha256}`)
+    writeFileSync(join(other, '.manifest'), unreachable.envelope, { mode: 0o600 })
+    writeFileSync(join(other, '.release-key'), unreachable.publicKey, { mode: 0o600 })
+    // The window sends the whole release from its own computer then.
+    await expect(install(other, out, unreachable.fetcher)).rejects.toMatchObject({ code: 'CannotDownload' })
   })
 })

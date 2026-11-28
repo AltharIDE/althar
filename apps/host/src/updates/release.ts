@@ -9,6 +9,36 @@ export const MAX_ARCHIVE_BYTES = 1_073_741_824
 export const MAX_UNPACKED_BYTES = 4_294_967_296
 const Hash = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
 const Natural = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }))
+/** An archive of a release, or of a part of one, with what it holds unpacked. */
+const Counted = {
+  url: Schema.String,
+  sha256: Hash,
+  bytes: Natural.check(Schema.isLessThanOrEqualTo(MAX_ARCHIVE_BYTES)),
+  files: Natural.check(Schema.isLessThanOrEqualTo(50_000)),
+  unpackedBytes: Natural.check(Schema.isLessThanOrEqualTo(MAX_UNPACKED_BYTES)),
+}
+/** A package folder in a release's `node_modules`, nested where a consumer needs its own copy. */
+const PACKAGE_FOLDER = /^node_modules\/(?:@[a-z0-9_.-]+\/)?[a-z0-9_.-]+(?:\/node_modules\/(?:@[a-z0-9_.-]+\/)?[a-z0-9_.-]+)*$/u
+export const ReleasePart = Schema.Struct({
+  /** What it is, as its archive's name says it. */
+  name: Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9._-]{0,99}$/u)),
+  /** Where in the release it goes. */
+  path: Schema.String.check(Schema.isPattern(PACKAGE_FOLDER), Schema.isMaxLength(512)),
+  /** What it holds, whatever archive brought it (parts.ts `treeDigest`): a release that has it already lends it. */
+  tree: Hash,
+  ...Counted,
+})
+export type ReleasePart = typeof ReleasePart.Type
+/**
+ * A worker's release in parts: the release without its agents' own programs (`base`), and each of those programs on its
+ * own. The release's `archive` stays whole, for updaters and windows from before parts; one that knows parts downloads
+ * only the parts the release it runs doesn't have already.
+ */
+export const ReleaseParts = Schema.Struct({
+  base: Schema.Struct(Counted),
+  of: Schema.Array(ReleasePart).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
+})
+export type ReleaseParts = typeof ReleaseParts.Type
 export const ReleaseManifest = Schema.Struct({
   format: Schema.Literal(1),
   version: Schema.String.check(Schema.isPattern(/^(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})$/)),
@@ -25,6 +55,7 @@ export const ReleaseManifest = Schema.Struct({
   files: Natural.check(Schema.isLessThanOrEqualTo(50_000)),
   /** What it is: a home's release, or a worker's own. A manifest from before workers had their own is a home's. */
   product: Schema.optional(Schema.Literals(['host', 'worker'])),
+  parts: Schema.optional(ReleaseParts),
 })
 export type ReleaseManifest = typeof ReleaseManifest.Type
 const Envelope = Schema.Struct({ format: Schema.Literal(1), keyId: Hash, payload: Schema.String, signature: Schema.String })
@@ -111,6 +142,18 @@ export const authenticateRelease = (bytes: Uint8Array, keys: ReadonlyArray<strin
     const expires = date(manifest.expiresAt)
     if (expires <= published || expires - published > 366 * 86_400_000 || manifest.arch !== arch) throw rejected()
     httpsURL(manifest.archive.url)
+    if (manifest.parts !== undefined) {
+      httpsURL(manifest.parts.base.url)
+      const paths = manifest.parts.of.map((part) => part.path)
+      for (const part of manifest.parts.of) {
+        httpsURL(part.url)
+        // Each in a place of its own: none inside another, or twice.
+        if (paths.some((path) => path !== part.path && (path.startsWith(`${part.path}/`) || part.path.startsWith(`${path}/`))))
+          throw rejected()
+      }
+      if (new Set(paths).size !== paths.length || new Set(manifest.parts.of.map((part) => part.name)).size !== paths.length)
+        throw rejected()
+    }
     return { id: digest(bytes), manifest, envelope: bytes }
   } catch {
     throw rejected()

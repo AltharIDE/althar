@@ -346,15 +346,21 @@ export const workerSetups = (
       throw new Stopped(error instanceof ReleaseProblem ? error.code : 'ReleaseRejected', STEP.get)
     }
     const release = found
-    set({ version: release.version, progress: { bytes: 0, total: release.bytes } })
+    // Downloaded on the machine, a release in parts comes as its base, which the release's install makes whole; sent from
+    // here, it goes whole.
+    const base = release.base
+    set({ version: release.version, progress: { bytes: 0, total: base?.totalBytes ?? release.bytes } })
     const signed = [release.sha256, String(release.bytes), String(release.unpackedBytes)]
     const trust = [Buffer.from(release.envelope).toString('base64'), Buffer.from(release.key).toString('base64')]
     const install = async (method: 'download' | 'upload', source: string) => {
-      const ran = await bootstrap(target, 'worker-install', [method, ...signed, source, ...trust], signal, {
+      const asked = method === 'download' && base !== undefined ? [base.sha256, String(base.bytes), String(base.unpackedBytes)] : signed
+      const total = method === 'download' && base !== undefined ? base.totalBytes : release.bytes
+      const ran = await bootstrap(target, 'worker-install', [method, ...asked, source, ...trust], signal, {
         timeout: 15 * 60_000,
         event: (one) => {
+          // The base's own progress counts toward the whole download's.
           if (one.step === 'get' && typeof one.bytes === 'number' && typeof one.totalBytes === 'number')
-            set({ progress: { bytes: one.bytes, total: one.totalBytes } })
+            set({ progress: { bytes: one.bytes, total: Math.max(one.totalBytes, total) } })
         },
       })
       const key = ran.events.find((one) => one.step === 'key' && one.state === 'done')
@@ -364,7 +370,7 @@ export const workerSetups = (
     }
     try {
       say(`Release ${release.version}: downloading on the machine`)
-      return await install('download', release.url)
+      return await install('download', base?.url ?? release.url)
     } catch (error) {
       if (!(error instanceof Stopped) || error.code !== 'CannotDownload') throw error
     }

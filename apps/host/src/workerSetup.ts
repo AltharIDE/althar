@@ -21,11 +21,13 @@ import { workerCodeOf } from '@althar/runtime/workerHome'
 import { newKey } from '@althar/transport-node'
 import { Effect } from 'effect'
 
+import { HostError } from './errors'
 import { HOST_VERSION } from './version'
 import { privateDirectory, readPrivate, writePrivate } from './privateFiles'
 import { authenticateRelease, verifyRelease } from './updates/release'
 import { downloadRelease, getUpdateBytes } from './updates/network'
 import { extractRelease } from './updates/archive'
+import { completeRelease, type Completed } from './updates/parts'
 import { checkHere, checkWorker, linkShipped, shippedSandbox, workerPath, type CheckSystem } from './workerCheck'
 import { installTools } from './workerTools'
 
@@ -34,8 +36,10 @@ import { installTools } from './workerTools'
  * any of this. The window's SSH setup runs it on the worker (`bootstrap/ssh.sh`'s `worker-` operations), and a machine
  * without SSH runs `join` with a one-time code. Each prints JSON lines the window reads.
  *
- * - `install --program <release>`: points the worker's `current` program at the release it was just given, makes the
- *   worker's own P-256 key where it has none, and says its public key. The key never leaves the worker.
+ * - `install --program <release>`: makes the release it was just given whole where it came as its base (its agents'
+ *   own programs, its parts, lent from a release already here or downloaded: updates/parts.ts), points the worker's
+ *   `current` program at it, makes the worker's own P-256 key where it has none, and says its public key. The key never
+ *   leaves the worker.
  * - `enroll --grant <base64url>`: what the home gave once it signed that key, written to the worker's folder; its
  *   agents, from the release (the ACP adapters and the agents' own programs ship in it); and its services, started.
  * - `join --code <code>`: a code's way to the same, asking the home itself.
@@ -43,7 +47,8 @@ import { installTools } from './workerTools'
  * - `sign-in --agent <id> --way <browser|device>`: the agent's own sign-in, as Althar runs it on a home, its steps
  *   said as JSON lines; a code pasted back comes in on stdin.
  * - `update`: its timer's, hourly: a newer signed worker release, from where the home's come from, verified, unpacked
- *   and switched to while the worker runs no task, and the worker started again on it; and its check again.
+ *   and switched to while the worker runs no task, and the worker started again on it; and its check again. A release in
+ *   parts comes as its base and only the parts the release it runs doesn't have.
  * - `check`: whether its agents' sandbox starts, its tools, and each signed-in agent started once, which says its
  *   models (workerCheck.ts); kept where the worker reads it with its heartbeats. Setup ends with it.
  * - `sandbox`: what only root may do to let the sandbox start (newer Ubuntu's AppArmor rule for bubblewrap), with
@@ -245,7 +250,7 @@ const pointAt = async (program: string, release: string) => {
   await fs.rename(link, join(program, 'current'))
 }
 
-export const install = async (releaseFolder: string, out: (text: string) => void) => {
+export const install = async (releaseFolder: string, out: (text: string) => void, fetcher: typeof fetch = fetch) => {
   const folder = workerFolder()
   const program = programFolder()
   const release = resolve(releaseFolder)
@@ -253,6 +258,7 @@ export const install = async (releaseFolder: string, out: (text: string) => void
   await fs.access(join(release, 'althar-worker'), fs.constants.X_OK).catch(() => {
     throw failed('NoWorker', 'This release carries no worker.')
   })
+  await completeInstalled(release, out, fetcher)
   await privateDirectory(folder, true)
   await pointAt(program, release)
   await writePrivate(join(folder, 'release'), `${HOST_VERSION}\n`, true)
@@ -549,13 +555,28 @@ export const update = async (out: (text: string) => void, fetcher: typeof fetch 
     return
   }
   if (await busy()) return say(out, { step: 'update', state: 'waiting', version: verified.manifest.version })
-  const target = join(program, `bundle-${verified.manifest.archive.sha256}`)
+  // A release in parts comes as its base, and only those of its parts no release here has already.
+  const parts = verified.manifest.parts
+  const first = parts?.base ?? {
+    ...verified.manifest.archive,
+    files: verified.manifest.files,
+    unpackedBytes: verified.manifest.unpackedBytes,
+  }
+  const target = join(program, `bundle-${first.sha256}`)
   const scratch = join(program, `.update-${process.pid}`)
   await fs.rm(scratch, { recursive: true, force: true })
   await privateDirectory(scratch, true)
+  let completed: Completed | undefined
   try {
-    await downloadRelease(verified.manifest.archive, join(scratch, 'release.tar.gz'), fetcher)
-    await extractRelease(join(scratch, 'release.tar.gz'), join(scratch, 'release'), verified.manifest)
+    await downloadRelease(first, join(scratch, 'release.tar.gz'), fetcher)
+    await extractRelease(join(scratch, 'release.tar.gz'), join(scratch, 'release'), first)
+    await fs.rm(join(scratch, 'release.tar.gz'))
+    if (parts !== undefined)
+      completed = await completeRelease(join(scratch, 'release'), parts.of, {
+        donors: await releasesHere(program, current),
+        scratch,
+        fetcher,
+      })
     await fs.writeFile(join(scratch, 'release', '.manifest'), bytes, { mode: 0o600 })
     await fs.writeFile(join(scratch, 'release', '.release-key'), `${keys[0]}\n`, { mode: 0o600 })
     await fs.rm(target, { recursive: true, force: true })
@@ -576,7 +597,61 @@ export const update = async (out: (text: string) => void, fetcher: typeof fetch 
   for (const entry of await fs.readdir(program))
     if (entry.startsWith('bundle-') && entry !== basename(target) && entry !== basename(current))
       await fs.rm(join(program, entry), { recursive: true, force: true })
-  say(out, { step: 'update', state: 'done', version: verified.manifest.version })
+  say(out, {
+    step: 'update',
+    state: 'done',
+    version: verified.manifest.version,
+    ...(completed === undefined ? {} : { lent: completed.lent, downloaded: completed.downloaded }),
+  })
+}
+
+/** The releases on this computer a part may be lent from: the one it runs first, then the rest. */
+const releasesHere = async (program: string, current?: string) => {
+  const others = (await fs.readdir(program).catch(() => [] as string[]))
+    .filter((entry) => entry.startsWith('bundle-'))
+    .map((entry) => join(program, entry))
+    .filter((path) => path !== current)
+  return current === undefined ? others : [current, ...others]
+}
+
+/**
+ * A release the bootstrap unpacked from its base (`bundle-<base>`), made whole: each of its parts lent from a release
+ * already here or downloaded, said as the download's progress, from the base's bytes on. A whole release, or one with no
+ * signed manifest beside it, is left as it is.
+ */
+const completeInstalled = async (release: string, out: (text: string) => void, fetcher: typeof fetch) => {
+  const [manifest, key] = await Promise.all([
+    fs.readFile(join(release, '.manifest')).catch(() => undefined),
+    fs.readFile(join(release, '.release-key'), 'utf8').catch(() => undefined),
+  ])
+  if (manifest === undefined || key === undefined) return
+  const parts = authenticateRelease(manifest, [key.trim()], process.arch === 'arm64' ? 'arm64' : 'x64').manifest.parts
+  if (parts === undefined || basename(release) !== `bundle-${parts.base.sha256}`) return
+  const total = parts.of.reduce((sum, part) => sum + part.bytes, parts.base.bytes)
+  const scratch = join(dirname(release), `.install-${process.pid}`)
+  await fs.rm(scratch, { recursive: true, force: true })
+  await privateDirectory(scratch, true)
+  let said = 0
+  try {
+    await completeRelease(release, parts.of, {
+      donors: (await releasesHere(dirname(release))).filter((path) => path !== release),
+      scratch,
+      fetcher,
+      // At most once a second: the window shows it as the download's progress.
+      progress: (bytes) => {
+        if (Date.now() - said < 1000) return
+        said = Date.now()
+        say(out, { step: 'get', state: 'progress', bytes: parts.base.bytes + bytes, totalBytes: total })
+      },
+    })
+  } catch (error) {
+    // Where it can't download them, the window sends the whole release from its own computer instead.
+    if (error instanceof HostError && error.code === 'UpdateUnavailable') throw failed('CannotDownload', error.message)
+    throw error
+  } finally {
+    await fs.rm(scratch, { recursive: true, force: true })
+  }
+  say(out, { step: 'get', state: 'done', bytes: total, totalBytes: total })
 }
 
 const latestManifest = async (fetcher: typeof fetch) => {
