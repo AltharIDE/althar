@@ -45,6 +45,7 @@ import {
   StartedBy,
   TaskKind,
   TaskStatus,
+  taskStatusText,
   Thumbs,
   trackOf as trackItems,
   type ChangeMarkTone,
@@ -135,14 +136,7 @@ export const text = {
   /** A round of work after its plan, in place of Implement, as the person asked its lead for more. */
   followUp: 'Follow-up',
   conversation: 'Conversation',
-  status: {
-    [TaskStatus.Running]: 'Running',
-    [TaskStatus.Yours]: 'Waiting on you',
-    [TaskStatus.Done]: 'Done',
-    [TaskStatus.Paused]: 'Paused',
-    [TaskStatus.Queued]: 'Waiting',
-    [TaskStatus.Stopped]: 'Stopped',
-  } satisfies Record<TaskStatus, string>,
+  status: taskStatusText,
   /** Why a stopped task's lead stopped, in a card's words, where something says; else the card says nothing more. */
   stoppedBy: stepText.stoppedBy,
   carryOn: 'Resume',

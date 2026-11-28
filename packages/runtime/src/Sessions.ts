@@ -2,13 +2,7 @@ import { type GoalLead, endGoalRound, goalLaunchChoice, pauseGoal, runnableGoal 
 import { type MessageSender, type SentCanvasComment, type UndoTurnResult, workerName, workerNameOf } from '@althar/contracts'
 import { type CommandEnvelope, Ids, type ProjectId, newId } from '@althar/domain'
 import { Commands, bumpRevision } from '@althar/persistence-sqlite'
-import {
-  type AgentExited,
-  AgentRequestFailed,
-  type PermissionDecision,
-  type PermissionRequest,
-  type SessionEvent,
-} from '@althar/provider-adapters'
+import type { AgentExited, AgentRequestFailed, PermissionDecision, PermissionRequest, SessionEvent } from '@althar/provider-adapters'
 import { Cause, Clock, Context, Deferred, Duration, Effect, Fiber, Layer, Option, Queue, Schema, Scope } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
@@ -16,7 +10,7 @@ import type { Accepting } from './admission'
 import { syncIo } from './agentTools'
 import { Artifacts } from './Artifacts'
 import { bringBackFor } from './bringBack'
-import { keepComments } from './Canvases'
+import { keepComments } from './canvasComments'
 import { touchTask } from './cards'
 import { coordinatorRow, forgetItems } from './chatView'
 import { COMPACT } from './compact'
@@ -108,27 +102,7 @@ import { ToolServer } from './ToolServer'
 import { canUndoTask, recoverTurnUndo, undoConversation, undoTarget } from './turnUndo'
 import { agentSaid, lostWords, startedAfreshWords, summarize, words } from './words'
 import { taskWorker } from './workerExecution'
-import { holdOn, holdWords, WORKER_WAIT, WorkerTaken } from './workerWait'
-
-export { COMPACT } from './compact'
-export {
-  AcceptedInput,
-  DICTATED,
-  type Disposition,
-  INTERRUPTED,
-  OTHER_TASKS,
-  StartTimedOut,
-  agentLost,
-  asTold,
-  compactedWords,
-  errorClassOf,
-  heldFor,
-  onlyReads,
-  passedOn,
-  promptFor,
-  sentWithWords,
-  upFrontSaid,
-} from './sessionState'
+import { holdOn, holdWords, WORKER_WAIT, type WorkerTaken } from './workerWait'
 
 /** A switch or a fresh session under way on a thread, and what the person picked for it meanwhile (`handovers`). */
 interface Handing {

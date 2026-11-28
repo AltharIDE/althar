@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import { ApiError, MAX_PREVIEW_SOCKET_CHUNK } from '@althar/contracts'
-import { Effect, Scope, Stream } from 'effect'
+import { Effect, type Scope, Stream } from 'effect'
 
 const MAX_SOCKETS = 8
 const CLAIM_WITHIN = 5_000

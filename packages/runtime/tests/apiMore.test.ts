@@ -17,7 +17,8 @@ import { Context, Deferred, Duration, Effect, Fiber, Layer, Stream } from 'effec
 import { RpcClient } from 'effect/rpc'
 import { until } from '@althar/testing/effect'
 
-import { connection, services, text } from '../src/Api'
+import { connection, services } from '../src/Api'
+import { text } from '../src/api/plans'
 import { type AgentEntry, Agents, type RuntimeOptions } from '../src/Config'
 import { ClientIdentities } from '../src/ClientIdentities'
 import { Instance } from '../src/Instance'

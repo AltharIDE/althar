@@ -1,10 +1,12 @@
 /*
  * The words for the vocabularies that more than one component offers as a
- * choice: the project's rules, the plan's last step, a review's reach. One
- * table each, so a setting reads the same wherever it is changed. English
- * defaults, like every component's `text`; a consumer passes its own.
+ * choice: the project's rules, the plan's last step, a review's reach; and
+ * for those more than one shows: where a task stands, and the board's lanes.
+ * One table each, so a setting reads the same wherever it is changed, and a
+ * task the same on every card. English defaults, like every component's
+ * `text`; a consumer passes its own.
  */
-import { BlockerStands, FindingsReach, LimitPolicy, PermissionPolicy, RepositoryRole, TaskEnd } from './vocabulary'
+import { BlockerStands, BoardLane, FindingsReach, LimitPolicy, PermissionPolicy, RepositoryRole, TaskEnd, TaskStatus } from './vocabulary'
 
 export interface ChoiceWords {
   title: string
@@ -76,4 +78,32 @@ export const blockerStandsText: Record<BlockerStands, string> = {
   [BlockerStands.Review]: 'In review',
   [BlockerStands.Merged]: 'Merged',
   [BlockerStands.Abandoned]: 'Abandoned',
+}
+
+/**
+ * Where a task stands, in a word, as its card says it (docs/glossary.md): Needs you, never Waiting on you, which names a
+ * stuck lead's call alone. Every card reads it here, the board's, the coordinator's thread's and the kit's, and lint
+ * keeps it so (lint/words.js); one that says a status differently spreads it, and names the word it says instead.
+ */
+export const taskStatusText: Record<TaskStatus, string> = {
+  [TaskStatus.Running]: 'Running',
+  [TaskStatus.Yours]: 'Needs you',
+  [TaskStatus.Done]: 'Done',
+  [TaskStatus.Paused]: 'Paused',
+  [TaskStatus.Queued]: 'Waiting',
+  [TaskStatus.Stopped]: 'Stopped',
+}
+
+/**
+ * Stopped, on the kit's own cards, says whose stop it was, as `TaskStatus.Stopped` is yours; the app's say Stopped, and
+ * who stopped it under the title.
+ */
+export const stoppedByYou = `${taskStatusText[TaskStatus.Stopped]} by you`
+
+/** The board's lanes by name. Running and Needs you are the words of the tasks in them. */
+export const boardLaneText: Record<BoardLane, string> = {
+  [BoardLane.Next]: 'Up next',
+  [BoardLane.Running]: taskStatusText[TaskStatus.Running],
+  [BoardLane.Yours]: taskStatusText[TaskStatus.Yours],
+  [BoardLane.Settled]: 'Settled',
 }

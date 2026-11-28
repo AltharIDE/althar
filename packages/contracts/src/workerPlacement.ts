@@ -1,4 +1,5 @@
-import type { PlanStep, ProjectWorker, ToolNeed, WorkerPlanRequirements, WorksIn } from './Api'
+import type { PlanStep, WorkerPlanRequirements, WorksIn } from './api/shared'
+import type { ProjectWorker, ToolNeed } from './api/workers'
 
 type Lead = Pick<PlanStep, 'key' | 'agentId' | 'skipped'> & Partial<Pick<PlanStep, 'model'>>
 

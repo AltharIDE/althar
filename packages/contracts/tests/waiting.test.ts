@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ChangeSummary } from '../src/Api'
+import type { ChangeSummary } from '../src/api/shared'
 import {
   blockerAbandoned,
   inMergeQueue,

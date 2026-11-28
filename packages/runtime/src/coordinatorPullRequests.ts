@@ -12,7 +12,8 @@ import { forkOf } from './forks'
 import { namedRemotes } from './git'
 import { Instance } from './Instance'
 import { checksOf, nameOf, sameDescription, signed, titleWords, withDescribed } from './pullRequestWords'
-import { type ToolAccess, ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
+import type { ToolAccess } from './ToolServer'
 
 /*
  * What the coordinator does on the code host to the project's pull requests

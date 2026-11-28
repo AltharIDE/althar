@@ -5,11 +5,11 @@ import type { Evidence, ShownPicture } from '@althar/contracts'
 import { cleanUp } from '@althar/provider-adapters'
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { pictureType } from '@althar/contracts'
 
 import { Artifacts } from './Artifacts'
 import { inside, keepPicture, type HandedPlace, type KeptPicture, PICTURE_KEPT, picturesOf } from './handed'
-import { pictureType } from './pictures'
-import { ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 
 /*
  * What a lead shows of its work when it finishes a step: evidence that the

@@ -2,7 +2,7 @@ import type { MergeRules } from '@althar/connectors'
 import type { ChangeSummary, ChecksSummary } from '@althar/contracts'
 import { assert, describe, it } from '@effect/vitest'
 
-import { changeOf } from '../src/Queries'
+import { changeOf } from '../src/changeSnapshot'
 import { checksNeedOf, heldBack, mergeNeedsOf, withPushed } from '../src/mergeNeeds'
 import { isMergeable } from '../src/needsYou'
 

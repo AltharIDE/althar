@@ -1,5 +1,5 @@
 import type { PlanStep, TaskStopped } from '@althar/contracts'
-import { type TrackItem, trackOf } from '@althar/ui'
+import { TaskStatus, taskStatusText, type TrackItem, trackOf } from '@althar/ui'
 
 /*
  * A task's steps as its card and its header show them: the plan's steps,
@@ -32,7 +32,7 @@ export const stepText = {
   /** Its Ship past its push, its step still the opening of its pull request: the stop it is at, as Ship's button says it. */
   shipAt: { ready: 'Marking ready', merge: 'Merges once checks pass' } satisfies Record<'ready' | 'merge', string>,
   /** Stopped, no agent on it, as its card and its header say it: by what stopped its lead, where something says. */
-  stopped: 'Stopped',
+  stopped: taskStatusText[TaskStatus.Stopped],
   /** Stopped with its pull request ready to merge as it is: the word, and that it can be accepted all the same. */
   stoppedMergeable: 'Stopped, ready to merge',
   stoppedBy: {

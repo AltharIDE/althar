@@ -9,7 +9,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Cause, Deferred, Duration, Effect, Fiber, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { ActionNotPerformed } from '../src/toolErrors'
+import { ActionNotPerformed, ToolRefused } from '../src/toolErrors'
 import { Live } from '../src/Live'
 import { postCard } from '../src/cards'
 import { Coordinator } from '../src/Coordinator'
@@ -21,7 +21,7 @@ import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { addItem } from '../src/threads'
-import { ToolRefused, ToolServer, type ToolAccess } from '../src/ToolServer'
+import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { callTool, callToolAtOnce, repository, runtime, task, turns, until } from './support'
 
 /** Defer background sweeps in tests that call the reminder or merge-line sweep directly. */

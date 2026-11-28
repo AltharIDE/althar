@@ -26,6 +26,7 @@ const status = yield* client.Status({})
 - **`Api`** holds every call: status and sign-in, projects, tasks, a task's thread a page at a time (`GetThread`) and one of its items (`GetThreadItem`), sessions (start, switch, model, interrupt, stop), sending to a thread, answering a call, the coordinator's thread (`GetCoordinator`) with each task's card, a task's plan (`StartTask` for one the person plans, and `StartPlan`, `HoldPlan`, `ChangePlan`, and `ChangeTeam` for one that has begun, and `HoldDraft` for one the coordinator is still drafting), answering a step that needs the person (`AnswerStuck`), and `Watch`, the stream of what changes after a cursor.
 - **Commands** each take a `commandId` the client makes (`cmd_` and 32 hex digits); sending the same one again is a safe retry.
 - **`ApiError`** is the one error a call fails with: the runtime's own error tag as `reason`, and a message a person can read.
+- **Clients of other releases read a newer home's answers.** A union in an answer that grows is open on decode (`open.ts`): what a client doesn't know takes a fallback, or is left out where it can't be shown. Encoding stays strict.
 - **`serverProtocol` and `clientProtocol`** run Effect's RPC over any port, as a worker would: the server says it is ready, and ends when the client closes or its port does.
 
 ## Work on it
@@ -37,6 +38,7 @@ From `packages/contracts`:
 | `bun run check` | Format, type-aware lint and type checks |
 | `bun run test` | The schemas, and a server and a client over a `MessageChannel`: calls, errors, a stream, and ending when either side goes |
 | `bun run test:coverage` | The same, with the coverage gate |
+| `bun run snapshot` | Writes `api.schema.json`, the wire as JSON Schema, from the contract: commit it with a change to a call |
 | `bun run verify` | Check and coverage, as CI runs them |
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the rules this package follows.

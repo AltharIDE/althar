@@ -17,8 +17,6 @@ import { change, fact, timestamp } from './records'
  * note keeps its row, so what it said stays on the record.
  */
 
-export { NOTE_LENGTH }
-
 /** How many notes a project keeps at once, so every brief that holds them stays short. */
 export const NOTES_KEPT = 40
 

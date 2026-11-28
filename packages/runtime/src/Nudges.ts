@@ -1,4 +1,5 @@
 import {
+  type AttentionEvent,
   type NudgeKind,
   kindWords,
   plainTitle,
@@ -13,11 +14,12 @@ import { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { field, text } from './changeSnapshot'
 import { Agents } from './Config'
 import { outStep } from './Limits'
-import { field, Queries, stuckOf, text } from './Queries'
-import { programOf } from './rules'
+import { Queries, stuckOf } from './Queries'
 import { Sessions } from './Sessions'
+import { programOf } from './shellCommands'
 
 /*
  * What reaches the person outside the window, for work that doesn't need
@@ -40,8 +42,7 @@ import { Sessions } from './Sessions'
 /** How long changes are gathered, so a burst is read once. */
 const GATHER = Duration.millis(250)
 
-export type { NudgeKind } from '@althar/contracts'
-export type NudgeEvent = import('@althar/contracts').AttentionEvent
+export type NudgeEvent = AttentionEvent
 
 /** What a step that needs the person is called in a nudge. */
 const STEPS: Readonly<Record<StuckStep['step'], string>> = {

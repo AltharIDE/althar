@@ -1,4 +1,4 @@
-import type { Evidence, GalleryUpdate, Picture } from './Api'
+import type { Evidence, GalleryUpdate, Picture } from './api/shared'
 
 /*
  * A task's visual collection: new handoffs patch views by stable identity.

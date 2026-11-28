@@ -10,7 +10,7 @@
     "build": "vp build --config vite.node.config.ts && vp build --config vite.preload.config.ts && vp build --config vite.overlay.config.ts && vp build --config vite.ground.config.ts && vp build --config vite.chip.config.ts && vp build && vp build --config vite.edge.config.ts",
     "build:package": "vp build --config vite.node.config.ts --mode package && vp build --config vite.preload.config.ts && vp build --config vite.overlay.config.ts && vp build --config vite.ground.config.ts && vp build --config vite.chip.config.ts && vp build && vp build --config vite.edge.config.ts",
     "start": "electron .",
-    "measure:startup": "bun run build && bun build scripts/measure-startup.ts --target=node --external=@playwright/test --external=electron --outfile=test-results/measure-startup.mjs && node test-results/measure-startup.mjs > test-results/startup-measurements.jsonl",
+    "measure:startup": "bun run build && vp build --config scripts/measure-startup.config.ts && node test-results/measure-startup/measure-startup.mjs > test-results/startup-measurements.jsonl",
     "measure:long-thread": "bun run build && bun build scripts/measure-long-thread.ts --target=node --external=@playwright/test --external=electron --outfile=test-results/measure-long-thread.mjs && node test-results/measure-long-thread.mjs",
     "dev": "bun run build && electron .",
     "check": "vp check",

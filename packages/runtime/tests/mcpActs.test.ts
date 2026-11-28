@@ -3,7 +3,8 @@ import { assert, describe, it } from '@effect/vitest'
 
 import { irreversibleOf } from '../src/irreversible'
 import { mcpActOf } from '../src/mcpActs'
-import { decide, MVP_RULES, type RuleContext } from '../src/rules'
+import { MVP_RULES, type RuleContext } from '../src/ruleContext'
+import { decide } from '../src/rules'
 
 const context: RuleContext = { worktree: '/work/althar/runs', defaultBranch: 'main', taskBranch: 'althar/runs' }
 const everything: RuleContext = { ...context, project: { ...MVP_RULES, mode: 'allow' } }

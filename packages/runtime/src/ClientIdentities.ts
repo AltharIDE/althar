@@ -10,7 +10,7 @@ import {
   ClientName,
   ClientPublicKey,
   ClientSignature,
-  RegisteredClient,
+  type RegisteredClient,
   clientChallengeMessage,
 } from '@althar/contracts'
 import { Ids, newId, now } from '@althar/domain'

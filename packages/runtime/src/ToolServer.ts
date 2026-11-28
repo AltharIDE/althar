@@ -10,12 +10,11 @@ import { Context, Effect, Exit, Layer } from 'effect'
 
 import { Errands, type AskedAction, type TurnWord } from './Errands'
 import { errandTools } from './errandTools'
-import { ToolRefused } from './toolErrors'
+import type { ToolRefused } from './toolErrors'
 import { refusalWords } from './toolRefusal'
 import { redactCredentials } from './diagnostics'
 import { singleTypes } from './toolSchemas'
 import { workerMcpMounts, WORKER_MCP_PATH } from './workerMcp'
-export { ActionNotPerformed, ToolRefused } from './toolErrors'
 
 /*
  * Althar's tools, served to agents over MCP (docs/architecture/04): how the

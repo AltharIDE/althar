@@ -4,7 +4,7 @@ import { Effect, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { change, fact } from './records'
-import type { ProjectRuleSet } from './rules'
+import type { ProjectRuleSet } from './ruleContext'
 
 /*
  * What every part knows of an automation's run (docs/plans/automations.md):

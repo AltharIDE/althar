@@ -56,7 +56,7 @@ export const WithEffort: Story = {
 }
 
 /** Something in it waits on you: violet, and the button answers. */
-export const WaitingOnYou: Story = {
+export const NeedsYou: Story = {
   args: {
     task: '431',
     status: TaskStatus.Yours,
@@ -69,6 +69,9 @@ export const WaitingOnYou: Story = {
     at: 4,
   },
 }
+
+/** The app's word for a ready change with something in its way, which its card says in place of Needs you. */
+const NOT_READY = 'Not ready to accept'
 
 /**
  * Its failing checks brought to you by its lead, as nothing the change can fix: violet, it waits on you, in the board's word,
@@ -88,11 +91,11 @@ export const ChecksHandedBack: Story = {
     pr: 'MR !89',
     steps: ['Implement', 'Review'],
     at: 1,
-    text: { status: { ...taskCardText.status, [TaskStatus.Yours]: 'Not ready to accept' } },
+    text: { status: { ...taskCardText.status, [TaskStatus.Yours]: NOT_READY } },
   },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('Not ready to accept')).toBeVisible()
+    await expect(c.getByText(NOT_READY)).toBeVisible()
     await expect(c.queryByRole('button', { name: /Answer/ })).toBeNull()
     await userEvent.click(c.getByRole('button', { name: /Open task/ }))
     await expect(args.onOpen).toHaveBeenCalledWith('433')
@@ -228,7 +231,7 @@ export const Widths: Story = {
   render: (args) => {
     const cards = [
       { ...args, ...Done.args, from: T432.from },
-      { ...args, ...WaitingOnYou.args, from: T432.from, pr: 'Draft PR 1187, after Draft PR 1102 and PR 1090' },
+      { ...args, ...NeedsYou.args, from: T432.from, pr: 'Draft PR 1187, after Draft PR 1102 and PR 1090' },
       { ...args, ...Paused.args },
       { ...args, status: TaskStatus.Queued, now: 'Waiting for a free agent · 2 are busy', started: '1m ago' },
       { ...args, ...Stopped.args },
@@ -274,7 +277,7 @@ export const LongFacts: Story = {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: 320 }}>
         <TaskCard {...args} lead={SONNET} effort="High" from={from} />
         <TaskCard {...args} lead={SONNET} effort="High" from={from} pr="Draft PR 1187" />
-        <TaskCard {...args} {...WaitingOnYou.args} lead={SONNET} from={from} pr="Draft PR 1187" />
+        <TaskCard {...args} {...NeedsYou.args} lead={SONNET} from={from} pr="Draft PR 1187" />
       </div>
     )
   },
@@ -289,7 +292,7 @@ export const AllStates: Story = {
       size="thread"
       cells={[
         { state: 'running', node: <TaskCard {...args} /> },
-        { state: 'waiting on you', node: <TaskCard {...args} {...WaitingOnYou.args} /> },
+        { state: 'needs you', node: <TaskCard {...args} {...NeedsYou.args} /> },
         { state: 'done', node: <TaskCard {...args} {...Done.args} /> },
         { state: 'paused', node: <TaskCard {...args} {...Paused.args} /> },
         { state: 'stopped', node: <TaskCard {...args} {...Stopped.args} /> },

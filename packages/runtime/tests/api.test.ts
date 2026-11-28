@@ -34,7 +34,8 @@ import { SqlClient } from 'effect/sql'
 import { fakeGitHub, install } from '../../skills/tests/support'
 import { ToolServer } from '../src/ToolServer'
 import { thisDevice } from '../src/device'
-import { connection, isInside, services } from '../src/Api'
+import { connection, services } from '../src/Api'
+import { isInside } from '../src/api/launches'
 import {
   ChangedSinceSeen,
   CantMerge,

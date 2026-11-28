@@ -1,0 +1,60 @@
+name: Test durations
+description: >-
+  The test durations post-merge last measured on main, which spread a run's test files between its parts
+  (packages/testing/src/shards.ts): the runtime's parts by sequencer.ts, the end-to-end run's by playwright.config.ts.
+  post-merge.yml uploads them as the artifact test-durations after each run on main, from what its tests took, so no one
+  edits packages/testing/durations.json, which stays as the fallback. Every part of a run must read the same durations,
+  or a file could land in two parts or in none: so a plan job picks the run once (`pick: true`, its output `run`), and
+  each part downloads that run's (`run:`) over the committed file before its tests. A part that can't fails, rather
+  than take another share; an empty `run`, where none was found, keeps the committed file. Needs `actions: read`.
+inputs:
+  pick:
+    description: Only pick the newest post-merge run on main that uploaded durations, as the output `run`.
+    default: 'false'
+    required: false
+  run:
+    description: The post-merge run whose durations to put in packages/testing/durations.json; empty keeps the file.
+    default: ''
+    required: false
+outputs:
+  run:
+    description: The post-merge run picked, or empty when none was found or GitHub couldn't say.
+    value: ${{ steps.pick.outputs.run }}
+runs:
+  using: composite
+  steps:
+    # Unexpired, from main's own runs: a run by hand on a branch measures that branch.
+    - id: pick
+      if: inputs.pick == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        run="$(gh api "repos/$GH_REPO/actions/artifacts?name=test-durations&per_page=30" \
+          --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == "main")][0].workflow_run.id // empty' || true)"
+        if [ -n "$run" ]; then
+          echo "Test durations from post-merge run $run: $GITHUB_SERVER_URL/$GH_REPO/actions/runs/$run"
+        else
+          echo "No test durations from post-merge on main: the parts use packages/testing/durations.json."
+        fi
+        echo "run=$run" >> "$GITHUB_OUTPUT"
+    - if: inputs.pick != 'true' && inputs.run != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        RUN: ${{ inputs.run }}
+      run: |
+        for wait in 5 15 45 0; do
+          rm -rf "$RUNNER_TEMP/durations"
+          if gh run download "$RUN" --name test-durations --dir "$RUNNER_TEMP/durations" \
+            && bun -e 'JSON.parse(await Bun.file(process.argv[1]).text()).platforms.linux' "$RUNNER_TEMP/durations/durations.json" >/dev/null; then
+            cp "$RUNNER_TEMP/durations/durations.json" "$GITHUB_WORKSPACE/packages/testing/durations.json"
+            echo "Test durations from post-merge run $RUN."
+            exit 0
+          fi
+          [ "$wait" = 0 ] || { echo "Couldn't download post-merge run $RUN's test durations: trying again in ${wait}s"; sleep "$wait"; }
+        done
+        echo "::error title=Test durations::Couldn't download post-merge run $RUN's test durations, which the other parts of this run use: this part would take a different share of the files."
+        exit 1

@@ -1,4 +1,4 @@
-import { type CheckoutAnswer, type CheckoutAsk, type CheckoutWait, WorksIn } from '@althar/contracts'
+import type { CheckoutAnswer, CheckoutAsk, CheckoutWait, WorksIn } from '@althar/contracts'
 import { type ActorId, type CommandEnvelope, Ids, type ProjectId, newId } from '@althar/domain'
 import type { Ledger, RevisionConflict, RowNotFound } from '@althar/persistence-sqlite'
 import { type Crypto, Duration, Effect, Option, Queue, type Schema } from 'effect'
@@ -25,18 +25,9 @@ import {
   settledHolding,
   waitMove,
 } from './local'
+import type { PlanParameters, PlanStep, TaskEnd } from './planParameters'
 import { change, fact, timestamp } from './records'
-import {
-  type CheckoutHold,
-  type Place,
-  type PlanParameters,
-  type PlanStep,
-  type RunRow,
-  type Store,
-  type StuckInfo,
-  type TaskEnd,
-  waitingOf,
-} from './runRecords'
+import { type CheckoutHold, type Place, type RunRow, type Store, type StuckInfo, waitingOf } from './runRecords'
 import type { Sessions } from './Sessions'
 import { Setups } from './Setups'
 import { makeTaskPlaces, placesWaiting } from './taskPlaces'

@@ -4,7 +4,7 @@ import { plainTitle } from '@althar/contracts'
 import type { SessionEvent, ToolContent } from '@althar/provider-adapters'
 
 import type { LiveEvent } from './Live'
-import { commandIn } from './rules'
+import { commandIn } from './toolCalls'
 
 /*
  * Whether a turn that hasn't ended is still working, and what to do when it

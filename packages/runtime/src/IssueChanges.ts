@@ -30,10 +30,9 @@ import { movesIssues, Policies } from './Policies'
 import { change, fact, timestamp } from './records'
 import { Sessions } from './Sessions'
 import { addItem, updateItem } from './threads'
-import { POOL, type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
+import { POOL, type Tool, type ToolAccess, ToolServer } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 import { toolRefusalOf } from './toolRefusal'
-
-export type { Wanted } from './issueFields'
 
 /*
  * Changes to issues on the person's trackers (docs/architecture/06,

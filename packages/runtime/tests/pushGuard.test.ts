@@ -6,8 +6,9 @@ import { join } from 'node:path'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { guard, guardEnv, guardHolds, guardStopIn, passGuard } from '../src/pushGuard'
+import { guard, guardEnv, guardHolds, passGuard } from '../src/pushGuard'
 import { gitRunsOf } from '../src/rules'
+import { guardStopIn } from '../src/toolCalls'
 
 /*
  * A lead's git stops what can't be undone from its task (ADR-071), wherever

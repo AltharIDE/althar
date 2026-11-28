@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { Evidence, GalleryUpdate } from '../src/Api'
+import type { Evidence, GalleryUpdate } from '../src/api/shared'
 import { type PictureReport, screenshotsNow, updateScreenshots } from '../src/screenshots'
 
 const shot = (view: string, extra: Partial<Evidence> = {}): Evidence => ({

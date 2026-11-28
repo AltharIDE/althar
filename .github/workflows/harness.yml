@@ -1,9 +1,12 @@
 name: harness
 
-# On a pull request: the checks and unit tests its change reaches (packages/testing/src/select.ts). A ready one that
-# reaches the runtime also reports and gates its whole coverage. Its tests and its measured coverage have separate
-# verdicts. In the merge queue, only the checks and unit tests that both an entry and what landed beneath it reach
-# (queue.yml). Every test on Linux and Windows, and every coverage gate, run after merge, in post-merge.yml.
+# On a pull request: the checks and unit tests its change reaches (packages/testing/src/select.ts). Once it is ready
+# for review, every package it reaches that gates on its coverage measures its whole suite with it: the runtime in four
+# parts and a job that gates the whole, each other package (connectors, contracts, transport-node, domain,
+# persistence-sqlite, provider-adapters, skills and the CLI) in a job of its own, which runs its selected tests too. So a
+# change that lowers a package's coverage fails on its own pull request, not on main after it lands. In the merge queue,
+# only the checks and unit tests that both an entry and what landed beneath it reach (queue.yml). Every test on Linux
+# and Windows, and every coverage gate, run after merge, in post-merge.yml.
 on:
   # From queue.yml, for a pull request in the merge queue.
   workflow_call:
@@ -30,12 +33,15 @@ on:
         'packages/testing/**',
         '.github/actions/flaky/**',
         '.github/actions/electron/**',
+        '.github/actions/durations/**',
         '.github/workflows/harness.yml',
         '.github/scripts/runtime-coverage.py',
         '.github/scripts/test_runtime_coverage.py',
       ]
 
 permissions:
+  # The test durations post-merge measured on main, which spread the runtime's parts (.github/actions/durations).
+  actions: read
   contents: read
   issues: write
 
@@ -57,6 +63,10 @@ jobs:
       any: ${{ steps.plan.outputs.any }}
       # Whether the change reaches the runtime, whose coverage is measured on a ready PR, and again after merge.
       runtime: ${{ steps.plan.outputs.runtime == 'true' || steps.coverage.outputs.changed == 'true' }}
+      # The other packages it reaches that gate on their coverage, measured once it is ready.
+      coverage: ${{ steps.plan.outputs.coverage }}
+      # The post-merge run whose test durations every part of this run spreads its files by.
+      durations: ${{ steps.durations.outputs.run }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -86,9 +96,13 @@ jobs:
           path: ${{ runner.temp }}/queue
       - id: plan
         env:
-          RUNTIME_COVERAGE: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true }}
+          COVERAGE: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true }}
           QUEUE_ENTRIES: ${{ github.event_name == 'merge_group' && format('{0}/queue/entries.json', runner.temp) || '' }}
         run: bun packages/testing/src/select.ts plan harness "$RUNNER_TEMP/changed"
+      - id: durations
+        uses: ./.github/actions/durations
+        with:
+          pick: 'true'
 
   # Each job's packages one after another, every one run even when one before it fails, so a run says all that broke:
   # the packages besides the runtime in one (each takes under a minute, and a job of its own mostly waits for a machine
@@ -115,6 +129,11 @@ jobs:
       - uses: ./.github/actions/electron
         with:
           binary: 'false'
+      # A part of the runtime takes its share by the durations every part reads (packages/testing/src/sequencer.ts).
+      - if: contains(toJSON(matrix), '"shard"')
+        uses: ./.github/actions/durations
+        with:
+          run: ${{ needs.plan.outputs.durations }}
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
       - env:
@@ -124,17 +143,21 @@ jobs:
       - if: always()
         uses: ./.github/actions/flaky
 
-  # Coverage gates on the pull request, and after merge (post-merge.yml), not in the queue: two changes that each
-  # hold their coverage don't make a measurement worth sending one of them back for.
-  client-coverage:
-    name: client coverage (${{ matrix.package }})
-    if: github.event_name == 'pull_request'
+  # Each other package the change reaches that gates on its coverage, its whole suite with its gate, as post-merge.yml
+  # runs it, on a ready pull request: about a minute's tests each, on a machine of its own. Its selected tests run here,
+  # not in verify (select.ts), so a failing test still fails this job. Not in the queue: two changes that each hold
+  # their coverage don't make a measurement worth sending one of them back for, and post-merge.yml measures it again.
+  package-coverage:
+    name: coverage (${{ matrix.package }})
+    needs: plan
+    if: github.event_name == 'pull_request' && needs.plan.outputs.coverage != '' && needs.plan.outputs.coverage != '[]'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # A few times a package's usual run, so a hang fails here, not at the limit.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        package: [packages/transport-node, apps/cli]
+        package: ${{ fromJSON(needs.plan.outputs.coverage) }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -146,9 +169,14 @@ jobs:
       - uses: ./.github/actions/electron
         with:
           binary: 'false'
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
-      - run: bun run test:coverage --maxWorkers=1
+        with:
+          # Measured for coverage: a lapsed test runs here, failing nothing, so what it covers still counts.
+          lapsed: run
+      - run: bun run test:coverage
         working-directory: ${{ matrix.package }}
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
       - if: always()
         uses: ./.github/actions/flaky
 
@@ -179,8 +207,15 @@ jobs:
       - uses: ./.github/actions/electron
         with:
           binary: 'false'
+      # Each part takes its share by the durations every part reads (packages/testing/src/sequencer.ts).
+      - uses: ./.github/actions/durations
+        with:
+          run: ${{ needs.plan.outputs.durations }}
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
+        with:
+          # Measured for coverage: a lapsed test runs here, failing nothing, so what it covers still counts.
+          lapsed: run
       # A part covers only what its own tests reach, so the thresholds wait for the merge.
       - run: >-
           bun run test:coverage --shard=${{ matrix.shard }} --reporter=default --reporter=blob --reporter=@althar/testing/reporter

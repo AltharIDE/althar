@@ -3,8 +3,9 @@ import { agentServers, runsOf, sameServer, type ServerSpec, SYNCED_AGENTS, type 
 import { Duration, Effect, Option, Schema } from 'effect'
 
 import { expandedSpec, FILES, repositoryServerOn, repositoryServersOf, signInOf, syncIo } from './agentTools'
-import { probeServer, type Probed, readHealth } from './mcpHealth'
+import { readHealth } from './mcpHealth'
 import { asCodexWrites, claudeLines, codexLines, mask, openCodeLines } from './mcpLines'
+import { type Probed, probeServer } from './mcpProbe'
 import * as mcp from './mcpSync'
 
 /*

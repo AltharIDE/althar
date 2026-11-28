@@ -1,7 +1,9 @@
 import { Schema } from 'effect'
 import { assert, describe, it } from '@effect/vitest'
 
-import { ProjectWorker, WorkerSelection, type PlanStep } from '../src/Api'
+import { WorkerSelection } from '../src/api/plans'
+import { type PlanStep } from '../src/api/shared'
+import { ProjectWorker } from '../src/api/workers'
 import {
   automaticWorker,
   planUnfitWords,

@@ -1,13 +1,14 @@
 import type { MessageSender, SentCanvasComment } from '@althar/contracts'
 import { createHash } from 'node:crypto'
 
-import { type ActorId, type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/domain'
+import type { ActorId, CommandEnvelope, ProjectId, WorksIn } from '@althar/domain'
 import { type Commands, Ledger } from '@althar/persistence-sqlite'
 import {
   AUTOMATION_DEFAULTS,
   type AutomationDefinition,
   GOAL_LENGTH,
   GOAL_ROUNDS,
+  NOTE_LENGTH,
   Schedule,
   scheduleInLine,
   workerName,
@@ -19,7 +20,7 @@ import { SqlClient } from 'effect/sql'
 
 import { thisDevice } from './device'
 import { Busy } from './Busy'
-import { Connections } from './Connections'
+import type { Connections } from './Connections'
 import { Errands } from './Errands'
 import { postCard, touchCard } from './cards'
 import { Changes } from './Changes'
@@ -29,7 +30,7 @@ import { teamChanges, teamLine } from './teamWords'
 import { armDraftDeadlines, planMade, stillDraft, surfaceDraftAt } from './draftDeadlines'
 import { Live, type LiveEvent } from './Live'
 import { suggestedCoordinator } from './coordinatorChoice'
-import { Accounts } from './Accounts'
+import type { Accounts } from './Accounts'
 import { AutomationRefused, Automations } from './Automations'
 import { localZone } from './slots'
 import { Agents, RuntimeConfig } from './Config'
@@ -45,12 +46,12 @@ import { asideIn, quickIn } from './kinds'
 import { DRAFT_THEN_PRESET, PICK_A_PRESET } from './presetBrief'
 import { presetModels } from './presetModels'
 import { Limits } from './Limits'
-import { ModelFacts } from './ModelFacts'
+import type { ModelFacts } from './ModelFacts'
 import { DRAFTING_MS } from './needsYou'
-import { Installs } from './Installs'
-import { Models } from './Models'
+import type { Installs } from './Installs'
+import type { Models } from './Models'
 import { Plans } from './Plans'
-import { PlanUsage } from './PlanUsage'
+import type { PlanUsage } from './PlanUsage'
 import {
   closePullRequest,
   editPullRequest,
@@ -75,17 +76,20 @@ import { asidesAmong, findTasks, foundWords } from './Search'
 import { changeOf, diffWords, touchedWords } from './otherTasks'
 import { taskFindingsOf } from './taskFindings'
 import { notesSection, projectOverview } from './handover'
-import { dropNote, keepNote, NOTE_LENGTH, NoteRefused, NOTES_KEPT, notesOf, sayNotes } from './notes'
+import { dropNote, keepNote, type NoteRefused, NOTES_KEPT, notesOf, sayNotes } from './notes'
 import { envelope } from './envelope'
 import { fact } from './records'
 import { declinedOf, offerable, reviewOfferOf } from './reviewOffer'
-import { PlanParameters, type PlanStep, Runs, type StuckInfo } from './Runs'
+import { Runs } from './Runs'
+import type { StuckInfo } from './runRecords'
+import { PlanParameters, type PlanStep } from './planParameters'
 import { smallChangeSteps } from './smallChange'
 import { afterMergeNow } from './afterMergeReview'
-import { type Disposition, passedOn, Sessions } from './Sessions'
+import { Sessions } from './Sessions'
+import { type Disposition, passedOn } from './sessionState'
 import type { InputFile } from './sentFiles'
 import type { InputImage } from './sentImages'
-import { SignIns } from './SignIns'
+import type { SignIns } from './SignIns'
 import { alsoPlanned, siblingsOf } from './siblings'
 import { TITLE_LENGTH } from './taskTitle'
 import { Tasks } from './Tasks'
@@ -93,7 +97,8 @@ import { setToward } from './towards'
 import { addItem, transcript } from './threads'
 import { controlGoal } from './threadGoals'
 import { hearsOf, personsWords, quoted, threadsSaying } from './TaskActions'
-import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 import { toolRefusalOf } from './toolRefusal'
 import { whereaboutsOf } from './workerLookup'
 import { describe as describePreset, presetsIn, resetPreset, tunePreset } from './presets'
@@ -140,8 +145,6 @@ const LEAD_STARTING = ` From a task's lead: for work the person asked for that y
  * tools, which it has as its only way to change anything. It starts when you
  * first say something to it, on the agent you last used.
  */
-
-export { TITLE_LENGTH }
 
 /** The coordinator couldn't start on the agent it would use, and the person picks another. */
 export class CoordinatorUnavailable extends Schema.TaggedError<CoordinatorUnavailable>()('CoordinatorUnavailable', {

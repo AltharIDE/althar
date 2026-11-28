@@ -13,6 +13,7 @@ import {
   TaskEnd,
   TaskLaunch,
   TaskStatus,
+  taskStatusText,
   WorksIn,
 } from '@althar/ui'
 import { useQueryClient } from '@tanstack/react-query'
@@ -45,16 +46,12 @@ import s from './Card.module.css'
 /** How long a plan waits before it starts on its own where its card doesn't say: the runtime's countdown unless the person changed it. */
 export const COUNTDOWN = 25
 
+/** A task done, as its card in the coordinator's thread says it: what you asked for there is ready. Its header and the board say Done. */
+const READY = 'Ready'
+
 export const text = {
   label: stepText.label,
-  status: {
-    [TaskStatus.Running]: 'Running',
-    [TaskStatus.Yours]: 'Needs you',
-    [TaskStatus.Done]: 'Ready',
-    [TaskStatus.Paused]: 'Paused',
-    [TaskStatus.Queued]: 'Waiting',
-    [TaskStatus.Stopped]: 'Stopped',
-  } satisfies Record<TaskStatus, string>,
+  status: { ...taskStatusText, [TaskStatus.Done]: READY },
   now: stepText.now,
   /** A small change's card, as Team's dialog entry elsewhere is named. */
   changeTeam: 'Change the team…',

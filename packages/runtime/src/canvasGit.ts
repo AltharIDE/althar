@@ -11,7 +11,7 @@ import type { Connections } from './Connections'
 import { GitFailed } from './errors'
 import { committerIdentity } from './commitIdentity'
 import { addDetachedWorktree, defaultBranch, git, gitOutcome, gitWith, gitWithInput } from './git'
-import { ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 
 export const refuse = (message: string) => new ToolRefused({ message })
 

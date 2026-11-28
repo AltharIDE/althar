@@ -7,8 +7,8 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from './Instance'
+import { recordedOf } from './recordedSetup'
 import { installIn, managerIn, manifestsIn, runOf, scriptsIn } from './runCommand'
-import { recordedOf } from './Setups'
 import { cachesOf, TOOL_PLACES } from './toolPlaces'
 
 /*

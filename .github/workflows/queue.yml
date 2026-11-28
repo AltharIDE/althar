@@ -13,12 +13,17 @@ name: queue
 # changes and what landed beneath it since it branched reach (.github/scripts/queue-entries.py, and queuePlan in
 # packages/testing/src/select.ts), through the same workflows a pull request runs, for the paths the group changes.
 # A test only one of them reaches already passed with nothing of the other in its way. Not the end-to-end run, the
-# coverage gates or Windows: a pull request runs them, and post-merge.yml runs them in full after merge, before any
-# release. When the entries can't be told apart, the queue runs what the whole group changes against main instead.
+# coverage gates or Windows: a pull request runs them, its coverage gates once it is ready (harness.yml), and
+# post-merge.yml runs them in full after merge, before any release. When the entries can't be told apart, the queue runs
+# what the whole group changes against main instead. `numbers`, `measures` and `wire` run on every pull request and
+# every group, whatever they change: two pull requests that each pass alone can still take the same number, raise a
+# count or change the wire against main together.
 #
 # Main's rules require one check, `merge queue`. On a pull request it passes once every one of the pull request's own
-# checks has, on its head, and its migration and ADR numbers are free (`numbers`). In the queue, it passes once every
-# check that ran there did, and each entry's own checks, read again, still say they passed on its head.
+# checks has, on its head, its migration and ADR numbers are free (`numbers`), no count that may only fall has risen
+# (`measures`) and no change to the wire breaks an older client (`wire`). In the queue, it passes once every check that
+# ran there did, `numbers`, `measures` and `wire` among them, and each entry's own checks, read again, still say they
+# passed on its head.
 on:
   pull_request:
     # And when a draft is ready for review, which is when its stress run starts (stress.yml).
@@ -26,12 +31,13 @@ on:
   merge_group:
 
 permissions:
+  # The workflows it calls read the test durations post-merge measured on main (.github/actions/durations), and
+  # harness.yml's coverage job main's measurement from post-merge's runs. That runs on a pull request only, but a called
+  # workflow may ask for no more than its caller gives, or the whole run fails to start.
+  actions: read
   contents: read
   # The workflows it calls file flaky tests as issues (.github/actions/flaky).
   issues: write
-  # harness.yml's coverage job reads main's measurement from post-merge's runs. It runs on a pull request only, but a
-  # called workflow may ask for no more than its caller gives, or the whole run fails to start.
-  actions: read
 
 # A newer push to a pull request replaces its run; a group's build is never cancelled.
 concurrency:
@@ -164,11 +170,65 @@ jobs:
             python3 .github/scripts/numbers.py --base HEAD^1 --pr "$PR"
           fi
 
-  # The one check main's rules require: passes when nothing that ran failed. On a pull request, only `numbers` above
-  # runs.
+  # Counts over the tree that may only fall (.github/measures.json), on every pull request and group whatever they
+  # change, with no install (.github/scripts/measures.py): the runtime's import cycles, json_extract calls, comparisons
+  # of a code host's or an agent's name, tests that sleep on the real clock, and writers of a status. A count above
+  # main's baseline is refused, and so is a baseline raised; one below its baseline is a warning to lower it
+  # (docs/decisions/foundations.md#what-ci-gates).
+  measures:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # On a pull request HEAD is its merge with main, and HEAD^1 is main.
+          fetch-depth: 2
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      # And what the workflows must say for quarantine to keep its word: every job that measures coverage runs its
+      # lapsed tests (packages/testing/src/workflows.ts), with no install.
+      - run: bun packages/testing/src/workflows.ts check
+      - env:
+          BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          python3 -m unittest discover -s .github/scripts -p 'test_measures.py'
+          if [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            git fetch --no-tags --depth=1 origin "$BASE"
+            python3 .github/scripts/measures.py --base FETCH_HEAD
+          else
+            python3 .github/scripts/measures.py --base HEAD^1
+          fi
+
+  # The wire, on every pull request and group whatever they change, with no install (.github/scripts/wire.py): a home,
+  # the desktop and the phone ship apart, so a change to packages/contracts/api.schema.json that a client of main's
+  # contract can't survive is refused unless API_VERSION goes up. That is a call gone or one a socket can't make any
+  # more, a payload that needs more or takes less, and an answer with a member a closed union doesn't have, or a field
+  # it reads left out or changed (docs/decisions/foundations.md#clients-of-another-version).
+  wire:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # On a pull request HEAD is its merge with main, and HEAD^1 is main.
+          fetch-depth: 2
+      - env:
+          BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          python3 -m unittest discover -s .github/scripts -p 'test_wire.py'
+          if [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            git fetch --no-tags --depth=1 origin "$BASE"
+            python3 .github/scripts/wire.py --base FETCH_HEAD
+          else
+            python3 .github/scripts/wire.py --base HEAD^1
+          fi
+
+  # The one check main's rules require: passes when nothing that ran failed and each pull request's own checks passed on
+  # its head. On a pull request, only `numbers`, `measures` and `wire` above run here.
   merge-queue:
     name: merge queue
-    needs: [changes, numbers, desktop, harness, host, ui, site, brand, report, worker]
+    needs: [changes, numbers, measures, wire, desktop, harness, host, ui, site, brand, report, worker]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     # Long enough to wait out a pull request's own checks still going, whose longest jobs take 75 minutes at most.

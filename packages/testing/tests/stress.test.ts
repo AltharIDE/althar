@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test'
 
-import { moreRuns, plan } from '../src/stress'
+import { graph } from '../src/select'
+import { moreRuns, plan, REACHED } from '../src/stress'
 
 describe('the stress plan', () => {
   it('repeats CLI and Node transport tests on Windows while keeping the Linux-only host on Linux', () => {
@@ -74,5 +75,62 @@ describe('the stress plan', () => {
     expect(1 + moreRuns(20, 3000, 2400)).toBe(3)
     expect(1 + moreRuns(3, 220, 900)).toBe(3)
     expect(1 + moreRuns(20, 0, 2400)).toBe(20)
+  })
+
+  it('stresses the tests that import changed source too, nearest first, a few on a pull request and more at night', () => {
+    const files: Record<string, string> = {
+      'packages/runtime/package.json': JSON.stringify({ name: '@althar/runtime' }),
+      'packages/runtime/src/git.ts': 'export const commit = () => {}',
+      'packages/runtime/src/Runtime.ts': "import { commit } from './git'",
+      'packages/runtime/tests/git.test.ts': "import { commit } from '../src/git'",
+      'packages/runtime/tests/real/git.test.ts': "import { commit } from '../../src/git'",
+      ...Object.fromEntries(
+        Array.from({ length: 20 }, (_, index) => [
+          `packages/runtime/tests/run${String(index).padStart(2, '0')}.test.ts`,
+          "import { layer } from '../src/Runtime'",
+        ]),
+      ),
+      'apps/desktop/package.json': JSON.stringify({ name: '@althar/desktop' }),
+      'apps/desktop/e2e/home.spec.ts': "import { commit } from '../../../packages/runtime/src/git'",
+    }
+    const known = graph({ files: Object.keys(files), read: (path) => files[path] ?? '' })
+    const changed = ['packages/runtime/src/git.ts', 'packages/runtime/tests/run05.test.ts']
+    const planned = plan(changed, 'pull request', known)
+    // The test that imports it first, then those through the runtime, but not one of real agents, or a spec.
+    expect(planned.reached).toHaveLength(REACHED['pull request'])
+    expect(planned.reached.slice(0, 3)).toEqual([
+      'packages/runtime/tests/git.test.ts',
+      'packages/runtime/tests/run00.test.ts',
+      'packages/runtime/tests/run01.test.ts',
+    ])
+    expect(planned.linux.parts).toEqual([
+      { dir: 'packages/runtime', files: ['tests/run05.test.ts', ...planned.reached.map((file) => file.slice('packages/runtime/'.length))] },
+    ])
+    expect(planned.linux.runs).toBe(3)
+    expect(planned.specs.files).toEqual([])
+    expect(plan(changed, 'nightly', known).reached).toHaveLength(REACHED.nightly)
+    // Without the graph, only what changed.
+    expect(plan(changed).reached).toEqual([])
+  })
+
+  it('leaves a test with an open flaky issue out of what a pull request reaches, unless it changed, and not at night', () => {
+    const files: Record<string, string> = {
+      'packages/runtime/package.json': JSON.stringify({ name: '@althar/runtime' }),
+      'packages/runtime/src/git.ts': 'export const commit = () => {}',
+      'packages/runtime/tests/git.test.ts': "import { commit } from '../src/git'",
+      'packages/runtime/tests/push.test.ts': "import { commit } from '../src/git'",
+    }
+    const known = graph({ files: Object.keys(files), read: (path) => files[path] ?? '' })
+    const flaky = new Set(['packages/runtime/tests/git.test.ts'])
+    // A race the change didn't bring would hold its merge queue check: stress quarantines nothing.
+    expect(plan(['packages/runtime/src/git.ts'], 'pull request', known, flaky).reached).toEqual(['packages/runtime/tests/push.test.ts'])
+    // Changed, it is stressed, as its fix must hold here.
+    const fixed = plan(['packages/runtime/src/git.ts', 'packages/runtime/tests/git.test.ts'], 'pull request', known, flaky)
+    expect(fixed.linux.parts).toEqual([{ dir: 'packages/runtime', files: ['tests/git.test.ts', 'tests/push.test.ts'] }])
+    // At night nothing waits on it, so it runs with the rest.
+    expect(plan(['packages/runtime/src/git.ts'], 'nightly', known, flaky).reached).toEqual([
+      'packages/runtime/tests/git.test.ts',
+      'packages/runtime/tests/push.test.ts',
+    ])
   })
 })

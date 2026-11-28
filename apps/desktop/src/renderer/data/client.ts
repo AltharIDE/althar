@@ -63,6 +63,7 @@ import {
   ApiError,
   BACKGROUND,
   type BoardSnapshot,
+  isKnownEvent,
   type HomeSnapshot,
   clientProtocol,
   LANE_HEADER,
@@ -1561,7 +1562,7 @@ export const connect = async (
       if (expected !== undefined) {
         const position = checkedPosition(since, expected.homeId)
         const watching = checkedWatch(
-          { watch: (position) => api.WatchFrom({ position }), snapshot: () => api.ListProjects() },
+          { watch: (position) => Stream.filter(api.WatchFrom({ position }), isKnownEvent), snapshot: () => api.ListProjects() },
           expected.homeId,
           position,
           listener,
@@ -1579,7 +1580,11 @@ export const connect = async (
       const heard = Effect.suspend(() => {
         const whole = wholeAgain()
         return Stream.runForEach(
-          Stream.onStart(api.Watch(cursor === undefined ? { deltas: true } : { since: cursor, deltas: true }), started),
+          // An event of a type a newer home sends, and this window doesn't know, is passed over.
+          Stream.onStart(
+            Stream.filter(api.Watch(cursor === undefined ? { deltas: true } : { since: cursor, deltas: true }), isKnownEvent),
+            started,
+          ),
           (event) =>
             Effect.sync(() => {
               if (event._tag === 'Changed') cursor = event.cursor

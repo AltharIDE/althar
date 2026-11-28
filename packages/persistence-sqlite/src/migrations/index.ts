@@ -1,112 +1,10 @@
+/// <reference types="vite/client" />
+import { readdirSync } from 'node:fs'
+import { createRequire } from 'node:module'
+
 import { SqliteMigrator } from '@effect/sql-sqlite-node'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
-import { statements as clientIdentities } from './0086_client_identities'
-
-import { statements as initial } from './0001_initial'
-import { statements as permissionScopeTurn } from './0002_permission_scope_turn'
-import { statements as threadItems } from './0003_thread_items'
-import { statements as coordinator } from './0004_coordinator'
-import { statements as runPerPlan } from './0005_run_per_plan'
-import { statements as connectors } from './0006_connectors'
-import { statements as models } from './0007_models'
-import { statements as usageLimits } from './0008_usage_limits'
-import { statements as accounts } from './0009_accounts'
-import { statements as projectFolders } from './0010_project_folders'
-import { statements as home } from './0011_home'
-import { statements as withdrawnInput } from './0012_withdrawn_input'
-import { statements as projectChanges } from './0013_project_changes'
-import { statements as modelBlocks } from './0014_model_blocks'
-import { statements as taskRequests } from './0015_task_requests'
-import { statements as settings } from './0016_settings'
-import { statements as artifactImages } from './0017_artifact_images'
-import { statements as questions } from './0018_questions'
-import { statements as runCommands } from './0019_run_commands'
-import { statements as issueDrafts } from './0020_issue_drafts'
-import { statements as inputImages } from './0021_input_images'
-import { statements as connectionCli } from './0022_connection_cli'
-import { statements as worktreeSetup } from './0023_worktree_setup'
-import { statements as conflictResolutions } from './0024_conflict_resolutions'
-import { statements as pushRequests } from './0025_push_requests'
-import { statements as projectNotes } from './0026_project_notes'
-import { statements as agentsAtOnce } from './0027_agents_at_once'
-import { statements as taskSeen } from './0028_task_seen'
-import { statements as reviewDrafts } from './0029_review_drafts'
-import { statements as taskSearch } from './0030_task_search'
-import { statements as branchOnFirstWrite } from './0031_branch_on_first_write'
-import { statements as taskAllowEverything } from './0032_task_allow_everything'
-import { statements as runnables } from './0033_runnables'
-import { statements as dictatedInput } from './0034_dictated_input'
-import { statements as line } from './0035_line'
-import { statements as taskKept } from './0036_task_kept'
-import { statements as attachedChangeSets } from './0037_attached_change_sets'
-import { statements as roundOpeners } from './0038_round_openers'
-import { statements as taskOpened } from './0039_task_opened'
-import { statements as issueChanges } from './0040_issue_changes'
-import { statements as trackerWorkspaces } from './0041_tracker_workspaces'
-import { statements as automations } from './0042_automations'
-import { statements as planUsage } from './0043_plan_usage'
-import { statements as lookupIndexes } from './0044_lookup_indexes'
-import { statements as inputFiles } from './0045_input_files'
-import { statements as shownPictures } from './0046_shown_pictures'
-import { statements as taskRequestInputs } from './0047_task_request_inputs'
-import { statements as threadItemsByInput } from './0048_thread_items_by_input'
-import { statements as decisionKind } from './0049_decision_kind'
-import { statements as moreInks } from './0050_more_inks'
-import { statements as pullRequestPictures } from './0051_pull_request_pictures'
-import { statements as onePressSettles } from './0052_one_press_settles'
-import { statements as recordedSetups } from './0053_recorded_setups'
-import { statements as personsWord } from './0054_persons_word'
-import { statements as upstreamBranches } from './0055_upstream_branches'
-import { statements as usage } from './0056_usage'
-import { statements as issueFields } from './0057_issue_fields'
-import { statements as followedPulls } from './0058_followed_pulls'
-import { statements as taskAsks } from './0059_task_asks'
-import { statements as findingTitles } from './0060_finding_titles'
-import { statements as localTasks } from './0061_local_tasks'
-import { statements as workToward } from './0062_work_toward'
-import { statements as skills } from './0063_skills'
-import { statements as taskParents } from './0064_task_parents'
-import { statements as settingChanges } from './0065_setting_changes'
-import { statements as clearedView } from './0066_cleared_view'
-import { statements as fastLane } from './0067_fast_lane'
-import { statements as reviewsAfterMerge } from './0068_reviews_after_merge'
-import { statements as heldForShip } from './0069_held_for_ship'
-import { statements as turnTimings } from './0070_turn_timings'
-import { statements as mergeReviews } from './0071_merge_reviews'
-import { statements as severalChanges } from './0072_several_changes'
-import { statements as reviewTrust } from './0073_review_trust'
-import { statements as scratchAndPresets } from './0074_scratch_and_presets'
-import { statements as helpers } from './0075_helpers'
-import { statements as changeWaits } from './0076_change_waits'
-import { statements as helperCopies } from './0077_helper_copies'
-import { statements as canvases } from './0078_canvases'
-import { statements as cards } from './0079_cards'
-import { statements as keyReads } from './0080_key_reads'
-import { statements as mergeLineCard } from './0081_merge_line_card'
-import { statements as notedInput } from './0082_noted_input'
-import { statements as externalWaits } from './0083_external_waits'
-import { statements as evidenceGalleries } from './0084_evidence_galleries'
-import { statements as turnUndo } from './0085_turn_undo'
-import { statements as errandWords } from './0087_errand_words'
-import { statements as taskWaits } from './0088_task_waits'
-import { statements as taskWaitsCleared } from './0089_task_waits_cleared'
-import { statements as cardReads } from './0090_card_reads'
-import { statements as clickup } from './0091_clickup'
-import { statements as broughtIn } from './0092_brought_in'
-import { statements as runnableTask } from './0093_runnable_task'
-import { statements as presetTunings } from './0094_preset_tunings'
-import { statements as sessionsByAgent } from './0095_sessions_by_agent'
-import { statements as homeEvents } from './0096_home_events'
-import { statements as finderIndex } from './0097_finder_index'
-import { statements as threadGoals } from './0098_thread_goals'
-import { statements as threadItemDates } from './0099_thread_item_dates'
-import { statements as setupsByThread } from './0100_setups_by_thread'
-import { statements as boundedHomeSearch } from './0101_bounded_home_search'
-import { statements as canvasBoards } from './0102_canvas_boards'
-import { statements as canvasSaves } from './0103_canvas_saves'
-import { statements as artifactChats } from './0104_artifact_chats'
-import { statements as workerSetups } from './0105_worker_setups'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -120,118 +18,40 @@ export const MIGRATIONS_TABLE = 'schema_migrations'
 /** A migration's number, as the migrator records it: 18 for `0018_questions`. */
 export const idOf = (migration: Migration) => Number.parseInt(migration.key, 10)
 
-/**
- * Every migration, in order. Migrations are append-only: once released, a
- * migration never changes. `checksums.ts` records each one, and a test fails
- * if a released migration is edited.
+interface File {
+  readonly statements: ReadonlyArray<string>
+}
+
+/** A migration's file: `0018_questions.ts`. A migration in parts keeps them in a folder of its name, as `0001_initial` does. */
+const NAMED = /^\d{4}_[a-z0-9_]+\.ts$/
+
+/*
+ * Every migration is a file here, found by its name: nothing lists them, so two pull requests that each add one change
+ * different files. Vite reads the folder as it builds the app's runtime, the host and the CLI, and Vitest as it runs.
+ * Code run as it is, without Vite, as Playwright runs the end-to-end specs' helpers, has no `import.meta.glob`: it
+ * reads the folder on the disk instead.
  */
-export const migrations: ReadonlyArray<Migration> = [
-  { key: '0001_initial', statements: initial },
-  { key: '0002_permission_scope_turn', statements: permissionScopeTurn },
-  { key: '0003_thread_items', statements: threadItems },
-  { key: '0004_coordinator', statements: coordinator },
-  { key: '0005_run_per_plan', statements: runPerPlan },
-  { key: '0006_connectors', statements: connectors },
-  { key: '0007_models', statements: models },
-  { key: '0008_usage_limits', statements: usageLimits },
-  { key: '0009_accounts', statements: accounts },
-  { key: '0010_project_folders', statements: projectFolders },
-  { key: '0011_home', statements: home },
-  { key: '0012_withdrawn_input', statements: withdrawnInput },
-  { key: '0013_project_changes', statements: projectChanges },
-  { key: '0014_model_blocks', statements: modelBlocks },
-  { key: '0015_task_requests', statements: taskRequests },
-  { key: '0016_settings', statements: settings },
-  { key: '0017_artifact_images', statements: artifactImages },
-  { key: '0018_questions', statements: questions },
-  { key: '0019_run_commands', statements: runCommands },
-  { key: '0020_issue_drafts', statements: issueDrafts },
-  { key: '0021_input_images', statements: inputImages },
-  { key: '0022_connection_cli', statements: connectionCli },
-  { key: '0023_worktree_setup', statements: worktreeSetup },
-  { key: '0024_conflict_resolutions', statements: conflictResolutions },
-  { key: '0025_push_requests', statements: pushRequests },
-  { key: '0026_project_notes', statements: projectNotes },
-  { key: '0027_agents_at_once', statements: agentsAtOnce },
-  { key: '0028_task_seen', statements: taskSeen },
-  { key: '0029_review_drafts', statements: reviewDrafts },
-  { key: '0030_task_search', statements: taskSearch },
-  { key: '0031_branch_on_first_write', statements: branchOnFirstWrite },
-  { key: '0032_task_allow_everything', statements: taskAllowEverything },
-  { key: '0033_runnables', statements: runnables },
-  { key: '0034_dictated_input', statements: dictatedInput },
-  { key: '0035_line', statements: line },
-  { key: '0036_task_kept', statements: taskKept },
-  { key: '0037_attached_change_sets', statements: attachedChangeSets },
-  { key: '0038_round_openers', statements: roundOpeners },
-  { key: '0039_task_opened', statements: taskOpened },
-  { key: '0040_issue_changes', statements: issueChanges },
-  { key: '0041_tracker_workspaces', statements: trackerWorkspaces },
-  { key: '0042_automations', statements: automations },
-  { key: '0043_plan_usage', statements: planUsage },
-  { key: '0044_lookup_indexes', statements: lookupIndexes },
-  { key: '0045_input_files', statements: inputFiles },
-  { key: '0046_shown_pictures', statements: shownPictures },
-  { key: '0047_task_request_inputs', statements: taskRequestInputs },
-  { key: '0048_thread_items_by_input', statements: threadItemsByInput },
-  { key: '0049_decision_kind', statements: decisionKind },
-  { key: '0050_more_inks', statements: moreInks },
-  { key: '0051_pull_request_pictures', statements: pullRequestPictures },
-  { key: '0052_one_press_settles', statements: onePressSettles },
-  { key: '0053_recorded_setups', statements: recordedSetups },
-  { key: '0054_persons_word', statements: personsWord },
-  { key: '0055_upstream_branches', statements: upstreamBranches },
-  { key: '0056_usage', statements: usage },
-  { key: '0057_issue_fields', statements: issueFields },
-  { key: '0058_followed_pulls', statements: followedPulls },
-  { key: '0059_task_asks', statements: taskAsks },
-  { key: '0060_finding_titles', statements: findingTitles },
-  { key: '0061_local_tasks', statements: localTasks },
-  { key: '0062_work_toward', statements: workToward },
-  { key: '0063_skills', statements: skills },
-  { key: '0064_task_parents', statements: taskParents },
-  { key: '0065_setting_changes', statements: settingChanges },
-  { key: '0066_cleared_view', statements: clearedView },
-  { key: '0067_fast_lane', statements: fastLane },
-  { key: '0068_reviews_after_merge', statements: reviewsAfterMerge },
-  { key: '0069_held_for_ship', statements: heldForShip },
-  { key: '0070_turn_timings', statements: turnTimings },
-  { key: '0071_merge_reviews', statements: mergeReviews },
-  { key: '0072_several_changes', statements: severalChanges },
-  { key: '0073_review_trust', statements: reviewTrust },
-  { key: '0074_scratch_and_presets', statements: scratchAndPresets },
-  { key: '0075_helpers', statements: helpers },
-  { key: '0076_change_waits', statements: changeWaits },
-  { key: '0077_helper_copies', statements: helperCopies },
-  { key: '0078_canvases', statements: canvases },
-  { key: '0079_cards', statements: cards },
-  { key: '0080_key_reads', statements: keyReads },
-  { key: '0081_merge_line_card', statements: mergeLineCard },
-  { key: '0082_noted_input', statements: notedInput },
-  { key: '0083_external_waits', statements: externalWaits },
-  { key: '0084_evidence_galleries', statements: evidenceGalleries },
-  { key: '0085_turn_undo', statements: turnUndo },
-  { key: '0086_client_identities', statements: clientIdentities },
-  { key: '0087_errand_words', statements: errandWords },
-  { key: '0088_task_waits', statements: taskWaits },
-  { key: '0089_task_waits_cleared', statements: taskWaitsCleared },
-  { key: '0090_card_reads', statements: cardReads },
-  { key: '0091_clickup', statements: clickup },
-  { key: '0092_brought_in', statements: broughtIn },
-  { key: '0093_runnable_task', statements: runnableTask },
-  { key: '0094_preset_tunings', statements: presetTunings },
-  { key: '0095_sessions_by_agent', statements: sessionsByAgent },
-  { key: '0096_home_events', statements: homeEvents },
-  { key: '0097_finder_index', statements: finderIndex },
-  { key: '0098_thread_goals', statements: threadGoals },
-  { key: '0099_thread_item_dates', statements: threadItemDates },
-  { key: '0100_setups_by_thread', statements: setupsByThread },
-  { key: '0101_bounded_home_search', statements: boundedHomeSearch },
-  { key: '0102_canvas_boards', statements: canvasBoards },
-  { key: '0103_canvas_saves', statements: canvasSaves },
-  { key: '0104_artifact_chats', statements: artifactChats },
-  { key: '0105_worker_setups', statements: workerSetups },
-]
+const files = (): Record<string, File> => {
+  try {
+    return import.meta.glob<File>('./[0-9][0-9][0-9][0-9]_*.ts', { eager: true })
+  } catch {
+    const here = new URL('./', import.meta.url)
+    const load = createRequire(here)
+    const names = readdirSync(here).filter((name) => NAMED.test(name))
+    // Bundled by something other than Vite, the folder is gone: say so, rather than open a store with no schema.
+    if (names.length === 0) throw new Error(`No migrations in ${here.pathname}: build what runs the store with Vite.`)
+    return Object.fromEntries(names.map((name) => [`./${name}`, load(`./${name}`) as File]))
+  }
+}
+
+/**
+ * Every migration, in the order of its number. Migrations are append-only: once
+ * main has one, it never changes, and CI's `numbers` check refuses a change to
+ * it (.github/scripts/numbers.py).
+ */
+export const migrations: ReadonlyArray<Migration> = Object.entries(files())
+  .map(([path, file]) => ({ key: path.slice('./'.length, -'.ts'.length), statements: file.statements }))
+  .toSorted((a, b) => idOf(a) - idOf(b))
 
 const run = (statements: ReadonlyArray<string>) =>
   Effect.gen(function* () {

@@ -1,6 +1,7 @@
 import { Icon } from '../../foundations/Icon/Icon'
 import { Model, ModelList, type ModelInfo } from '../../primitives/Model/Model'
 import { TaskStatus } from '../../foundations/vocabulary'
+import { stoppedByYou, taskStatusText } from '../../foundations/vocabularyText'
 import { cx } from '../../lib/cx'
 import { StepTrack, trackOf } from '../../primitives/StepTrack/StepTrack'
 import { TaskGlyph } from '../../primitives/TaskGlyph/TaskGlyph'
@@ -25,14 +26,7 @@ export interface WorkCardText {
 }
 
 export const workCardText: WorkCardText = {
-  status: {
-    [TaskStatus.Running]: 'Running',
-    [TaskStatus.Yours]: 'Waiting on you',
-    [TaskStatus.Done]: 'Done',
-    [TaskStatus.Paused]: 'Paused',
-    [TaskStatus.Queued]: 'Waiting',
-    [TaskStatus.Stopped]: 'Stopped by you',
-  },
+  status: { ...taskStatusText, [TaskStatus.Stopped]: stoppedByYou },
   task: (task) => `Task ${task}`,
   of: (step, steps) => `${step} of ${steps}`,
   lead: 'Lead',

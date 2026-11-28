@@ -1,7 +1,7 @@
 import { lstat, readdir, readFile, realpath } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
-import { type CodeHost, ConnectorFailed, type Gate, type Release, type ReleaseUpload, type Run } from '@althar/connectors'
+import type { CodeHost, ConnectorFailed, Gate, Release, ReleaseUpload, Run } from '@althar/connectors'
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 

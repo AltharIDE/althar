@@ -14,7 +14,8 @@ import { Context, Effect, Layer, Schema } from 'effect'
 
 import { Connections } from './Connections'
 import { agentFolderOf } from './sentFiles'
-import { POOL, type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
+import { POOL, type Tool, type ToolAccess, ToolServer } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 
 import {
   connected,

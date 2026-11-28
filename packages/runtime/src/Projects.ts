@@ -15,8 +15,15 @@ import {
   type ThreadId,
   type WorksIn,
 } from '@althar/domain'
-import { bumpRevision, Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
-import { Context, Crypto, Effect, Layer, Option, Schema } from 'effect'
+import {
+  bumpRevision,
+  Commands,
+  type CommandIdReused,
+  type Ledger,
+  type RevisionConflict,
+  type RowNotFound,
+} from '@althar/persistence-sqlite'
+import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { postCard } from './cards'
@@ -32,7 +39,7 @@ import {
   ProjectRefused,
   RepositoriesNeeded,
 } from './errors'
-import { type Fork, forkOf, onRemote, parentRemote } from './forks'
+import { forkOf, onRemote } from './forks'
 import { makeKeyedLock } from './keyedLock'
 import { makeScratch } from './firstWrite'
 import {
@@ -56,8 +63,10 @@ import { Instance } from './Instance'
 import { seedRules } from './Policies'
 import { linkTask } from './automated'
 import { change, fact, timestamp } from './records'
-import { indexTask } from './Search'
-import { recordedOf, setupOf, Setups } from './Setups'
+import { indexTask } from './searchRows'
+import { setupOf, Setups } from './Setups'
+import { recordedOf } from './recordedSetup'
+import { forkAt, startOf } from './startsFrom'
 
 /*
  * Projects and tasks (docs/architecture/01). Opening a folder makes it a
@@ -257,15 +266,6 @@ export interface ProjectRepository {
   readonly branches: ReadonlyArray<string>
 }
 
-/** The fork a repository's clone is here, read from its remotes; none where it has no clone here, or isn't one. */
-const forkAt = (path: string | null): Effect.Effect<Fork | null> =>
-  path === null
-    ? Effect.succeed(null)
-    : namedRemotes(path).pipe(
-        Effect.map(forkOf),
-        Effect.orElseSucceed(() => null),
-      )
-
 /** A slug from a name: lowercase letters, digits and dashes. */
 export const slugify = (name: string, fallback: string) => {
   const slug = name
@@ -290,30 +290,6 @@ export const branchName = (named: string, remotes: ReadonlyArray<string> = []) =
   const plain = named.trim().replace(/^refs\/(heads|remotes\/[^/]+)\//, '')
   return onRemote(plain, remotes)?.branch ?? plain
 }
-
-/**
- * Where a task starts in a repository: the branch it works toward, else its
- * default branch; for a fork whose work goes to the repository it came from,
- * on that repository, its default branch there unless it works toward
- * another.
- */
-export const startOf = (binding: {
-  readonly repository: string
-  readonly base: string | null
-  readonly changeTarget: string | null
-  readonly toward?: string | null
-}) =>
-  Effect.gen(function* () {
-    // From the repository it was forked from, by whatever name the clone has it; one the clone hasn't as a remote, from origin.
-    const upstream =
-      binding.changeTarget === 'upstream' || binding.changeTarget === 'upstream_branch'
-        ? parentRemote(yield* forkAt(binding.repository))
-        : null
-    const toward = binding.toward ?? null
-    return upstream !== null
-      ? { remote: upstream, base: toward ?? (yield* defaultBranch(binding.repository, upstream)) }
-      : { remote: 'origin', base: toward ?? binding.base ?? 'main' }
-  })
 
 /**
  * The branch a task's work goes into in a repository (ADR-093): the one asked

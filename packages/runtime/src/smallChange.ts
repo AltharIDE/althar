@@ -1,6 +1,6 @@
 import type { AfterMergeRule } from '@althar/contracts'
 
-import type { PlanStep } from './Runs'
+import type { PlanStep } from './planParameters'
 
 /*
  * The fast lane: a change of a few lines takes one step, on a lighter model,

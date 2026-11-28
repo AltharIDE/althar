@@ -10,7 +10,7 @@ import { RuntimeConfig } from './Config'
 import { GitFailed, NotFound } from './errors'
 import { commitOf, git, gitWithin } from './git'
 import { Instance } from './Instance'
-import { startOf } from './Projects'
+import { startOf } from './startsFrom'
 import { makeKeyedLock } from './keyedLock'
 
 /*

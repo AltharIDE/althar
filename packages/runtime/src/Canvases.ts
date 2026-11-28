@@ -17,7 +17,6 @@ import {
   isCanvasName,
   manifestBytes,
   readBoards,
-  type SentCanvasComment,
 } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
@@ -37,13 +36,14 @@ import {
   writeCopy,
 } from './canvasFiles'
 import { CanvasSaves } from './CanvasSaves'
-import { RuntimeConfig } from './Config'
+import type { RuntimeConfig } from './Config'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { timestamp } from './records'
 import { agentFolderOf } from './sentFiles'
 import { addItem } from './threads'
-import { POOL, type Tool, type ToolAccess, ToolRefused, type ToolRole, ToolServer } from './ToolServer'
+import { ToolRefused } from './toolErrors'
+import { POOL, type Tool, type ToolAccess, type ToolRole, ToolServer } from './ToolServer'
 
 /*
  * A project's canvases (ADR-104): what its agents draw for the person to
@@ -58,12 +58,8 @@ import { POOL, type Tool, type ToolAccess, ToolRefused, type ToolRole, ToolServe
  * longer the latest is refused, with the latest set aside to bring the
  * change onto. Getting a canvas never overwrites a copy with edits in it.
  * The person's comments are kept with the message that sends them, in its
- * command (`keepComments`), never before.
+ * command (`canvasComments.ts`), never before.
  */
-
-/** What a lead's and the coordinator's brief says of canvases: when to draw one, and to look before saying it's done. */
-export const CANVAS_BRIEF =
-  'The project keeps canvases: what you draw for the person to look at again, iterate on, compare or pass on, such as a mockup, a set of directions to choose between, a chart of results, a diagram to come back to or a page that explains a flow. Write its files in .althar/canvases/<name>/ in your folder with your own tools and publish them with canvas_publish; it opens beside the conversation as a new version every lead and the coordinator can get. What the person reads once belongs in your reply, and a diagram that only explains it in a mermaid block there. Before you change a canvas, canvas_list, then canvas_get it and canvas_read its comments; resolve those your version answers. An HTML canvas is a page of its own: link its files relatively (style.css, never /style.css). Designs to compare side by side (screens, states, sizes, directions) go on one canvas of boards, its entry canvas.json, each board a page of the canvas at its own size; when the person points at a part of a board and says what to change, change that board and publish again.'
 
 type Input = Readonly<Record<string, unknown>>
 
@@ -874,40 +870,3 @@ export class Canvases extends Context.Service<
     }),
   )
 }
-
-/**
- * Keeps the person's comments on canvases with the message that sends them,
- * inside its command's transaction: each on a canvas of the message's own
- * project, at a version it has. One that isn't refuses the message whole.
- */
-export const keepComments = (input: {
-  readonly projectId: string
-  readonly threadId: string
-  readonly inputId: string
-  readonly actorId: string
-  readonly comments: ReadonlyArray<SentCanvasComment>
-}) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const at = yield* timestamp
-    const touched = new Set<string>()
-    for (const [index, comment] of input.comments.entries()) {
-      const [found] = yield* sql<{ one: number }>`
-        SELECT 1 AS one FROM canvases c JOIN canvas_versions v ON v.canvas_id = c.id
-        WHERE c.id = ${comment.canvasId} AND c.project_id = ${input.projectId} AND v.number = ${comment.version}`
-      if (found === undefined) return yield* new NotFound({ kind: 'canvas_version', id: `${comment.canvasId}:${comment.version}` })
-      const id = yield* newId(Ids.canvasComment)
-      yield* sql`INSERT INTO canvas_comments (id, canvas_id, version, anchor, body, author_actor_id, user_input_id, thread_id, position, created_at)
-        VALUES (${id}, ${comment.canvasId}, ${comment.version}, ${JSON.stringify(comment.anchor)}, ${comment.body.slice(0, CANVAS_LIMITS.note)},
-          ${input.actorId}, ${input.inputId}, ${input.threadId}, ${index + 1}, ${at})`
-      touched.add(comment.canvasId)
-    }
-    const ledger = yield* Ledger
-    for (const canvasId of touched)
-      yield* ledger.notify({
-        projectId: input.projectId as ProjectId,
-        aggregateType: 'canvas',
-        aggregateId: canvasId,
-        aggregateRevision: 1,
-      })
-  })

@@ -97,7 +97,7 @@ export const STAGES = [
     detail: 'to run a command on staging',
     now: 'Security review · a command that reaches staging',
     started: 'started 11:02',
-    label: 'Waiting on you',
+    label: 'Needs you',
   },
   {
     status: TaskStatus.Done,

@@ -12,8 +12,6 @@ import { Effect, type Scope } from 'effect'
 import type { WorkerTaken } from './workerWait'
 import { SqlClient } from 'effect/sql'
 
-export type { ProjectWorker } from '@althar/contracts'
-
 /** A task’s accepted plan is the authority for where its processes run. */
 export const taskWorker = (taskId: string) =>
   Effect.gen(function* () {

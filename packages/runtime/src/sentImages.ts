@@ -1,11 +1,11 @@
-import type { SentImage } from '@althar/contracts'
+import type { PictureType, SentImage } from '@althar/contracts'
+import { MESSAGE_IMAGES, pictureSize, pictureType } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Artifacts } from './Artifacts'
 import { ImageRefused } from './errors'
-import { MESSAGE_IMAGES, pictureSize, pictureType, type PictureType } from './pictures'
 
 /*
  * The images the person sends with a message (docs/architecture/07): read

@@ -5,8 +5,9 @@ import { BranchNotFound } from './errors'
 import { remoteBranches } from './git'
 import { Instance } from './Instance'
 import { spotsOf } from './local'
-import { hasBranch, startOf, towardIn } from './Projects'
+import { hasBranch, towardIn } from './Projects'
 import { change, fact } from './records'
+import { startOf } from './startsFrom'
 
 /*
  * The branch a task works toward (ADR-093). Each of a task's workspaces has

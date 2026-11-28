@@ -1,4 +1,4 @@
-import { ShipRoute, shipsToOpen } from '@althar/contracts'
+import { type ShipRoute, shipsToOpen } from '@althar/contracts'
 import type { ActorId, CommandEnvelope, ProjectId } from '@althar/domain'
 import type { Ledger, RevisionConflict, RowNotFound } from '@althar/persistence-sqlite'
 import { Cause, type Crypto, Deferred, Effect, Exit, Option, Queue, Schema, type Scope } from 'effect'
@@ -11,6 +11,7 @@ import { envelope } from './envelope'
 import { type GitFailed, NotFound, ShipRefused, TaskRefused } from './errors'
 import type { Instance, InstanceInfo } from './Instance'
 import type { MergeReviews } from './MergeReviews'
+import { PlanParameters, type PlanStep, type TaskEnd, endingOf } from './planParameters'
 import { roundsNow } from './plansAndReviews'
 import { touchQuestion } from './Questions'
 import { change, fact, timestamp } from './records'
@@ -19,15 +20,11 @@ import {
   AFTER_TURN_WAIT,
   NEXT_SHIP_EVERY,
   NEXT_SHIP_TRIES,
-  PlanParameters,
-  PlanStep,
   type ReviewerChange,
   type RunRow,
   type ShipOptions,
   type Store,
-  TaskEnd,
   type TeamChanged,
-  endingOf,
   reviewerChange,
   roundOf,
 } from './runRecords'

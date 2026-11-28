@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 
-import { decideReader } from '../src/rules'
+import { decideReader } from '../src/readerRules'
 
 /*
  * The coordinator as a trusted reader (ADR-058): in its own copies of the

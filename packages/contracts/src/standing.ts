@@ -1,4 +1,4 @@
-import type { ChangeSummary, ChecksSummary } from './Api'
+import type { ChangeSummary, ChecksSummary } from './api/shared'
 
 /*
  * What stands between a ready change's open pull request and merging it,

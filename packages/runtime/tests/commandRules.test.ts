@@ -1,18 +1,10 @@
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 
-import {
-  alwaysOf,
-  decide,
-  decideReader,
-  holds,
-  MVP_RULES,
-  programOf,
-  type ProjectRuleSet,
-  type RuleContext,
-  sayAllowRule,
-  shortCommand,
-} from '../src/rules'
+import { decideReader } from '../src/readerRules'
+import { MVP_RULES, type ProjectRuleSet, type RuleContext, sayAllowRule } from '../src/ruleContext'
+import { alwaysOf, decide, holds } from '../src/rules'
+import { programOf, shortCommand } from '../src/shellCommands'
 
 /*
  * The rules for agents' requests (ADR-013, ADR-018) at their edges: lines

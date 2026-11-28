@@ -58,8 +58,6 @@ export interface Kept {
   readonly size: number
 }
 
-export { artifactPath, isDigest } from './artifactFiles'
-
 export class Artifacts extends Context.Service<
   Artifacts,
   {

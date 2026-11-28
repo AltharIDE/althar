@@ -6,8 +6,6 @@ import { SYNCED_AGENTS, type ServerStatus, type SyncedAgent } from '@althar/prov
 
 import type { SyncIo } from './mcpSync'
 
-export { type Probed, probeServer } from './mcpProbe'
-
 /*
  * How each of the person's MCP servers stands in each of their agents, as the agents' own commands say it
  * (`claude mcp list`, `codex mcp list --json`, `opencode mcp list`), kept in Althar's own folder beside the sync record

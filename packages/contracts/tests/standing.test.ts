@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ChangeSummary, ChecksSummary } from '../src/Api'
+import type { ChangeSummary, ChecksSummary } from '../src/api/shared'
 import {
   checkFailuresIn,
   checkFailuresOf,

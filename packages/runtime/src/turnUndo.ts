@@ -8,7 +8,7 @@ import { SqlClient } from 'effect/sql'
 import { UndoRefused } from './errors'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
-import { indexThread } from './Search'
+import { indexThread } from './searchRows'
 import {
   applyRestore,
   changedPaths,

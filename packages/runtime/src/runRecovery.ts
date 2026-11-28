@@ -36,16 +36,15 @@ import { type ExternalWait, type Observation, externalWaitOf, observeExternal, w
 import { backoff, contained } from './Failures'
 import type { Instance, InstanceInfo } from './Instance'
 import { type Limits, type Out, capitalized, outStep, whenWords } from './Limits'
+import type { PlanParameters, PlanStep, TaskEnd } from './planParameters'
 import type { Questions } from './Questions'
 import { change, fact, timestamp } from './records'
 import type { LimitedStep } from './runCapacity'
 import {
   type Finding,
-  Hold,
+  type Hold,
   type Lead,
   type Place,
-  type PlanParameters,
-  type PlanStep,
   RECONNECTED,
   RESTART_GRACE,
   type RoundBack,
@@ -56,13 +55,12 @@ import {
   type StuckAnswer,
   type StuckInfo,
   type StuckWhy,
-  type TaskEnd,
   decodeHold,
 } from './runRecords'
 import type { Sessions } from './Sessions'
 import { standInOf, whenBack } from './standIn'
 import { addItem } from './threads'
-import { ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 import { summarize } from './words'
 
 /** A step a restart stopped, to carry on once the launch is up. */

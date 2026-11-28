@@ -1,4 +1,4 @@
-import { ProjectInk } from './Api'
+import { ProjectInk } from './api/shared'
 
 /*
  * A new project's ink, the colour its mark is drawn in. The runtime picks

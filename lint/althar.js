@@ -1,12 +1,32 @@
 import { definePlugin } from 'vite-plus/lint/plugins'
 
+import { callsInAreas } from './areas.js'
+import { specTime, testTime } from './budget.js'
 import { oneClock } from './clock.js'
+import { noFutureDates } from './dates.js'
+import { exportedWhereMade } from './exports.js'
+import { systemKeys } from './keys.js'
+import { layers } from './layers.js'
 import { pressAtOnce } from './press.js'
 import { oneRemoval } from './removal.js'
 import { offTheThread } from './thread.js'
+import { statusWords } from './words.js'
 
 /* Althar's own lint rules, one file each; vite.config.ts says where each applies. */
 export default definePlugin({
   meta: { name: 'althar' },
-  rules: { 'one-clock': oneClock, 'one-removal': oneRemoval, 'off-the-thread': offTheThread, 'press-at-once': pressAtOnce },
+  rules: {
+    'one-clock': oneClock,
+    'one-removal': oneRemoval,
+    'off-the-thread': offTheThread,
+    'press-at-once': pressAtOnce,
+    'test-time': testTime,
+    'spec-time': specTime,
+    'system-keys': systemKeys,
+    'no-future-dates': noFutureDates,
+    layers,
+    'exported-where-made': exportedWhereMade,
+    'calls-in-areas': callsInAreas,
+    'status-words': statusWords,
+  },
 })

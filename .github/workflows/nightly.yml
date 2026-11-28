@@ -6,6 +6,10 @@ name: nightly
 # them on Linux (stress.yml). A test that fails, then passes on its retry, is filed as flaky (.github/actions/flaky);
 # one that fails both times, or in any of its stress runs, opens or adds to the issue "Nightly tests failed", which
 # closes when a night passes. The seed in each part's log runs its order again (`--sequence.seed`).
+#
+# Nothing is quarantined here, so a test whose quarantine lapsed, skipped in every other run, runs and gates here: the
+# unit tests with the rest, and the end-to-end tests on their own (`lapsed`). And each night tends the quarantines
+# (packages/testing/src/tend.ts): it names each one's owner on its issue, and labels `broken` each that has lapsed.
 on:
   schedule:
     # 03:00 UTC, when no one is merging.
@@ -248,9 +252,68 @@ jobs:
             exit 1
           fi
 
+  # The end-to-end tests whose quarantine lapsed, which every other run skips: here, with no retry, they gate the night.
+  lapsed:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      # Which tests' quarantines lapsed, as Playwright's --grep (QUARANTINE_SKIPPED); none at all most nights.
+      - uses: ./.github/actions/flaky/quarantine
+      - if: env.QUARANTINE_SKIPPED != ''
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - if: env.QUARANTINE_SKIPPED != ''
+        uses: ./.github/actions/electron
+      # As in e2e.yml: Chromium's sandbox, and a keyring on a virtual display.
+      - if: env.QUARANTINE_SKIPPED != ''
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0 openssh-server
+      # Without QUARANTINE, the reporter lets nothing through: a lapsed test that fails fails the night.
+      - if: env.QUARANTINE_SKIPPED != ''
+        env:
+          ALTHAR_E2E_DISPLAY: inherit
+        run: unset QUARANTINE; dbus-run-session -- bash -c 'printf "althar\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e --retries=0 "--grep=$QUARANTINE_SKIPPED"'
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: lapsed-e2e
+          path: apps/desktop/test-results
+          retention-days: 7
+
+  # The quarantines, tended (packages/testing/src/tend.ts): each one's owner, by git's whole history, named on its issue;
+  # and each whose quarantine lapsed, by its age or by failing on its retry twice in a day, labelled broken, saying so
+  # to its owner. It reads what each test imports from the tree, with no install.
+  quarantine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bun packages/testing/src/tend.ts
+
   # The night's result as one open issue: opened (or added to) when a night fails, closed when one passes.
   report:
-    needs: [linux, windows, stress-windows, stress-linux]
+    needs: [linux, windows, stress-windows, stress-linux, lapsed]
     if: ${{ always() && !cancelled() && github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

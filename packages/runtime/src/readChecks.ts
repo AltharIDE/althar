@@ -6,7 +6,7 @@ import { stripVTControlCharacters } from 'node:util'
 import type { CodeHost, Repository } from '@althar/connectors'
 import { Effect, Schema } from 'effect'
 import { readLog, logForLead } from './checkLogs'
-import { ToolRefused } from './ToolServer'
+import { ToolRefused } from './toolErrors'
 
 export const OUTPUT_CAP = 32 * 1024
 export const LOG_CAP = 16 * 1024 * 1024

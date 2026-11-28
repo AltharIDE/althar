@@ -9,7 +9,7 @@ import { Cause, Clock, Context, type Crypto, Duration, Effect, Exit, Layer, Stre
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
-import { UnknownAgent } from './errors'
+import type { UnknownAgent } from './errors'
 import { startsAgain } from './startAgain'
 import { Installs, isInstalled } from './Installs'
 import { Instance } from './Instance'

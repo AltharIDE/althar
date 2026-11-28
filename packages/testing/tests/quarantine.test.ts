@@ -8,14 +8,51 @@ import { startVitest } from 'vite-plus/test/node'
 
 import { type Flaky, fromRoot, titleOf } from '../src/flaky'
 import PlaywrightReporter from '../src/playwright'
-import { CAP, held, issueOf, judge, parse, type Quarantine, summary } from '../src/quarantine'
+import {
+  CAP,
+  DAY,
+  GRACE_ENDS,
+  held,
+  type Issue,
+  issueOf,
+  judge,
+  LANDED,
+  lapsedOf,
+  lapsesAt,
+  LASTS,
+  parse,
+  type Quarantine,
+  skippedSpecs,
+  standing,
+  summary,
+} from '../src/quarantine'
 import FlakyReporter from '../src/reporter'
 
 const fixture = (name: string) => fromRoot(join(import.meta.dirname, 'fixtures', name))
 
+/** When the quarantines here were read: well after those open before owners and ends lapsed. */
+const AT = GRACE_ENDS + 30 * DAY
+
+/** An open issue CI filed a day before AT, titled `title`. */
+const filed = (number: number, title: string, more: Partial<Issue> = {}): Issue => ({
+  number,
+  title,
+  opened: new Date(AT - DAY).toISOString(),
+  by: 'github-actions[bot]',
+  labels: ['flaky'],
+  ...more,
+})
+
 /** A quarantine of the tests named, each under an issue numbered from 7. */
 const quarantining = (...tests: ReadonlyArray<{ file: string; name: string }>): Quarantine => ({
-  issues: tests.map((test, index) => ({ number: 7 + index, title: titleOf(test) })),
+  issues: tests.map((test, index) => filed(7 + index, titleOf(test))),
+  at: AT,
+})
+
+/** The same, each issue's quarantine lapsed: labelled broken. */
+const lapsing = (...tests: ReadonlyArray<{ file: string; name: string }>): Quarantine => ({
+  issues: tests.map((test, index) => filed(7 + index, titleOf(test), { labels: ['flaky', 'broken'] })),
+  at: AT,
 })
 
 const FAILS = { file: fixture('fails.fixture.ts'), name: 'a block > fails every time' }
@@ -101,7 +138,7 @@ describe('a Vitest run in quarantine', () => {
 
   test('fails once its issue is closed: the test gates again', async () => {
     expect((await run(['fails.fixture.ts'], quarantining(BROKEN))).exitCode).toBe(1)
-    expect((await run(['fails.fixture.ts'], { issues: [] })).exitCode).toBe(1)
+    expect((await run(['fails.fixture.ts'], { issues: [], at: AT })).exitCode).toBe(1)
   })
 
   test("gates every test when the issues couldn't be read, and where nothing is quarantined", async () => {
@@ -129,6 +166,21 @@ describe('a Vitest run in quarantine', () => {
     const unchecked = await run(['fails.fixture.ts'], quarantining(FAILS), { coverage: { ...coverage, reportOnFailure: false } })
     expect(unchecked.exitCode).toBe(1)
     expect(unchecked.warned).toContainEqual(expect.stringContaining('coverage goes unchecked'))
+  })
+
+  test('skips a test whose quarantine lapsed, where its job read it, and gates the rest', async () => {
+    const kept = join(mkdtempSync(join(tmpdir(), 'quarantine-')), 'quarantine.json')
+    writeFileSync(kept, JSON.stringify(lapsing(FAILS)))
+    const was = process.env.QUARANTINE
+    // The setup skips it in the test's own worker, which reads the job's quarantine from QUARANTINE.
+    process.env.QUARANTINE = kept
+    try {
+      expect(await run(['fails.fixture.ts'], lapsing(FAILS))).toEqual({ exitCode: 0, recorded: [], warned: [] })
+      expect((await run(['fails.fixture.ts', 'broken.fixture.ts'], lapsing(FAILS))).exitCode).toBe(1)
+    } finally {
+      if (was === undefined) delete process.env.QUARANTINE
+      else process.env.QUARANTINE = was
+    }
   })
 
   test('passes the merge of parts that quarantine let pass, without recording their tests again', async () => {
@@ -229,10 +281,8 @@ describe('which tests are quarantined', () => {
 
   test('matches a test to its issue by the title report.ts gives it, exactly, and nothing else labelled flaky', () => {
     const quarantine: Quarantine = {
-      issues: [
-        { number: 431, title: 'models.test: the process agent is asked for its models twice on Windows' },
-        { number: 434, title: titleOf(test1) },
-      ],
+      issues: [filed(431, 'models.test: the process agent is asked for its models twice on Windows'), filed(434, titleOf(test1))],
+      at: AT,
     }
     expect(issueOf(quarantine, test1)).toBe(434)
     expect(issueOf(quarantine, { ...test1, name: 'the models > record the process asking' })).toBeUndefined()
@@ -264,8 +314,8 @@ describe('which tests are quarantined', () => {
   test('reads the quarantine its job kept, and none where no job read it', () => {
     const folder = mkdtempSync(join(tmpdir(), 'quarantine-'))
     const kept = join(folder, 'quarantine.json')
-    writeFileSync(kept, JSON.stringify({ issues: [{ number: 434, title: titleOf(test1), url: 'ignored' }] }))
-    expect(held(kept)).toEqual({ issues: [{ number: 434, title: titleOf(test1) }] })
+    writeFileSync(kept, JSON.stringify({ issues: [{ ...filed(434, titleOf(test1)), url: 'ignored' }], at: AT }))
+    expect(held(kept)).toEqual({ issues: [filed(434, titleOf(test1))], at: AT })
     // A job that read none has no QUARANTINE: in CI this one has, so it goes for the moment.
     const was = process.env.QUARANTINE
     delete process.env.QUARANTINE
@@ -277,7 +327,10 @@ describe('which tests are quarantined', () => {
     expect(held('')).toBeUndefined()
     // A file that isn't there or isn't a quarantine quarantines nothing, and says why.
     expect(held(join(folder, 'missing.json'))).toEqual({ unread: expect.stringContaining('missing.json: ENOENT') })
-    writeFileSync(kept, JSON.stringify({ issues: [{ number: '434', title: 'Flaky: x' }] }))
+    writeFileSync(kept, JSON.stringify({ issues: [{ number: '434', title: 'Flaky: x' }], at: AT }))
+    expect(held(kept)).toEqual({ unread: expect.stringContaining('neither the open issues nor why') })
+    // Nor one read by an older reader, which didn't say when, or when each opened.
+    writeFileSync(kept, JSON.stringify({ issues: [{ number: 434, title: titleOf(test1) }] }))
     expect(held(kept)).toEqual({ unread: expect.stringContaining('neither the open issues nor why') })
     expect(parse(JSON.stringify({ unread: 'gh: HTTP 502' }))).toEqual({ unread: 'gh: HTTP 502' })
   })
@@ -299,3 +352,93 @@ describe('which tests are quarantined', () => {
     expect(summary(undefined, [failed], repository)).toBe('')
   })
 })
+
+describe('a quarantine’s end', () => {
+  const title = titleOf({ file: 'packages/runtime/tests/models.test.ts', name: 'the models > record the process asking starts' })
+
+  test('lasts a week from its issue’s opening, and lapses then', () => {
+    const issue = filed(434, title)
+    expect(lapsesAt(issue)).toBe(AT - DAY + LASTS)
+    expect(standing(issue, AT)).toBe('held')
+    expect(standing(issue, AT - DAY + LASTS - 1)).toBe('held')
+    expect(standing(issue, AT - DAY + LASTS)).toBe('lapsed')
+  })
+
+  test('gives one open before owners and ends landed until a week after, so none lapsed the day it landed', () => {
+    const old = filed(569, title, { opened: '2026-11-03T23:14:32Z' })
+    expect(lapsesAt(old)).toBe(GRACE_ENDS)
+    expect(standing(old, LANDED)).toBe('held')
+    expect(standing(old, GRACE_ENDS - 1)).toBe('held')
+    expect(standing(old, GRACE_ENDS)).toBe('lapsed')
+  })
+
+  test('lapses at once when its issue is labelled broken', () => {
+    expect(standing(filed(434, title, { labels: ['flaky', 'broken'] }), AT)).toBe('lapsed')
+  })
+
+  test('is only CI’s to open: an issue anyone else opens with a test’s title quarantines nothing since this landed', () => {
+    expect(standing(filed(434, title, { by: 'someone' }), AT)).toBeUndefined()
+    expect(standing(filed(434, title, { by: 'app/github-actions' }), AT)).toBe('held')
+    // One open before, as all were, keeps its grace and lapses with the others.
+    expect(standing(filed(434, title, { by: 'someone', opened: '2026-11-03T23:14:32Z' }), LANDED)).toBe('held')
+    expect(standing(filed(431, 'models.test: twice on Windows'), AT)).toBeUndefined()
+  })
+
+  test('skips a lapsed test, which still lets its failure through should it run, and only a lapsed one', () => {
+    const test1 = testOfTitle(title)
+    expect(lapsedOf(lapsing(test1), test1)).toBe(7)
+    expect(issueOf(lapsing(test1), test1)).toBe(7)
+    expect(lapsedOf(quarantining(test1), test1)).toBeUndefined()
+    expect(lapsedOf({ unread: 'gh: HTTP 502' }, test1)).toBeUndefined()
+    expect(lapsedOf(undefined, test1)).toBeUndefined()
+  })
+
+  test('names the lapsed specs as Playwright’s --grep-invert matches them, and nothing else', () => {
+    const spec1 = { file: 'apps/desktop/e2e/local.spec.ts', name: 'works Local › asks (first) before it takes $5' }
+    const nested = { file: 'apps/desktop/e2e/homes/pairing.spec.ts', name: 'pairs a desktop' }
+    const unit = { file: 'apps/desktop/tests/tabs.test.tsx', name: 'Althar’s settings > waits' }
+    const grep = new RegExp(skippedSpecs(lapsing(spec1, nested, unit)), 'gi')
+    const matches = (value: string) => {
+      grep.lastIndex = 0
+      return grep.test(value)
+    }
+    // Playwright's title: the root's and the project's, both empty, the file from the config's folder, its titles.
+    expect(matches('  local.spec.ts works Local asks (first) before it takes $5')).toBe(true)
+    expect(matches('  local.spec.ts works Local asks (first) before it takes $5 @slow')).toBe(true)
+    expect(matches('  homes/pairing.spec.ts pairs a desktop')).toBe(true)
+    expect(matches('  local.spec.ts works Local asks (first) before it takes $5 again')).toBe(false)
+    expect(matches('  local.spec.ts works Local')).toBe(false)
+    expect(matches('  other.spec.ts pairs a desktop')).toBe(false)
+    expect(skippedSpecs(quarantining(spec1))).toBe('')
+    expect(skippedSpecs(lapsing(unit))).toBe('')
+    expect(skippedSpecs(undefined)).toBe('')
+  })
+
+  test('lists the lapsed tests on every summary, with their owners, and counts only the rest against the cap', () => {
+    const repository = 'https://github.com/AltharIDE/althar'
+    const test1 = testOfTitle(title)
+    const quarantine: Quarantine = {
+      issues: [
+        filed(434, title, { labels: ['flaky', 'broken'], owner: '#1219 (Window updates a home) by someone' }),
+        filed(569, titleOf({ ...test1, name: 'another' }), { opened: '2026-11-03T23:14:32Z' }),
+        ...Array.from({ length: CAP }, (_, index) => filed(600 + index, titleOf({ ...test1, name: `test ${index}` }))),
+      ],
+      at: AT,
+    }
+    const said = summary(quarantine, [], repository)
+    expect(said).toContain("**2 tests' quarantines have lapsed**, and they are skipped in this job")
+    expect(said).toContain(
+      '| `packages/runtime/tests/models.test.ts` › the models > record the process asking starts | [#434](https://github.com/AltharIDE/althar/issues/434) | labelled broken | #1219 (Window updates a home) by someone |',
+    )
+    expect(said).toContain(
+      `| [#569](https://github.com/AltharIDE/althar/issues/569) | ${new Date(GRACE_ENDS).toISOString().slice(0, 10)} | named on the issue tonight |`,
+    )
+    expect(said).not.toContain('CAUTION')
+  })
+})
+
+/** A test, from its issue's title. */
+const testOfTitle = (title: string) => {
+  const [file = '', name = ''] = title.slice('Flaky: '.length).split(' › ')
+  return { file, name }
+}
