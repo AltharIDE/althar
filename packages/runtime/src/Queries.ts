@@ -382,7 +382,7 @@ interface ItemRow {
   readonly model?: string | null
   readonly inputState: 'queued' | 'delivered' | 'superseded' | 'withdrawn' | null
   readonly inputClaimed?: number
-  /** A queued message no agent is on its way to read: its thread's last start failed after it was written, none since. */
+  /** A queued message no agent is on its way to read: its thread's last start since it was written failed, none since. */
   readonly inputUnsent?: number
   readonly disposition: string | null
   /** For a message the person said: some of it was dictated. */
@@ -1302,9 +1302,16 @@ export class Queries extends Context.Service<
               u.state AS input_state, u.disposition, u.dictated, i.created_at,
               EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries td ON td.id = di.delivery_id
                 WHERE di.user_input_id = u.id AND td.state IN ('pending', 'delivered')) AS input_claimed,
-              -- Queued, with the thread's last session one that failed to start after it was written: nothing reads it now.
-              CASE WHEN u.state = 'queued' THEN (SELECT ps.state = 'failed' AND ps.ended_at >= u.accepted_at FROM provider_sessions ps
-                WHERE ps.thread_id = i.thread_id ORDER BY ps.started_at DESC, ps.rowid DESC LIMIT 1) END AS input_unsent,
+              -- Queued, and the thread's last start since it was written failed, with no session since, live or not, and
+              -- no wait for its worker said since: nothing reads it now.
+              CASE WHEN u.state = 'queued' THEN EXISTS (SELECT 1 FROM thread_items f
+                WHERE f.thread_id = i.thread_id AND f.kind = 'notice' AND json_extract(f.content, '$.startFailed') IS NOT NULL
+                  AND f.created_at >= u.accepted_at
+                  AND NOT EXISTS (SELECT 1 FROM thread_items w WHERE w.thread_id = f.thread_id AND w.kind = 'notice'
+                    AND w.sequence > f.sequence AND json_extract(w.content, '$.waitsForWorker') IS NOT NULL)
+                  AND NOT EXISTS (SELECT 1 FROM provider_sessions ps WHERE ps.thread_id = f.thread_id
+                    AND (ps.started_at > f.created_at OR ps.state IN ('starting', 'active', 'waiting_approval', 'cancelling')))) END
+                AS input_unsent,
               (SELECT d.outcome FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,

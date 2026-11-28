@@ -1376,6 +1376,21 @@ describe('the API', () => {
           thread.items.flatMap((item) => (item.kind === 'user_message' && item.content.text === 'my message not sending' ? [item] : []))[0]
         // Queued for a lead that hasn't started yet, it is on its way.
         assert.isUndefined(message(yield* client.GetThread({ threadId: task.threadId }))?.input?.unsent)
+        // Refused before any session is recorded, as for a task abandoned meanwhile: unsent too, and its start can be tried
+        // again, though no session ever was.
+        const gone = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Abandoned meanwhile' })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: gone.threadId,
+          body: 'my message not sending',
+          disposition: 'after_current',
+        })
+        yield* client.AbandonTask({ commandId: commandId(), taskId: gone.id })
+        yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: gone.threadId, agentId: 'codex' }))
+        const early = yield* client.GetThread({ threadId: gone.threadId, fresh: true })
+        assert.isNull(early.session)
+        assert.deepInclude(message(early)?.input, { state: 'queued', unsent: true })
+        assert.isTrue(early.retryable)
         // Its lead couldn't start: nothing is on its way to read it.
         yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'missing' }))
         assert.deepInclude(message(yield* client.GetThread({ threadId: task.threadId, fresh: true }))?.input, {

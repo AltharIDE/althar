@@ -1,4 +1,4 @@
-import { Duration } from 'effect'
+import { Data, Duration } from 'effect'
 
 import type { WorkerExecutionPlatform } from './workerExecution'
 
@@ -52,3 +52,9 @@ export const holdWords = (
     description: 'The lead starts there once that one is done. A worker runs one agent at a time.',
   }
 }
+
+/**
+ * A lead's start its worker turned away only because another run took it first, between looking and asking: the start
+ * waits for the worker again (Sessions.ts), rather than failing or being tried again afresh.
+ */
+export class WorkerTaken extends Data.TaggedError('WorkerTaken')<{ readonly workerId: string; readonly reason: string }> {}
