@@ -29,6 +29,9 @@ permissions:
   contents: read
   # The workflows it calls file flaky tests as issues (.github/actions/flaky).
   issues: write
+  # harness.yml's coverage job reads main's measurement from post-merge's runs. It runs on a pull request only, but a
+  # called workflow may ask for no more than its caller gives, or the whole run fails to start.
+  actions: read
 
 # A newer push to a pull request replaces its run; a group's build is never cancelled.
 concurrency:
