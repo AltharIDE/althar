@@ -415,11 +415,8 @@ The [host release workflow](../../.github/workflows/host-release.yml) builds nat
 3. Use the protected `release` environment with `ALTHAR_HOST_RELEASE_SIGNING_KEY` set to the Ed25519 private PEM. Keep the private key out of Git, logs and release assets. Distribute the public key separately.
 4. Verify a reboot on a personal VPS and actual provider sign-in and refresh on a headless host. Publish the draft after those checks. Give a corrected release a new version and sequence so published signed assets stay immutable.
 5. For a new minor or major, cut its release branch at the tag through the cascade: `gh workflow run cascade.yml -f cut=release/host-0.3 -f at=host-v0.3.0`.
-<<<<<<< origin/main
 
 A release is built with the public ids of Althar's own apps, from the repository variables `ALTHAR_GITHUB_CLIENT_ID`, `ALTHAR_GITHUB_APP`, `ALTHAR_GITLAB_CLIENT_ID` and, optionally, `ALTHAR_COPILOT_CLIENT_ID`; `bun run build` reads the same names from the environment or `apps/host/.env`, and the home's own environment overrides each at run time. A window attached to the home then offers GitHub's and GitLab's sign-in by a code: it shows in the window and the person approves in any browser. Linear's sign-in comes back to the computer's own loopback address, so a home doesn't offer it; Linear takes a pasted token there.
-=======
->>>>>>> 5b2735c855280bcad7d9dc9c2039058c203a05bc
 
 `bun run release:smoke` builds a portable release with a throwaway key, verifies its signature and archive and checks the bundled provider binaries outside the workspace. Use an official Node installation with its license file.
 
