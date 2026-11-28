@@ -65,10 +65,12 @@ newer workers and windows take.
 
 ## Steps
 
+All six are built in this change; what each left open is under them.
+
 1. Pins and installs: npm downloads in `Installs`, pins generated from
    `bun.lock` (and a test that they match), the fit check, adapters pointed
    at the program they drive.
-2. The desktop app, its Flatpak and the CLI ship no program.
+2. The desktop app and its Flatpak ship no program (the CLI runs from a checkout, where they are installed).
 3. The home's release ships no program.
 4. The worker's release ships no program; a worker installs agents as a
    profile does, keeps those signed in across updates.
@@ -76,3 +78,17 @@ newer workers and windows take.
    window or in a terminal over SSH; the home places tasks on any of them.
 6. The window shows it: an agent not installed yet, its download, its
    sign-in, on a Mac and on a worker.
+
+### Left open
+
+- Junie, Grok, Kimi, Mistral Vibe and Qwen Code have no download Althar
+  pins: on a worker, as on a Mac, they run where the person installed them,
+  and the window says where to get each. Pinning their releases (npm, uv,
+  zstd archives) is its own work.
+- Antigravity's sign-in comes back to a listener on the computer it runs on,
+  which a window elsewhere can't reach: on a worker it doesn't sign in yet.
+- A home updated from 0.3.0 downloads Claude Code's and Codex's programs at
+  their first use, rather than adopting them from its release before, as a
+  worker does.
+- A worker's terminal sign-in is a line to run; an in-app terminal over SSH
+  would save the copy.

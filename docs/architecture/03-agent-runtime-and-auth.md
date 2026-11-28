@@ -37,7 +37,7 @@ can move between them.
 | Agent | How Althar runs it | Sign-in, held by the agent | Notes |
 |---|---|---|---|
 | Claude Code | `claude-agent-acp`, the ACP project's adapter on the Claude Agent SDK. Claude Code has no native ACP | Claude plan or Anthropic API key; status from `claude auth status` | Starts in the user's own default mode, which can be `bypassPermissions`, so Althar turns bypass off and adds ask rules for every session. The Agent SDK reports usage limits, but the adapter doesn't forward them |
-| Codex | `codex-acp`, the ACP project's adapter, driving its own bundled Codex | ChatGPT plan or OpenAI API key; status from `codex login status` | Althar uses its `workspace-write` mode, not the default `agent` mode, whose automatic reviewer answers requests itself. Usage limits reach the adapter but are only rendered as `/status` text |
+| Codex | `codex-acp`, the ACP project's adapter, driving the Codex its lockfile pins (downloaded on first use) or the person's own where it fits | ChatGPT plan or OpenAI API key; status from `codex login status` | Althar uses its `workspace-write` mode, not the default `agent` mode, whose automatic reviewer answers requests itself. Usage limits reach the adapter but are only rendered as `/status` text |
 | OpenCode | `opencode acp`, native | API keys for any provider; local model servers; status from `opencode auth list` | The bring-your-own-key route. It cannot use a Claude plan. It allows most actions without asking unless configured, so Althar starts it with inline config that makes it ask |
 | GitHub Copilot | `copilot --acp`, native (public preview); Althar can download it | A Copilot plan; no status command | Asks before every edit, command and fetch in its `#agent` mode. Althar holds its `allow_all` off and sends the person's `/` messages as words, as `/yolo` would turn asking off. A repository's hooks can approve, so it leads no review. One account until its keychain sign-in is seen per folder |
 | Junie | `junie --acp=true`, native | A JetBrains AI plan or a Junie key; no status command | Ordinary edits inside the project don't ask; commands, sensitive files and MCP tools do. Althar holds its brave mode off. Its plan mode has no edit tools, so readers run there. One account until Althar signs a home out before removing it |
@@ -298,6 +298,14 @@ type AgentDefinition = {
   time. Adapters written for Node run on a Node the packaged app ships, and
   on Electron's own Node in development ([02](02-desktop-runtime.md),
   ADR-033).
+- The programs those adapters drive, Claude Code's and Codex's, don't ship:
+  each comes on first use, the exact npm package the adapters' lockfile pins
+  for the platform, checked by its sha512 integrity and kept under the
+  profile (`pinnedPrograms.ts`, runtime's `Installs`). The person's own install
+  runs where its version is one the adapter can drive, read from where it is
+  installed; the adapter is told which program to drive
+  (`CLAUDE_CODE_EXECUTABLE`, `CODEX_PATH`). The same holds on a home and on a
+  worker ([the plan](../plans/agents-on-first-use.md)).
 - Agents the user installs, such as OpenCode, are found by probe, and their
   version is checked against the support matrix.
 - Adding an ACP agent means adding an entry and passing the contract suite.

@@ -175,7 +175,7 @@ A worker cleans up after its tasks too. Each run gets its own checkout, its help
 | The worker release it runs, as `current`, and the one before | `${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker-program` |
 | Its services | `${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/althar-worker.service`, `althar-worker-update.timer` |
 
-The timer checks hourly for a newer worker release from the same place its own came from, signed by the same key, and switches to it while the worker runs no task. A worker carries the programs of the agents signed in on it only: signing an agent in downloads its program first, and an update downloads the release's base and those programs that changed, linking the rest from the release it runs. A worker installed from a home's release moves to the worker's own release of the same version at its first check. `journalctl --user -u althar-worker.service` shows what the worker did.
+The timer checks hourly for a newer worker release from the same place its own came from, signed by the same key, and switches to it while the worker runs no task. A worker carries the programs of the agents signed in on it only, under `${XDG_DATA_HOME:-$HOME/.local/share}/althar-worker/programs`: signing an agent in downloads its program first (or uses the worker's own install of it, where it fits), and an update downloads the release's base and brings the programs its new pins need before it moves. A worker installed from a home's release moves to the worker's own release of the same version at its first check. `journalctl --user -u althar-worker.service` shows what the worker did.
 
 ## Set a worker up by hand
 
