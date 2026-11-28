@@ -268,6 +268,29 @@ describe('pressure and the real admission queue', () => {
         assert.strictEqual(holds, opened[1] ?? null, 'the worker holds the next task’s workspace now')
         assert.isFalse((yield* busy.waitsForWorker).has(next.taskId))
         assert.deepInclude(card(home.taskId), { held: 'memory' }, 'what runs here is held back still')
+        // Only the same session goes, looked at under its lock: another one's id lets nothing go.
+        assert.isFalse(yield* (yield* Sessions).retireIdle(next.threadId, 'another-session'))
+        // Said something now, the first's lead starts again on its worker, which the next has: it waits for the worker,
+        // never started into it.
+        yield* say(remote.threadId, 'One more thing. [lead:finish]')
+        yield* until(busy.waitsForWorker, (now) => now.get(remote.taskId) === workerId)
+        // The window starts the lead as it sends: no session yet, and the worker isn't asked.
+        assert.strictEqual(yield* (yield* Sessions).start({ threadId: remote.threadId, agentId: 'codex' }), '')
+        assert.strictEqual(opened.length, 2, 'the worker was never asked for a second session while it runs one')
+        const told = Effect.map(
+          sql<{ n: number }>`SELECT count(*) AS n FROM user_inputs WHERE thread_id = ${remote.threadId} AND state = 'queued'`,
+          ([row]) => row?.n ?? 0,
+        )
+        assert.strictEqual(yield* told, 1, 'what was said waits')
+        // The next finishes and lets the worker go: the first's lead starts there again, and what was said reaches it.
+        yield* say(next.threadId, '[lead:finish]')
+        yield* until(
+          Effect.sync(() => opened.length),
+          (n) => n === 3,
+        )
+        assert.strictEqual(opened[2], opened[0], 'the first task’s workspace, back on the worker')
+        yield* until(told, (n) => n === 0)
+        yield* until(busy.waitsForWorker, (now) => !now.has(remote.taskId))
       }).pipe(
         Effect.provide(
           Queries.layer.pipe(

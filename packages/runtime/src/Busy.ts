@@ -773,8 +773,9 @@ export class Busy extends Context.Service<
           if (task === undefined || task.asking === 1 || task.runState === 'running' || task.runState === 'admitted') return
           const lead = yield* sessions.running(task.threadId)
           if (Option.isNone(lead) || lead.value.turnRunning || (yield* sessions.busy(task.threadId))) return
-          yield* Effect.logInfo('Letting a finished task’s worker go for the work that waits for it')
-          yield* sessions.stop(task.threadId).pipe(Effect.ignore)
+          // Looked at again under its thread's lock: said to meanwhile, or another session by then, it stays.
+          if (yield* sessions.retireIdle(task.threadId, lead.value.sessionId))
+            yield* Effect.logInfo('Let a finished task’s worker go for the work that waits for it')
         })
 
       /** Everything waiting, from every source, and the turns that wait. */
@@ -930,7 +931,14 @@ export class Busy extends Context.Service<
           const key = keyOf(agent.taskId, agent.review, agent.helper)
           const tasks = yield* automated
           const order = orderIn(asked, agent.taskId, tasks)
-          if (order === 'person' || at.has(key)) return true
+          if (at.has(key)) return true
+          // What the person did never waits for a place, but a worker runs one task at a time, whoever asks: on one that runs
+          // another task, it waits for it.
+          if (order === 'person') {
+            const placed = yield* placedWith(work, [agent])
+            const worker = workerOf(agent, placed)
+            return worker === undefined || !workerTaken(worker, agent.taskId, at, placed, yield* occupied)
+          }
           // Offline, it waits for the computer to be back rather than start into a dead connection.
           if (!(yield* connectivity.online)) return false
           // A task's helpers, or automations' runs, as many at work as may be: it waits its turn, whatever is free.
@@ -1056,7 +1064,13 @@ export class Busy extends Context.Service<
                 : workerTaken(worker, waiter.taskId, busy, on, onWorkers)
             // Its task's own place, kept or owed, is no new one: an automation's run takes it beyond how many may be at work. A new
             // place it takes only while fewer automations than it may have are at work, wherever the person put it in Up next.
-            if (order !== 'person' && !busy.has(key) && kept === undefined && !back && (full || automationsFull(order, busy, tasks))) {
+            // What the person did never waits for a place, but waits for a worker that runs another task, whoever asks.
+            const waits =
+              !busy.has(key) &&
+              (order === 'person'
+                ? worker !== undefined && full
+                : kept === undefined && !back && (full || automationsFull(order, busy, tasks)))
+            if (waits) {
               if (worker !== undefined) {
                 if (full) waitsOn.set(waiter.taskId, worker)
               }
@@ -1330,6 +1344,24 @@ export class Busy extends Context.Service<
 
       // Every turn of a lead or a reviewer asks for a place first.
       yield* sessions.gateTurns((agent, work) => turn(agent, work))
+
+      /*
+       * A task's lead whose session starts while the home's worker its plan placed it on runs another task, as one let go
+       * when its task finished, started again by what is said to it: it waits for that worker in Up next, kept on its thread
+       * (`waits_for_place`), and starts there once the worker is free.
+       */
+      yield* sessions.gateStarts(({ taskId, threadId }) =>
+        Effect.gen(function* () {
+          const work = yield* atWork
+          const placed = yield* placedWith(work, [{ taskId }])
+          const worker = workerOf({ taskId }, placed)
+          if (worker === undefined || !workerTaken(worker, taskId, work.at, placed, yield* occupied)) return true
+          yield* sql`UPDATE threads SET waits_for_place = coalesce(waits_for_place, ${yield* timestamp}) WHERE id = ${threadId}`
+          yield* Effect.ignore(provide(touchTask(taskId)))
+          yield* wake
+          return false
+        }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not ask whether a lead’s worker is free', cause), true))),
+      )
 
       const set = (count: number | null) =>
         Effect.gen(function* () {

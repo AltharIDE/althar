@@ -418,6 +418,17 @@ export class Sessions extends Context.Service<
         readonly deliveryId: string
       }) => Effect.Effect<void>,
     ): Effect.Effect<void>
+    /**
+     * What a task's lead waits for before its session starts, once Busy says: false where the home's worker its task runs
+     * on runs another task now, when the start returns no session ('') and the lead starts there once the worker is free.
+     */
+    gateStarts(gate: (lead: { readonly taskId: string; readonly threadId: string }) => Effect.Effect<boolean>): Effect.Effect<void>
+    /**
+     * Lets an idle session go, as an idle coordinator's is: only where it is still the same session, between turns, with
+     * nothing left running, no call of its own open and nothing waiting to be said to it, all looked at under the thread's
+     * lock. What is said to it after starts it again. Whether it went.
+     */
+    retireIdle(threadId: string, sessionId: string): Effect.Effect<boolean>
     gateTurns(
       gate: (
         agent: {
@@ -601,6 +612,8 @@ export class Sessions extends Context.Service<
         readonly sessionId: string
         readonly deliveryId: string
       }): Effect.Effect<void> => Effect.void
+      /* What a task's lead's session waits for before it starts, once Busy says (gateStarts): until then, nothing. */
+      let startGate = (_lead: { readonly taskId: string; readonly threadId: string }): Effect.Effect<boolean> => Effect.succeed(true)
       /* What a lead's or a reviewer's turns wait for, once Busy says (gateTurns): until then, nothing. */
       let gate = (
         _agent: {
@@ -1630,6 +1643,13 @@ export class Sessions extends Context.Service<
             yield* inLiveProject(input.threadId)
             yield* notAbandoned(input.threadId)
             const thread = yield* loadThread(input.threadId)
+            // A lead on the home's worker that runs another task now waits for it (Busy.ts): it starts there once it is free.
+            if (
+              thread.role === 'task' &&
+              input.recovering === undefined &&
+              !(yield* startGate({ taskId: thread.taskId, threadId: input.threadId }))
+            )
+              return ''
             const sql = yield* SqlClient.SqlClient
             const [recovery] =
               yield* sql`SELECT 1 FROM turn_undo_recoveries WHERE thread_id = ${input.threadId} AND state = 'prepared' LIMIT 1`
@@ -2541,6 +2561,39 @@ export class Sessions extends Context.Service<
             yield* stopRunning(running, { state: 'completed', reason: 'idle' })
           }),
         )
+      /** An idle session let go for what waits (`retireIdle`), looked at again under the thread's lock. */
+      const retireIdle = (threadId: string, sessionId: string) =>
+        exclusive(
+          threadId,
+          Effect.gen(function* () {
+            const running = threads.get(threadId)
+            if (running === undefined) return false
+            const quiet = () =>
+              threads.get(threadId) === running &&
+              running.sessionId === sessionId &&
+              !running.stopping &&
+              !running.turnRunning &&
+              !running.leadHeld &&
+              !running.settingLead &&
+              running.handover !== 'under_way' &&
+              running.deliveryHeld === null &&
+              running.callsOpen.size === 0 &&
+              ![...running.background.values()].some((left) => left.ended === null) &&
+              !inputBatches.pending(threadId)
+            if (!quiet() || (yield* busyNow(threadId)) || (yield* inputWaiting(threadId)) || !quiet()) return false
+            running.stopping = true
+            retired.add(threadId)
+            // Said to meanwhile: it stays.
+            if ((yield* inputWaiting(threadId)) || inputBatches.pending(threadId)) {
+              running.stopping = false
+              retired.delete(threadId)
+              yield* Queue.offer(running.wake, undefined)
+              return false
+            }
+            yield* stopRunning(running, { state: 'completed', reason: 'idle' })
+            return true
+          }),
+        )
       yield* Effect.forkIn(
         Effect.forever(
           Effect.sleep(idleSweep).pipe(
@@ -3146,6 +3199,14 @@ export class Sessions extends Context.Service<
           Effect.sync(() => {
             gate = next
           }),
+        gateStarts: (next) =>
+          Effect.sync(() => {
+            startGate = next
+          }),
+        retireIdle: (threadId, sessionId) =>
+          run(retireIdle(threadId, sessionId)).pipe(
+            Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not let an idle session go', cause), false)),
+          ),
         onLeadTurn: (next) =>
           Effect.sync(() => {
             leadTurn = next
