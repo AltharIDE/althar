@@ -13,7 +13,6 @@ const ALTHAR: UpdateRow = {
   tone: 'offer',
   title: 'Althar 0.10.1 is ready',
   who: 'Althar 0.10.1',
-  link: { label: 'What’s new', onPress: fn() },
   end: { kind: 'press', label: 'Restart', onPress: restart },
   hides: true,
 }
@@ -41,7 +40,7 @@ function Held({ rows, ...props }: Parameters<typeof Updates>[0]) {
   const [hidden, setHidden] = useState<UpdateKind[]>([])
   const left = rows.filter((row) => !hidden.includes(row.kind))
   return (
-    <div style={{ display: 'flex', justifyContent: 'flex-end', minHeight: 360, padding: 8 }}>
+    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end', minHeight: 420, padding: 8 }}>
       <Updates
         {...props}
         rows={left}
@@ -109,7 +108,7 @@ export const TasksRunningHere: Story = {
   args: {
     open: true,
     rows: [
-      { ...ALTHAR, tone: 'quiet', line: 'Installs when you quit, as tasks are running here.', link: undefined, end: undefined },
+      { ...ALTHAR, tone: 'quiet', line: 'Installs when you quit, as tasks are running here.', end: undefined },
       {
         ...WORKERS,
         tone: 'quiet',
@@ -132,7 +131,6 @@ export const Failed: Story = {
         tone: 'failed',
         title: 'Couldn’t restart into Althar 0.10.1',
         line: 'It couldn’t replace the app where it’s installed. It installs when you quit.',
-        link: undefined,
         end: { kind: 'press', label: 'Try again', onPress: fn() },
       },
       {

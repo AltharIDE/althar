@@ -149,9 +149,6 @@
   -webkit-line-clamp: 2;
   text-wrap: pretty;
 }
-.link {
-  font-size: 12px;
-}
 .end {
   display: flex;
   justify-content: flex-end;

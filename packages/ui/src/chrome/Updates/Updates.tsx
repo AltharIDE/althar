@@ -49,8 +49,6 @@ export interface UpdateRow {
   readonly tone: UpdateTone
   readonly title: string
   readonly line?: string | undefined
-  /** A press of its own under its title, such as What's new. */
-  readonly link?: { readonly label: string; readonly onPress: () => void } | undefined
   readonly end?: UpdateEnd | undefined
   /** It can be put aside until its next release: what can update, waits or failed; not what runs, nor what's just done. */
   readonly hides: boolean
@@ -205,11 +203,6 @@ export function Updates({ rows, onHide, still, onCheck, checking = false, open, 
                     <span className={s.line} title={row.line}>
                       {row.line}
                     </span>
-                  )}
-                  {row.link !== undefined && (
-                    <LinkButton className={s.link} onClick={row.link.onPress}>
-                      {row.link.label}
-                    </LinkButton>
                   )}
                 </span>
                 <span className={s.end}>{row.end !== undefined && <End end={row.end} t={t} />}</span>
