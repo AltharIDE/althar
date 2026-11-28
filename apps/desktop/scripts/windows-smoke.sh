@@ -2,8 +2,9 @@
 # The Windows smoke test: installs the NSIS installer bun run package made, as
 # a person would but silently, and checks what it put where: for the person
 # alone (their own folders and registry, with no administrator's prompt), a
-# Start menu entry and an uninstaller, the updater's settings, and the Node,
-# Codex, Claude Code and speech engine the app runs, each run once. Then it
+# Start menu entry and an uninstaller, the updater's settings, the Node and
+# speech engine the app runs, each run once, and no agent's own program (each
+# comes on first use). Then it
 # opens Althar on a profile of its own until its runtime is ready, and
 # uninstalls it. Run in Git Bash, from apps/desktop, after bun run package:
 #
@@ -42,10 +43,10 @@ grep -q 'provider: github' "$dir/resources/app-update.yml" 2>/dev/null && ok "th
 
 node="$dir/resources/node/bin/node.exe"
 said=$("$node" --version 2>&1) && ok "Node $said" || bad "node.exe doesn't run: $said"
-codex="$modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe"
-said=$("$codex" --version 2>&1) && ok "Codex: $said" || bad "codex.exe doesn't run: $said"
-claude="$modules/@anthropic-ai/claude-agent-sdk-win32-x64/claude.exe"
-said=$("$claude" --version 2>&1) && ok "Claude Code: $said" || bad "claude.exe doesn't run: $said"
+# The agents' own programs don't ship: each comes on first use (docs/plans/agents-on-first-use.md).
+for program in "$modules/@openai/codex-win32-x64" "$modules/@anthropic-ai/claude-agent-sdk-win32-x64"; do
+  [ ! -e "$program" ] && ok "no $(basename "$program") shipped" || bad "$program ships, which comes on first use"
+done
 # The speech engine's addon is Node-API, so the app's Node loads it as Electron's utility process does.
 said=$("$node" -e "if (typeof require(process.argv[1]).OfflineRecognizer !== 'function') process.exit(1)" "$(cygpath -w "$modules/sherpa-onnx-node")" 2>&1) \
   && ok "the speech engine loads" || bad "sherpa-onnx doesn't load: $said"

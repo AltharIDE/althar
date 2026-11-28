@@ -1378,8 +1378,9 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
     cli: {
       name: 'codex',
       // The person's own Codex, where its adapter can drive it (codex-acp's range), is what sessions drive; else the
-      // package the lockfile pins, downloaded.
-      drivenBy: 'CODEX_PATH',
+      // package the lockfile pins, downloaded. In a Flatpak its adapter drives the bridge out to the computer
+      // (`CODEX_PATH`, apps/desktop/flatpak/codex-host.sh), which is told the copy Althar downloaded instead.
+      drivenBy: process.env.FLATPAK_ID === undefined ? 'CODEX_PATH' : 'ALTHAR_DOWNLOADED_CODEX',
       download: { npm: true, ...PINNED_PROGRAMS.codex },
       fits: codexFits,
       // In a Flatpak sessions use the host's Codex bridge too; reporting the

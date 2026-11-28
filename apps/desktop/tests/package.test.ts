@@ -1,14 +1,23 @@
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join, relative, sep } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
 import { ADAPTER_PATCH_MARKER, adapterPatchFor, applyAdapterPatch, assertAdapterPatched, PATCHED_FILE } from '../scripts/adapterPatch'
 import { isMachO, LIPO_ARCH, macBuild, machOFiles, wrongArchs } from '../scripts/archs'
-import { ADAPTERS, binariesFor, NATIVE, prunePrebuilds, speechPackage } from '../scripts/binaries'
+import {
+  ADAPTERS,
+  agentProgramsIn,
+  assertNoAgentPrograms,
+  binariesFor,
+  NATIVE,
+  pruneAgentPrograms,
+  prunePrebuilds,
+  speechPackage,
+} from '../scripts/binaries'
 import { entitlementsFor } from '../scripts/entitlements'
 import { fetchNode, NODE_ARCHIVES, NODE_VERSION, nodeArchive, nodeProgram } from '../scripts/node'
 
@@ -75,24 +84,18 @@ describe('the packaged app', () => {
     expect(nodeProgram('win32')).toBe('node.exe')
   })
 
-  it('checks the agents, speech engine and computer-use driver at their platform paths', () => {
+  it('checks the speech engine and computer-use driver at their platform paths, and no agent’s own program', () => {
     expect(binariesFor('win32', 'x64')).toEqual([
-      { parent: '@openai/codex', name: '@openai/codex-win32-x64', file: 'vendor/x86_64-pc-windows-msvc/bin/codex.exe' },
-      { parent: '@anthropic-ai/claude-agent-sdk', name: '@anthropic-ai/claude-agent-sdk-win32-x64', file: 'claude.exe' },
       { parent: 'sherpa-onnx-node', name: 'sherpa-onnx-win-x64', file: 'sherpa-onnx.node' },
       { parent: '@trycua/cua-driver', name: '@trycua/cua-driver-win32-x64-msvc', file: 'cua_driver_node_runtime.node' },
       { parent: '@trycua/cua-driver', name: '@trycua/cua-driver-win32-x64-msvc', file: 'cua_driver_sdk.dll' },
     ])
     expect(binariesFor('darwin', 'arm64').map(({ name, file }) => `${name}/${file}`)).toEqual([
-      '@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex',
-      '@anthropic-ai/claude-agent-sdk-darwin-arm64/claude',
       'sherpa-onnx-darwin-arm64/sherpa-onnx.node',
       '@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node',
       '@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib',
     ])
     expect(binariesFor('darwin', 'x64').map(({ name, file }) => `${name}/${file}`)).toEqual([
-      '@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/bin/codex',
-      '@anthropic-ai/claude-agent-sdk-darwin-x64/claude',
       'sherpa-onnx-darwin-x64/sherpa-onnx.node',
       '@trycua/cua-driver-darwin-x64/cua_driver_node_runtime.node',
       '@trycua/cua-driver-darwin-x64/libcua_driver_sdk.dylib',
@@ -103,7 +106,31 @@ describe('the packaged app', () => {
       file: 'libcua_driver_sdk.so',
     })
     expect(speechPackage('linux', 'x64')).toBe('sherpa-onnx-linux-x64')
-    expect(() => binariesFor('win32', 'ia32')).toThrow(/no build for win32-ia32/)
+  })
+
+  it('removes the agents’ own programs npm installed with their adapters, at any depth, and fails where one is left', () => {
+    const app = mkdtempSync(join(tmpdir(), 'althar-stage-'))
+    const pkg = (...path: string[]) => {
+      mkdirSync(join(app, ...path), { recursive: true })
+      writeFileSync(join(app, ...path, 'package.json'), '{}')
+    }
+    pkg('node_modules', '@anthropic-ai', 'claude-agent-sdk')
+    pkg('node_modules', '@anthropic-ai', 'claude-agent-sdk-darwin-arm64')
+    pkg('node_modules', '@openai', 'codex')
+    pkg('node_modules', '@openai', 'codex-darwin-arm64')
+    pkg('node_modules', '@agentclientprotocol', 'codex-acp', 'node_modules', '@openai', 'codex-darwin-arm64')
+    pkg('node_modules', 'sharp')
+    expect(agentProgramsIn(app).map((path) => relative(app, path).split(sep).join('/'))).toEqual([
+      'node_modules/@agentclientprotocol/codex-acp/node_modules/@openai/codex-darwin-arm64',
+      'node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64',
+      'node_modules/@openai/codex-darwin-arm64',
+    ])
+    expect(() => assertNoAgentPrograms(app)).toThrow(/come on first use/)
+    pruneAgentPrograms(app)
+    expect(() => assertNoAgentPrograms(app)).not.toThrow()
+    // The adapters' own packages, and everything else, stay.
+    for (const kept of ['@anthropic-ai/claude-agent-sdk', '@openai/codex', 'sharp'])
+      expect(existsSync(join(app, 'node_modules', kept))).toBe(true)
   })
 
   it('ships a Node for Intel Macs too, and names each Mac build with its processor', () => {

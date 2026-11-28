@@ -22,23 +22,48 @@ export const prunePrebuilds = (app: string, platform: string, arch: string) => {
 
 /*
  * The programs a package carries for the platform it is made on, beside
- * Electron and the Node in its resources (node.ts): Codex and Claude Code,
- * which the adapters start, dictation's speech engine, and the computer-use driver. Each comes in a
- * package of its own per platform, which npm installs as an optional
- * dependency of the package that names it; the runtime finds each where
- * this says (provider-adapters' registry.ts, `bundledCodex` and
- * `bundledClaude`; sherpa-onnx-node's addon.js), so package.ts checks the
- * staged app has every one before it is packaged.
+ * Electron and the Node in its resources (node.ts): dictation's speech engine
+ * and the computer-use driver. Each comes in a package of its own per
+ * platform, which npm installs as an optional dependency of the package that
+ * names it; the runtime finds each where this says (sherpa-onnx-node's
+ * addon.js), so package.ts checks the staged app has every one before it is
+ * packaged. The agents' own programs, Claude Code's and Codex's, don't ship:
+ * each comes on first use, the exact package the lockfile pins
+ * (docs/plans/agents-on-first-use.md), so package.ts removes them and checks
+ * none is left.
  */
 
-/** Codex's builds, by Node's `platform-arch`: the Rust target each is, as `@openai/codex`'s `bin/codex.js` names them. */
-const CODEX_TARGETS: Readonly<Record<string, string>> = {
-  'darwin-arm64': 'aarch64-apple-darwin',
-  'darwin-x64': 'x86_64-apple-darwin',
-  'linux-arm64': 'aarch64-unknown-linux-musl',
-  'linux-x64': 'x86_64-unknown-linux-musl',
-  'win32-arm64': 'aarch64-pc-windows-msvc',
-  'win32-x64': 'x86_64-pc-windows-msvc',
+/** The agents' own programs' platform packages, by the start of their names: never shipped. */
+export const AGENT_PROGRAMS: ReadonlyArray<string> = ['@anthropic-ai/claude-agent-sdk-', '@openai/codex-']
+
+/** Every agent program's platform package in an app's node_modules, at any depth, by its folder. */
+export const agentProgramsIn = (app: string): ReadonlyArray<string> => {
+  const found: string[] = []
+  const walk = (modules: string) => {
+    if (!existsSync(modules)) return
+    for (const entry of readdirSync(modules)) {
+      const names = entry.startsWith('@') ? readdirSync(join(modules, entry)).map((name) => `${entry}/${name}`) : [entry]
+      for (const name of names) {
+        const folder = join(modules, ...name.split('/'))
+        if (AGENT_PROGRAMS.some((prefix) => name.startsWith(prefix))) found.push(folder)
+        else walk(join(folder, 'node_modules'))
+      }
+    }
+  }
+  walk(join(app, 'node_modules'))
+  return found
+}
+
+/** Removes the agents' own programs from a staged app: they come on first use. */
+export const pruneAgentPrograms = (app: string) => {
+  for (const folder of agentProgramsIn(app)) rmSync(folder, { recursive: true, force: true })
+}
+
+/** Fails where an app still holds an agent's own program: none ships. */
+export const assertNoAgentPrograms = (app: string) => {
+  const left = agentProgramsIn(app)
+  if (left.length > 0)
+    throw new Error(`The package holds agents' own programs, which come on first use:\n${left.map((path) => `  ${path}`).join('\n')}`)
 }
 
 /** A program the package must hold: in `name`, the platform's package, found from `parent` as Node would; at `file` inside it. */
@@ -51,17 +76,12 @@ export interface Binary {
 /** The speech engine's package for a platform: sherpa-onnx names Windows `win`, not `win32`. */
 export const speechPackage = (platform: string, arch: string) => `sherpa-onnx-${platform === 'win32' ? 'win' : platform}-${arch}`
 
-/** Agent executables and native libraries for a platform and processor. */
+/** The native programs and libraries a package carries for a platform and processor. */
 export const binariesFor = (platform: string, arch: string): ReadonlyArray<Binary> => {
-  const target = CODEX_TARGETS[`${platform}-${arch}`]
-  if (target === undefined) throw new Error(`Codex has no build for ${platform}-${arch}.`)
-  const exe = platform === 'win32' ? '.exe' : ''
   const driver = '@trycua/cua-driver'
   const driverPackage = `${driver}-${platform}-${arch}${platform === 'win32' ? '-msvc' : platform === 'linux' ? '-gnu' : ''}`
   const driverLibrary = platform === 'win32' ? 'cua_driver_sdk.dll' : `libcua_driver_sdk.${platform === 'darwin' ? 'dylib' : 'so'}`
   return [
-    { parent: '@openai/codex', name: `@openai/codex-${platform}-${arch}`, file: `vendor/${target}/bin/codex${exe}` },
-    { parent: '@anthropic-ai/claude-agent-sdk', name: `@anthropic-ai/claude-agent-sdk-${platform}-${arch}`, file: `claude${exe}` },
     { parent: 'sherpa-onnx-node', name: speechPackage(platform, arch), file: 'sherpa-onnx.node' },
     { parent: driver, name: driverPackage, file: 'cua_driver_node_runtime.node' },
     { parent: driver, name: driverPackage, file: driverLibrary },

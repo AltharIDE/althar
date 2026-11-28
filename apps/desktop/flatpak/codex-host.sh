@@ -39,8 +39,12 @@ codex="$(flatpak-spawn --host sh -c '
   fi
   printf "%s" "$found"
 ' 2>/dev/null)" || true
+# The Codex Althar downloaded (provider-adapters' registry names it here, as `drivenBy`): kept in the Flatpak's own data
+# folder, which the computer sees at the same path, and run out there like the person's own. Taken first, as Althar
+# looks for it first (runtime's Installs), so the copy that was checked is the one that runs.
+if [ -n "${ALTHAR_DOWNLOADED_CODEX:-}" ] && [ -x "$ALTHAR_DOWNLOADED_CODEX" ]; then codex="$ALTHAR_DOWNLOADED_CODEX"; fi
 if [ -z "$codex" ]; then
-  echo 'Codex has to be installed on this computer for Althar to run it in its Flatpak. Install Codex there, then try again.' >&2
+  echo 'Codex isn’t on this computer yet. Download it in Settings › Agents, or install Codex there, then try again.' >&2
   exit 1
 fi
 # The device's own session, so Codex starts where its configuration lives.

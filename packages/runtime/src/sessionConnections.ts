@@ -624,7 +624,10 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       // What the launch's environment holds: whether it drives the person's own copy rather than the one Althar brings.
       const launchEnv = transport._tag === 'Process' ? { ...inherited(transport.spec.inheritEnv), ...transport.spec.env } : {}
       const drivenBy = definition.cli?.drivenBy
-      const ownCopy = drivenBy !== undefined && launchEnv[drivenBy] !== undefined
+      // The person's own: one Althar downloaded is kept under its agents' folder, and is Althar's to put right.
+      const driven = drivenBy === undefined ? undefined : launchEnv[drivenBy]
+      const keptRoot = runtimeConfig.agentsRoot
+      const ownCopy = driven !== undefined && (keptRoot === undefined || !driven.startsWith(keptRoot))
       // The program Althar brings for it, there and of the version its adapter needs, before it is spawned (bundledPrograms.ts).
       const check = selectedWorker === null && definition.program !== undefined ? () => definition.program?.(launchEnv) : undefined
       const program = check?.()
