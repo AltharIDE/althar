@@ -189,7 +189,7 @@ const AGENT_ADAPTERS = ['@agentclientprotocol/claude-agent-acp', '@agentclientpr
  * node-pty, which the runtime loads as a terminal first opens: only this machine's build of it. Its package carries
  * every platform's prebuilds and Windows' ConPTY; a Linux home has none of those, as npm compiles it into `build/`.
  */
-const keepOwnPty = async (destination: string) => {
+export const keepOwnPty = async (destination: string) => {
   const folder = join(destination, 'node_modules', 'node-pty')
   const own = `${process.platform}-${process.arch}`
   const prebuilds = join(folder, 'prebuilds')
