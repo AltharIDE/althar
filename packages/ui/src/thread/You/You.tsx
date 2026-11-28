@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { AttachmentKind, Delivery, unreachable } from '../../foundations/vocabulary'
@@ -21,6 +21,9 @@ export interface YouText {
   queued: string
   /** Sent now, while the agent works: until it has stopped at a safe point to read it. */
   interrupting: string
+  /** No agent is on its way to read it. */
+  notSent: string
+  sendAgain: string
   view: (name: string) => string
   open: (name: string) => string
   showPaste: (name: string) => string
@@ -32,6 +35,8 @@ export const youText: YouText = {
   youQueued: 'You, queued',
   queued: 'Queued',
   interrupting: 'Sent now',
+  notSent: 'Not sent',
+  sendAgain: 'Send again',
   view: (name) => `View ${name}`,
   open: (name) => `Open ${name}`,
   showPaste: (name) => `Show pasted text, ${name}`,
@@ -55,12 +60,24 @@ export type YouProps = RootProps<
     comments?: ReactNode
     /** Restores this turn's files and conversation. Offered only for a delivered, checkpointed message. */
     onUndo?: () => void
+    /** Starts its agent again to read it. Offered only for one not sent. */
+    onSendAgain?: () => void
     text?: Partial<YouText>
   }
 >
 
-function Status({ delivery, at, t }: { delivery: Delivery; at?: string; t: YouText }) {
+function Status({ delivery, at, t, onSendAgain }: { delivery: Delivery; at?: string; t: YouText; onSendAgain?: () => void }) {
   switch (delivery) {
+    case Delivery.NotSent:
+      return (
+        <>
+          <span className={s.notSent}>
+            <Icon name="problem" size={11} />
+            {t.notSent}
+          </span>
+          {onSendAgain !== undefined && <LinkButton onClick={onSendAgain}>{t.sendAgain}</LinkButton>}
+        </>
+      )
     case Delivery.Queued:
       return (
         <>
@@ -95,6 +112,7 @@ export function You({
   unfurl,
   comments,
   onUndo,
+  onSendAgain,
   text,
   className,
   ...rest
@@ -135,9 +153,33 @@ export function You({
             {t.undo}
           </LinkButton>
         )}
-        <Status delivery={delivery} at={at} t={t} />
+        <Status delivery={delivery} at={at} t={t} {...(onSendAgain === undefined ? {} : { onSendAgain })} />
       </span>
     </article>
+  )
+}
+
+/** How far from the chip's own shape a picture may be and still fill it: a strip or a tall shot fits whole instead. */
+const FILLS = { wide: 2.4, tall: 1 }
+
+/*
+ * An image's picture in its chip: filling it where it is about the chip's shape, whole where cropping it would leave only
+ * its middle (a strip of a screen is mostly margin there), and the picture icon where it doesn't load.
+ */
+function Thumb({ a }: { a: Extract<MessageAttachment, { kind: AttachmentKind.Image }> }) {
+  const shown = a.thumb ?? a.src
+  const [failed, setFailed] = useState<string | null>(null)
+  const ratio = a.width !== undefined && a.height !== undefined && a.height > 0 ? a.width / a.height : null
+  const whole = ratio !== null && (ratio > FILLS.wide || ratio < FILLS.tall)
+  const drawn = shown !== undefined && shown !== '' && failed !== shown
+  return (
+    <span className={s.imageArea} data-drawn={drawn || undefined}>
+      {drawn ? (
+        <img src={shown} alt="" className={s.thumb} data-whole={whole || undefined} onError={() => setFailed(shown)} />
+      ) : (
+        <Icon name="image" size={16} />
+      )}
+    </span>
   )
 }
 
@@ -156,10 +198,9 @@ function AttachmentChip({
   const { openImage } = useThreadShell()
   switch (a.kind) {
     case AttachmentKind.Image: {
-      const shown = a.thumb ?? a.src
       const body = (
         <>
-          <span className={s.imageArea}>{shown ? <img src={shown} alt="" className={s.thumb} /> : <Icon name="image" size={16} />}</span>
+          <Thumb a={a} />
           <span className={s.name}>{a.name}</span>
         </>
       )

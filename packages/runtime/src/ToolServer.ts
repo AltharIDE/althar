@@ -10,7 +10,9 @@ import { Context, Effect, Exit, Layer } from 'effect'
 
 import { Errands, type AskedAction, type TurnWord } from './Errands'
 import { errandTools } from './errandTools'
-import { ToolRefused } from './toolErrors'
+import type { ToolRefused } from './toolErrors'
+import { refusalWords } from './toolRefusal'
+import { redactCredentials } from './diagnostics'
 import { singleTypes } from './toolSchemas'
 import { workerMcpMounts, WORKER_MCP_PATH } from './workerMcp'
 
@@ -170,10 +172,14 @@ export class ToolServer extends Context.Service<
         })
         server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const tool = tools.find((candidate) => candidate.name === request.params.name)
+          // Every refusal leaves here with any credential in it taken out, a guard's as a tool's (toolRefusal.ts).
           if (tool === undefined)
-            return { isError: true, content: [{ type: 'text' as const, text: `Althar has no tool called ${request.params.name}.` }] }
+            return {
+              isError: true,
+              content: [{ type: 'text' as const, text: redactCredentials(`Althar has no tool called ${request.params.name}.`) }],
+            }
           const guarded = await refusal(tool)
-          if (guarded !== null) return { isError: true, content: [{ type: 'text' as const, text: guarded }] }
+          if (guarded !== null) return { isError: true, content: [{ type: 'text' as const, text: redactCredentials(guarded) }] }
           const input = request.params.arguments ?? {}
           const controller = tool.cancelWithRequest ? new AbortController() : undefined
           if (controller !== undefined) res.once('close', () => controller.abort())
@@ -207,10 +213,12 @@ export class ToolServer extends Context.Service<
                   ],
                 }
           const refused = exit.cause.reasons.find((reason) => reason._tag === 'Fail')
+          // What failed, in the runtime's own words for it: a refusal's, else the error's (toolRefusal.ts), never only its kind;
+          // any credential in it taken out here, at the edge, whichever tool worded it.
           const text =
-            refused !== undefined && refused._tag === 'Fail' && refused.error instanceof ToolRefused
-              ? refused.error.message
-              : 'Althar could not do that. Try again, or tell the person.'
+            refused !== undefined && refused._tag === 'Fail'
+              ? refusalWords(refused.error)
+              : 'Althar could not do that, and what it did is in its log. Try again, or tell the person.'
           await told(text)
           return { isError: true, content: [{ type: 'text' as const, text }] }
         })

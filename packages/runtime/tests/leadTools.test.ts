@@ -117,7 +117,7 @@ describe('a lead’s pull request tools, at their edges', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('post a reply whose answer was lost only once: asked again, it says to try again or tell the person', () => {
+  it.live('post a reply whose answer was lost only once: asked again, it says to check on the host first', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
     github.addRepository(['meridian', 'api'])
@@ -128,10 +128,10 @@ describe('a lead’s pull request tools, at their edges', () => {
         yield* callTool(lead, 'reply_on_pull_request', { body: 'Seconds, as charges.' }),
         'The code host said: The fake reply failed (unreachable)',
       )
-      // It may be on the pull request already: the same reply isn't posted again.
+      // It may be on the pull request already: the same reply isn't posted again, and the agent hears why.
       assert.strictEqual(
         yield* callTool(lead, 'reply_on_pull_request', { body: 'Seconds, as charges.' }),
-        'Althar could not do that. Try again, or tell the person.',
+        'That may have gone through. Check on the host before trying again.',
       )
       assert.lengthOf(
         github.commentsOn(1).filter((comment) => comment.body.startsWith('Seconds, as charges.')),

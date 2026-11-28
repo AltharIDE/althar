@@ -36,8 +36,14 @@ export const text = {
 
 /** Null while nothing shows them, before the first reading, or where the home can't say, as an older Althar can't. */
 export const useWorkers = (shown: boolean): HomeWorkers | null => {
+  const reading = useWorkersRead(shown)
+  return shown ? (reading.data ?? null) : null
+}
+
+/** The read of the home's workers itself: what it gave, whether it failed, and reading again, where that matters. */
+export const useWorkersRead = (shown: boolean) => {
   const { client } = useServices()
-  const reading = useQuery({
+  return useQuery({
     queryKey: keys.workers,
     queryFn: () => client.getWorkers(),
     enabled: shown,
@@ -46,7 +52,6 @@ export const useWorkers = (shown: boolean): HomeWorkers | null => {
     staleTime: 0,
     retry: false,
   })
-  return shown ? (reading.data ?? null) : null
 }
 
 export interface RemoveWorkerModel {

@@ -8,7 +8,7 @@ import { build } from 'electron-builder'
 
 import { adapterPatchFor, applyAdapterPatch, assertAdapterPatched } from './adapterPatch.ts'
 import { LIPO_ARCH, macBuild, wrongArchs } from './archs.ts'
-import { binariesFor, speechPackage } from './binaries.ts'
+import { ADAPTERS, binariesFor, NATIVE, prunePrebuilds, speechPackage } from './binaries.ts'
 import { entitlementsFor } from './entitlements.ts'
 import { joinFeeds, refresh } from './feed.ts'
 import { fetchNode, NODE_IN_APP, nodeProgram } from './node.ts'
@@ -91,11 +91,6 @@ const own = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
 const ALTHAR_IDENTITY = 'Balazs Otakomaiya (59A9XM7G7P)'
 /** Where updates come from: the repository's GitHub Releases (ADR-024). */
 const RELEASES = { provider: 'github', owner: 'AltharIDE', repo: 'althar' } as const
-
-/** The packages the runtime starts as processes, at the versions the app depends on. */
-const ADAPTERS = ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp']
-/** What stays in node_modules, including packages with platform binaries. */
-const NATIVE = ['sherpa-onnx-node', 'electron-updater', 'sharp', 'node-pty', '@trycua/cua-driver']
 
 /** The packages that carry the agents' binaries, by the adapter that brings each; their platform packages are pinned by them. */
 const BINARIES: Record<string, string> = {
@@ -236,6 +231,7 @@ const stageFor = (arch: string) => {
     join(stage, CLAUDE_ADAPTER),
     adapterPatchFor(join(desktop, '..', '..'), own.dependencies['@agentclientprotocol/claude-agent-acp']),
   )
+  prunePrebuilds(stage, process.platform, arch)
   // node-pty's helper that starts a shell comes from the registry without leave to run, so no terminal would open; it is given it here.
   for (const helper of globSync('node_modules/node-pty/prebuilds/*/spawn-helper', { cwd: stage })) chmodSync(join(stage, helper), 0o755)
   for (const [name, version] of Object.entries(pinned)) {

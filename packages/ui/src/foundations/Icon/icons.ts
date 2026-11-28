@@ -26,6 +26,7 @@ import {
   Edit,
   EditPencil,
   Expand,
+  Flask,
   Folder,
   Frame,
   InfoCircle,
@@ -58,8 +59,10 @@ import {
   PagePlus,
   PageRight,
   Pause,
+  PauseSolid,
   Pin,
   Play,
+  PlaySolid,
   Plus,
   Prohibition,
   Quote,
@@ -202,6 +205,9 @@ export const ICONS = {
   /** Plays something once, to hear it. */
   play: Play,
   pause: Pause,
+  /** A moving picture's own pause and play, solid as a player's are (the outline pause reads as "00" small). */
+  stillPicture: PauseSolid,
+  playPicture: PlaySolid,
   /** Waits for something else to merge first. */
   after: GitMerge,
   external: OpenNewWindow,
@@ -244,6 +250,8 @@ export const ICONS = {
   commit: GitCommit,
   /** What something is, explained where it is pointed at. */
   info: InfoCircle,
+  /** Still experimental: what works, but may change or have rough edges, as homes. */
+  flask: Flask,
   /** Something failed: the mark before the words that say what, in the danger colour. */
   problem: WarningCircle,
   /** Althar's own news: its tab, with what's new in an update and what's coming next. */

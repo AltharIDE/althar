@@ -74,6 +74,7 @@ import { listSkills } from './Skills'
 import { addItem, updateItem } from './threads'
 import { POOL, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { ToolRefused } from './toolErrors'
+import { toolRefusalOf } from './toolRefusal'
 import { agentTools } from './agentTools'
 import { changesOf, defaultEfforts, inWords, modelsTurnedOff, plainNames, said, type Names } from './settingWords'
 
@@ -1477,10 +1478,7 @@ export class SettingsTools extends Context.Service<
             Effect.catch((error) =>
               error instanceof ToolRefused
                 ? Effect.fail(error)
-                : Effect.andThen(
-                    Effect.logWarning('A settings tool did not succeed', error),
-                    Effect.fail(new ToolRefused({ message: 'Althar could not do that. Try again, or tell the person.' })),
-                  ),
+                : Effect.andThen(Effect.logWarning('A settings tool did not succeed', error), Effect.fail(toolRefusalOf(error))),
             ),
           ),
       })
@@ -1590,6 +1588,8 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   addWorker: "person: adding a worker installs a service on a machine of the person's own and lets it into the home",
   createWorkerCode: "person: a worker's one-time code lets a machine into the home, the person's to hand over",
   setWorkerProjects: "person: which projects a worker works on grants that machine their code, the person's to give",
+  updateWorker: "person: updating a worker restarts its service between its runs, the person's to time (althar/computers' updates)",
+  cancelWorkerUpdate: 'person: takes back an update the person asked of a worker',
   // althar/computers: phones
   pairedDevices: 'person: only reads the phones paired with this computer; pairing and removing one are the person’s',
   removePairedDevice: 'person: removing a phone takes its key off this computer, the person’s',

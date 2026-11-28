@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
+import { identify } from '@althar/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -14,7 +15,7 @@ import { Instance } from '../src/Instance'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
-import { repository, runtime } from './support'
+import { items, repository, runtime } from './support'
 
 /*
  * Merging a task here, and publishing it, where there is nothing to act on:
@@ -118,6 +119,31 @@ describe('merging a task here, with nothing to merge into', () => {
       // Pushing what merged here: the task's work isn't merged, so nothing is pushed.
       assert.deepStrictEqual(yield* changes.pushHere(task.taskId), [])
       assert.strictEqual(git(remote, 'branch', '--list'), '* main')
+    }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('merging a task here, where git would write a test’s identity', () => {
+  it.live('writes the merge commit as Althar, and says so in the task’s thread with the file', () =>
+    Effect.gen(function* () {
+      const changes = yield* Changes
+      const { root, task, slug, worktree } = yield* plainTask
+      const head = commit(worktree, 'retry.ts', 'retry\n')
+      // The base moved on, so the merge needs a commit of its own, not a fast-forward.
+      commit(root, 'limits.ts', 'limits\n')
+      // What a test left in the repository's own config, which every worktree of it shares.
+      identify(root, 'T', 't@t.test')
+      yield* changes.mergeHere(task.taskId, [{ repository: slug, head }])
+      assert.strictEqual(git(root, 'log', '-1', '--format=%P', 'main').split(' ').length, 2)
+      assert.strictEqual(
+        git(root, 'log', '-1', '--format=%an <%ae> | %cn <%ce>', 'main'),
+        'Althar <althar@localhost> | Althar <althar@localhost>',
+      )
+      const said = (yield* items(task.threadId)).flatMap((item) => (item.kind === 'notice' ? [String(item.content.title)] : []))
+      const warning = said.find((title) => title.startsWith('Git here would write commits as a test’s identity')) ?? ''
+      assert.include(warning, `“t@t.test” (user.email) from ${join(realpathSync(root), '.git', 'config')}`)
+      // The person's config is left as it was.
+      assert.strictEqual(git(root, 'config', '--local', '--get', 'user.name'), 'T')
     }).pipe(Effect.provide(runtime())),
   )
 })

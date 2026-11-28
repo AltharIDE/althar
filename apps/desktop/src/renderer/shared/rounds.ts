@@ -228,6 +228,8 @@ export interface RoundSource {
   readonly turnStarted?: string | null
   readonly openedAt?: string | null
   readonly reading?: boolean
+  /** The person just sent again what wasn't sent (`ThreadSource`). */
+  readonly resending?: boolean
   readonly readingLocally?: boolean
   readonly turnEnded?: string | null
   /** Where each turn's time went, by its id (`turnsById`). */
@@ -279,6 +281,7 @@ export const roundsOf = (
         // What opens the thread is answered in its first stretch, when that is all there is yet.
         ...(last && index === 0 && source.openedAt !== undefined ? { openedAt: source.openedAt } : {}),
         ...(last && source.reading !== undefined ? { reading: source.reading } : {}),
+        ...(source.resending === undefined ? {} : { resending: source.resending }),
         ...(last && source.readingLocally !== undefined ? { readingLocally: source.readingLocally } : {}),
         ...(last && source.turnEnded !== undefined ? { turnEnded: source.turnEnded } : {}),
         ...(last && index > 0 ? { earlierAt } : {}),

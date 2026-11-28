@@ -3,6 +3,7 @@ import { createContext, Fragment, useContext, useState, type ReactNode } from 'r
 import type { FieldAnswer, SentLineComment, Unfurl } from '@althar/contracts'
 import {
   AltharLine,
+  Delivery,
   Arrived,
   CodeBlock,
   CommentExcerpt,
@@ -774,6 +775,8 @@ export function ThreadBlocks({
             at={block.at}
             delivery={block.delivery}
             {...(onUndoFrom === undefined || !undoable?.includes(block.id) ? {} : { onUndo: () => onUndoFrom(block.id) })}
+            // Not sent: trying the thread again starts its agent to read it.
+            {...(block.delivery !== Delivery.NotSent || onTryAgain === undefined ? {} : { onSendAgain: onTryAgain })}
             {...(queued === undefined ? {} : { text: { queued } })}
             // The images sent with it, each opening full size with the others; then its files and folders, a chip each.
             {...(block.pictures.length + block.files.length === 0

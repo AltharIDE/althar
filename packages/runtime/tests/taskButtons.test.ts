@@ -15,6 +15,7 @@ import type { ToolAccess } from '../src/ToolServer'
 import { callTool, HOST, hosted, notices, repository, runtime, until } from './support'
 
 import { ask, cards, connect, git, pushByHand, runtimeWith, tipOf } from './changesSupport'
+import { identify } from '@althar/testing'
 
 /*
  * The buttons of a task's Change card and menu, as tools (ADR-097, "Matching the window"): the coordinator, or a lead,
@@ -30,8 +31,7 @@ const opened = () => {
   const tip = tipOf(bare)
   const github = makeFakeService({ pushUrl: () => bare, headOf: () => tip() })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   const ready = Effect.gen(function* () {
     yield* connect('github', HOST)
     const projectId = yield* ask(

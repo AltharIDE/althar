@@ -645,6 +645,37 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledTimes(2)
   })
 
+  it('names no default effort for a lead on a worker, which says its models and never their efforts', async () => {
+    const workerId = 'wrk_' + 'b'.repeat(32)
+    const plan = card().plan
+    if (plan == null) throw new Error('The task card fixture needs a plan.')
+    const held = card({
+      phase: 'held',
+      plan: {
+        ...plan,
+        startsAt: null,
+        workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false },
+        steps: [
+          { key: 'implement', agentId: 'claude-code', model: 'opus', skipped: false },
+          { key: 'review', agentId: 'codex', model: 'gpt-5.2-codex', skipped: false },
+        ],
+      },
+    })
+    // The worker lists the very model: that says nothing of how hard it starts there.
+    const readiness = { ...CHECKED, models: [{ providerId: 'claude-code', models: [{ id: 'opus', name: 'Opus' }] }] }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false, readiness }]),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    // The home: both steps run at a default it knows.
+    await waitFor(() => expect(screen.getAllByText('by default')).toHaveLength(2))
+    await userEvent.click(await screen.findByRole('button', { name: 'Runs on: This Mac' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Linux worker bbbbbb' }))
+    // Only the review's, which runs on the home.
+    expect(screen.getAllByText('by default')).toHaveLength(1)
+  })
+
   it('offers where it runs as it counts down, keeping the countdown for a worker that can take it', async () => {
     const free = 'wrk_' + 'f'.repeat(32)
     const busy = 'wrk_' + '9'.repeat(32)
@@ -1091,6 +1122,8 @@ describe('the Talk room', () => {
     // The lead at the coordinator's effort; the review, which it left out, at the model's own.
     expect(await screen.findByRole('button', { name: 'Lead for this task: Claude Opus High' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Review: gpt-5.2-codex Medium' })).toBeTruthy()
+    // Each row names it, and only the one no one set says so, as it shows dimmer.
+    expect(screen.getByText('by default').parentElement?.textContent).toBe(' Medium by default')
     // Skipping the review keeps it.
     // Skipping the review is in its dropdown, the whole row.
     await userEvent.click(screen.getByRole('button', { name: /^Review: / }))

@@ -2,10 +2,11 @@ name: host
 
 # The Linux service has process tests against its built Node entry, so its test
 # commands build first. Keep this gate separate from the source-only harness.
+# After merge on main and on release branches: host-release.yml cuts only a commit this passed on.
 on:
   workflow_call:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
     paths:
       - 'apps/host/**'
       - 'packages/contracts/**'

@@ -301,9 +301,10 @@ describe('a run that ends at once', () => {
       // Gone, and something else is where it goes: it can't be brought back.
       rmSync(worktree?.path ?? '', { recursive: true, force: true })
       writeFileSync(worktree?.path ?? '', 'not a folder')
-      assert.strictEqual(
+      // Said as it failed, not only that it did: its shell's own words, which differ by platform (ENOENT on Windows).
+      assert.match(
         yield* callTool(access('coordinator', projectId), 'run_project', { task: 'gone', run: 'Echo' }),
-        'Althar could not do that. Try again, or tell the person.',
+        /wouldn't start: |isn't installed, or isn't on /u,
       )
       // Nothing is left running.
       assert.lengthOf(yield* launches.ofProject(projectId), 0)

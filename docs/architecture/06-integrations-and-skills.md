@@ -319,11 +319,14 @@ request that names the issue links it.
   nothing with them (Resolving a conflict, below).
 - **A tag the lead makes, Althar pushes** (`push_tag`): to the remote that
   repository's work goes to, with the person's own git, never forced, so a
-  tag the remote has already stays as it is. A tag often starts a release, so
-  it waits for the person as the lead's own `git push` of it would
-  (ADR-013), short of a project that allows everything or never allows it.
-  Answered within half a minute, the call says what happened; else the lead
-  is told once it is.
+  tag the remote has already stays as it is. On the person's word in its
+  thread (their message in the turn, or an errand's step) it goes at once,
+  through `Errands.execute`, which reads the remote's tags first; where the
+  lead made none of that name, Althar makes it on the host, as the
+  coordinator's `push_tag` does. Without their word it waits for the person
+  as the lead's own `git push` of it would (ADR-013), short of a project that
+  allows everything or never allows it. Answered within half a minute, the
+  call says what happened; else the lead is told once it is.
 - **Without a connection, the person pushes the task's branch with their own
   git** (ADR-016): to the remote that repository's work goes to (the one its
   default branch follows, else `origin`, else its only remote), under the

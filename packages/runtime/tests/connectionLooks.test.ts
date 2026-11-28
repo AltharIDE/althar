@@ -17,6 +17,7 @@ import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Secrets, SecretsUnavailable } from '../src/Secrets'
 import { fakeAgents, repository, until } from './support'
+import { setConfig } from '@althar/testing'
 
 /*
  * A connection's sign-in as Althar keeps it working (docs/architecture/06,
@@ -796,7 +797,7 @@ describe('the guide to connecting a code host', () => {
       process.env.GIT_CONFIG_GLOBAL = global
       writeFileSync(global, '[user]\n\temail = me@home.test\n')
       const path = repository()
-      execFileSync('git', ['config', 'user.email', 'build-bot'], { cwd: path })
+      setConfig(path, 'user.email', 'build-bot')
       yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
       assert.deepStrictEqual((yield* connections.guide('bitbucket')).email, { address: 'me@home.test', project: null })
     }).pipe(

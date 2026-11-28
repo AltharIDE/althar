@@ -59,7 +59,7 @@ export function Turn({ model, voice, mark, at, children, meta, copy, onQuote, ba
       )}
       {children}
       {(copy !== undefined || onQuote || meta) && (
-        <div className={s.actions}>
+        <div className={s.actions} data-turn-actions="">
           {copy !== undefined && <CopyButton value={copy} text={t.copy} />}
           {onQuote && (
             <ActionButton icon="quote" onClick={onQuote}>

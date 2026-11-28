@@ -86,7 +86,7 @@ test('checks an SSH home, isolates its window and local services, and reconnects
     await still(page)
     await page.screenshot({ path: 'test-results/homes-flow-01-local.png', scale: 'css' })
     // The first connection is reachable from the app itself, even where its native menu bar is hidden.
-    await page.getByRole('button', { name: 'Homes', exact: true }).click()
+    await page.getByRole('button', { name: 'Computers', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Connect a home…', exact: true }).click()
     // A first home opens on what a home is, then how to set one up; one set up already pairs, or is checked over SSH.
     await page.getByRole('dialog', { name: 'Your first home' }).getByRole('button', { name: 'Set one up' }).click()
@@ -115,7 +115,7 @@ test('checks an SSH home, isolates its window and local services, and reconnects
     const opened = electronApp.waitForEvent('window', { predicate: (candidate) => candidate !== page })
     await page.getByRole('button', { name: 'Connect', exact: true }).click()
     const remote = await opened
-    await expect(remote.getByRole('button', { name: 'My VPS, over SSH. Homes', exact: true })).toBeVisible()
+    await expect(remote.getByRole('button', { name: 'My VPS, over SSH. Computers', exact: true })).toBeVisible()
     await remote
       .getByRole('complementary', { name: 'Projects' })
       .getByRole('button', { name: /^meridian/ })
@@ -146,7 +146,7 @@ test('checks an SSH home, isolates its window and local services, and reconnects
       if (connection === undefined) throw new Error('No dedicated home connection process')
       process.kill(connection.pid, 'SIGTERM')
     })
-    await expect(remote.getByRole('button', { name: 'My VPS, disconnected. Homes', exact: true })).toBeVisible()
+    await expect(remote.getByRole('button', { name: 'My VPS, disconnected. Computers', exact: true })).toBeVisible()
     await expect(remote.getByRole('heading', { name: 'meridian', exact: true })).toBeVisible()
     await remote.getByRole('button', { name: 'Reconnect', exact: true }).click()
     await expect(remote.getByRole('heading', { name: 'meridian', exact: true })).toBeVisible()
@@ -155,7 +155,7 @@ test('checks an SSH home, isolates its window and local services, and reconnects
     expect(await remote.evaluate(() => localStorage.getItem('home-isolation'))).toBe('remote-only')
     expect(await page.evaluate(() => localStorage.getItem('home-isolation'))).toBe('local-only')
     // Manage homes, from the chip: each home by its projects, this computer's and the VPS's, live while their windows connect.
-    await remote.getByRole('button', { name: 'My VPS, over SSH. Homes', exact: true }).click()
+    await remote.getByRole('button', { name: 'My VPS, over SSH. Computers', exact: true }).click()
     await remote.getByRole('menuitem', { name: 'Manage homes…' }).click()
     const manage = remote.getByRole('dialog', { name: 'Homes' })
     await expect(manage.getByRole('button', { name: /^meridian/ })).toHaveCount(2)
@@ -167,7 +167,7 @@ test('checks an SSH home, isolates its window and local services, and reconnects
     await manage.getByLabel('Name', { exact: true }).fill('Fixture VPS')
     await manage.getByLabel('Name', { exact: true }).press('Enter')
     await manage.getByRole('button', { name: 'Done', exact: true }).click()
-    await expect(remote.getByRole('button', { name: 'Fixture VPS, over SSH. Homes', exact: true })).toBeVisible()
+    await expect(remote.getByRole('button', { name: 'Fixture VPS, over SSH. Computers', exact: true })).toBeVisible()
     await remote.close()
     await expect(
       page.getByRole('region', { name: 'Running', exact: true }).getByRole('button', { name: 'Work over SSH', exact: true }),

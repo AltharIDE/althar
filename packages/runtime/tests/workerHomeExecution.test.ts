@@ -63,6 +63,11 @@ it.live('keeps each repository’s own baseline and sends commands to the select
         connected: () => [],
         openTools: () => undefined,
         remove: () => false,
+        update: () => false,
+        cancelUpdate: () => false,
+        updateOf: () => undefined,
+        retryUpdate: () => undefined,
+        stopRun: () => false,
         list: () => [
           {
             workerId: input.workerId,
@@ -331,12 +336,22 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
         }
       },
     }
+    const orphans: Array<string> = []
     const pool: AgentWorkerPool = {
       connect: () => assert.fail('No transport fixture needed'),
       connectPreview: () => assert.fail('No transport fixture needed'),
       connected: () => [],
       openTools: () => undefined,
       remove: () => false,
+      update: () => false,
+      cancelUpdate: () => false,
+      updateOf: () => undefined,
+      retryUpdate: () => undefined,
+      // What the worker is asked to stop that no lead here holds any more.
+      stopRun: (id) => {
+        orphans.push(id)
+        return true
+      },
       list: () => [{ workerId: input.workerId, busy: false, capabilities: [{ projectId: input.projectId, providerId: input.providerId }] }],
       start: async (id, placement, options) => {
         assert.strictEqual(id, input.workerId)
@@ -374,9 +389,15 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
         yield* Deferred.await(copying)
         assert.isTrue(service.list(input.projectId)[0]?.busy)
         const concurrent = yield* Effect.flip(service.open(input))
+        // Taken by a start under way: one to wait for, not a failure; and no other start may reserve it meanwhile.
+        assert.strictEqual(concurrent._tag, 'WorkerTaken')
         assert.include(concurrent.reason, 'preparing another task')
+        assert.isUndefined(service.reserve?.(input.workerId, 'ws_' + 'e'.repeat(32)))
         yield* Deferred.succeed(finishCopy, undefined)
         const running = yield* Fiber.join(opening)
+        // Its run is a lead's here: nothing asks the worker to stop it.
+        assert.isFalse(service.settle?.(input.workerId))
+        assert.deepStrictEqual(orphans, [])
         assert.strictEqual(running.path, '/worker/project')
         assert.strictEqual(running.toolPort, 4517)
         const openHelper = service.openHelper
@@ -405,6 +426,14 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
       }),
     )
     assert.strictEqual(stopping, 1)
+    // No lead here holds a run there now: whatever the worker still holds, it is asked to stop.
+    assert.isTrue(service.settle?.(input.workerId))
+    assert.deepStrictEqual(orphans, [input.workerId])
+    // Free, it is reserved for one workspace's start, which the next start for it opens with, and let go.
+    const release = service.reserve?.(input.workerId, input.workspaceId)
+    assert.isDefined(release)
+    assert.isUndefined(service.reserve?.(input.workerId, 'ws_' + 'e'.repeat(32)))
+    release?.()
     toolsAvailable = false
     const missingTools = yield* Effect.scoped(Effect.flip(service.open(input)))
     assert.include(missingTools.reason, 'worker did not open the Althar tools connection')
@@ -458,6 +487,8 @@ it.live('lists the home’s enrolled workers, connected or not, and takes one ou
           ],
         },
       ],
+      updateOf: () => undefined,
+      retryUpdate: () => undefined,
     } as unknown as AgentWorkerPool
     let enrolled = [
       { workerId: online, projectIds: ['proj_a', 'proj_b'] },

@@ -32,4 +32,6 @@ apps/desktop/.flatpak-builder/
 
 # Cargo workspace build products
 /target/
+
+# Python caches of the CI scripts (.github/scripts)
 __pycache__/

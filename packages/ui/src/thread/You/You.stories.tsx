@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Issue, IssueRef } from '../../coordinator/Issue/Issue'
 import { FROM_231, MER_231 } from '../../fixtures/coordinator'
@@ -94,6 +94,33 @@ export const ImagesOnly: Story = {
     await expect(canvasElement.querySelector('p')).toBeNull()
   },
 }
+/** A strip of a screen, far wider than the chip: shown whole, not cropped to its empty middle. */
+const STRIP = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="677" height="91"><rect width="677" height="91" fill="#f4f2ec"/><rect x="25" y="14" width="626" height="60" rx="10" fill="#fbfaf7" stroke="#e4e0d6"/><circle cx="46" cy="33" r="4" fill="#3b4bdb"/><text x="62" y="38" font-family="sans-serif" font-size="14" font-weight="600" fill="#1d1b16">Worker setup prototype</text><text x="62" y="60" font-family="sans-serif" font-size="12" fill="#6b665b">preview</text><text x="574" y="49" font-family="sans-serif" font-size="12" fill="#4b473e">Stop</text></svg>',
+)}`
+export const WideImage: Story = {
+  args: {
+    children: '.',
+    attach: [{ id: 'strip', kind: AttachmentKind.Image, name: 'Screenshot 2026-11-27 at 00.11.png', src: STRIP, width: 677, height: 91 }],
+  },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('img[data-whole]')).not.toBeNull()
+  },
+}
+/** A picture that doesn't load: the picture icon, not an empty box. */
+export const ImageThatDoesNotLoad: Story = {
+  args: {
+    children: '.',
+    attach: [
+      { id: 'gone', kind: AttachmentKind.Image, name: 'Screenshot.png', src: 'data:image/png;base64,AAAA', width: 1440, height: 900 },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    // A browser says the picture failed on its own; jsdom never loads one, so it is said here too.
+    canvasElement.querySelector('img')?.dispatchEvent(new Event('error'))
+    await waitFor(() => expect(canvasElement.querySelector('img')).toBeNull())
+  },
+}
 /** Without onOpenAttachment, files and pastes are shown but do not open. Images still open with the shell's openImage. */
 export const AttachmentsThatDoNotOpen: Story = { args: { ...WithAttachments.args, onOpenAttachment: undefined } }
 /** Sent while the lead works: the lead reads it next. */
@@ -103,6 +130,16 @@ export const Queued: Story = {
 /** Sent now, while the lead works: until it has stopped at a safe point to read it. */
 export const Interrupting: Story = {
   args: { delivery: Delivery.Interrupting, at: undefined, children: 'Stop, the limiter belongs in charges.' },
+}
+/** No agent is on its way to read it, as when the lead couldn't start: Send again starts it to read it. */
+export const NotSent: Story = {
+  args: { delivery: Delivery.NotSent, at: undefined, children: 'my message not sending', onSendAgain: fn() },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Not sent')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Send again' }))
+    await expect(args.onSendAgain).toHaveBeenCalledOnce()
+  },
 }
 /** With no shell to open images in, and nothing to open files: every chip is still. */
 export const NothingOpens: Story = {
@@ -162,6 +199,7 @@ export const AllStates: Story = {
         { state: 'message', node: <You {...args} /> },
         { state: 'queued', node: <You {...args} delivery={Delivery.Queued} at={undefined} /> },
         { state: 'interrupting', node: <You {...args} delivery={Delivery.Interrupting} at={undefined} /> },
+        { state: 'not sent', node: <You {...args} delivery={Delivery.NotSent} at={undefined} onSendAgain={fn()} /> },
         { state: 'attachments', node: <You {...args} {...WithAttachments.args} /> },
         { state: 'images', node: <You {...args} {...WithImages.args} /> },
         { state: 'images only', node: <You {...args} {...ImagesOnly.args} /> },

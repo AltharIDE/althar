@@ -253,6 +253,8 @@
   /* ---- Scale and air -----------------------------------------------------*/
   --sp: 1.15; /* air inside the working surfaces */
   --measure: 700px; /* how wide the conversation and the task read */
+  --page-width: 1320px; /* how wide a full page grows on a big screen: Settings, Artifacts, Automations */
+  --page-inline: clamp(16px, 3vw, 48px); /* a full page's margins, closing as the window narrows */
 
   /* ---- Motion ------------------------------------------------------------
      Named by what happens (DESIGN.md, Motion): something arrives or answers

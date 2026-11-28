@@ -77,6 +77,8 @@ export interface InstallState {
   readonly pinned: string | null
   /** A download of it is under way. */
   readonly installing: boolean
+  /** Althar's download is the only way to have it, and its maker publishes none for this platform and processor. */
+  readonly noBuild: boolean
 }
 
 /**
@@ -480,6 +482,10 @@ export class Installs extends Context.Service<
               size: definition.cli?.download?.size ?? null,
               pinned: definition.cli?.download !== undefined && pinned(definition.cli.download) ? definition.cli.download.version : null,
               installing: now.has(definition.id),
+              noBuild:
+                definition.cli?.download !== undefined &&
+                definition.cli.guide === undefined &&
+                assetOf<unknown>(definition.cli.download.assets) === undefined,
             })),
           install: (definition) =>
             install(definition).pipe(

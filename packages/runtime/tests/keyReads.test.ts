@@ -15,6 +15,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { fakeConnectors, HOST, hosted, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * What the person waits on stays quick however long Althar has been used
@@ -130,8 +131,7 @@ describe('the reads the person waits on', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     const traced = statements()
     return Effect.gen(function* () {
       yield* traced.afresh
@@ -183,8 +183,7 @@ describe('Ship', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     // The reviewer's agent starts at once, until the test holds it.
     let start: Promise<void> = Promise.resolve()
     let let_go = () => {}

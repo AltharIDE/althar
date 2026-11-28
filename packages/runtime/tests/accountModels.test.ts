@@ -274,7 +274,7 @@ describe('a step handed over or moved', () => {
     return Effect.gen(function* () {
       const limits = yield* Limits
       const { main } = yield* mainAndPlus(each)
-      const { projectId } = yield* taskOf
+      const { projectId, threadId } = yield* taskOf
       yield* applyRules(projectId, { onlyAccounts: { codex: [main.id] } }, (yield* Instance).personId)
       const refused = yield* Effect.flip(limits.pick({ agentId: 'codex', projectId, model: SOL.id }))
       assert.deepInclude(refused, { _tag: 'NotFound', kind: 'offered_model' })
@@ -289,6 +289,25 @@ describe('a step handed over or moved', () => {
       assert.isTrue(listed.some((model) => model.routes.some((route) => route.agentId === 'codex' && route.model === LUNA.id)))
       // Where no account is known to offer it, as an agent's older list leaves a model out, it runs as before.
       assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId, model: 'gpt-0-unlisted' })).id, main.id)
+      // The person's message waits for a lead started on that model: refused before any session, the thread says why, and the
+      // start can be tried again, so the message isn't left on its way to no one.
+      const sessions = yield* Sessions
+      const sql = yield* SqlClient.SqlClient
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId, body: 'Use Sol.' })
+      const unstarted = yield* Effect.flip(sessions.start({ threadId, agentId: 'codex', model: SOL.id, waitsAside: true }))
+      assert.deepInclude(unstarted, { _tag: 'NotFound', kind: 'offered_model' })
+      assert.lengthOf(yield* sql`SELECT id FROM provider_sessions WHERE thread_id = ${threadId}`, 0)
+      const [said] = yield* sql<{ description: string; agentId: string; model: string }>`
+        SELECT json_extract(content, '$.description') AS description, json_extract(content, '$.startFailed.agentId') AS agent_id,
+          json_extract(content, '$.startFailed.model') AS model
+        FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice' AND json_extract(content, '$.startFailed') IS NOT NULL`
+      assert.deepStrictEqual(said, {
+        description:
+          'No account this project uses offers that model. Allow the account that does in the project’s settings, or pick another model.',
+        agentId: 'codex',
+        model: SOL.id,
+      })
+      assert.isTrue(yield* sessions.retryable(threadId))
     }).pipe(Effect.provide(runtime(':memory:', {}, { each })))
   })
 })

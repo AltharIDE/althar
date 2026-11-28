@@ -362,14 +362,24 @@ export const effortId = (catalog: Catalog, key: string, name: string): string =>
   offeredOf(catalog, key).model?.efforts.find((offered) => effortWord(offered.name) === name)?.id ?? name
 
 /**
- * A model's default effort, in the words the picker shows: the person's, or
- * else the one it starts at by itself; until that is known, what its agent is
- * on, for the model it is on.
+ * The effort a session on a model starts at with none asked, in the words the
+ * picker shows: the person's default, or else the model's own; null until
+ * that is known. One the model doesn't offer is passed over, as the runtime
+ * passes over it. What its agent is on now is no part of it: that may be an
+ * effort asked of its latest session.
+ */
+export const startEffortOf = (catalog: Catalog, info: ModelInfo): string | null =>
+  effortName(catalog, info.id, catalog.defaults.get(info.id) ?? null) ??
+  effortName(catalog, info.id, offeredOf(catalog, info.id).model?.effort ?? null)
+
+/**
+ * A model's default effort, as a picker shows it: the one a session starts at;
+ * until that is known, what its agent is on, for the model it is on.
  */
 export const defaultEffortOf = (catalog: Catalog, info: ModelInfo): string | null => {
   const { agent, model } = offeredOf(catalog, info.id)
   const on = model !== undefined && model.id === agent?.model ? agent.effort : null
-  return effortName(catalog, info.id, catalog.defaults.get(info.id) ?? model?.effort ?? on)
+  return startEffortOf(catalog, info) ?? effortName(catalog, info.id, on)
 }
 
 /** Until the person pins a model: each agent's current one. */

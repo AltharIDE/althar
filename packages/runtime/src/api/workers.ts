@@ -44,6 +44,16 @@ export const workersHandlers = ({ identity, api, connectionAdmin }: ApiKit) =>
             ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes no workers.' }))
             : config.workers.revoke(workerId).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotRemoved', message }))),
         ),
+      // Updating a worker only runs its own updater between its runs, as its hourly timer would: any of the home's clients
+      // may ask.
+      UpdateWorker: ({ workerId }) =>
+        config.workers?.update === undefined
+          ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes no workers.' }))
+          : config.workers.update(workerId).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotUpdated', message }))),
+      CancelWorkerUpdate: ({ workerId }) =>
+        config.workers?.cancelUpdate === undefined
+          ? Effect.fail(new ApiError({ reason: 'WorkersOff', message: 'This home takes no workers.' }))
+          : config.workers.cancelUpdate(workerId).pipe(Effect.mapError((message) => new ApiError({ reason: 'WorkerNotUpdated', message }))),
       AddWorker: ({ publicKey, name, ssh }) =>
         connectionAdmin(
           config.workers?.admin === undefined

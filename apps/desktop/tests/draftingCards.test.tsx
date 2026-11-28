@@ -168,6 +168,8 @@ it('draws a completed team or a plan without a review with their selected models
   expect(screen.getByText('Thorough')).not.toBeNull()
   expect(screen.getByText('Ship it')).not.toBeNull()
   expect(screen.getByText('Held · starts when you say')).not.toBeNull()
+  // Neither step sets an effort: each names the one it will run at.
+  await waitFor(() => expect(screen.getAllByText('Medium')).toHaveLength(2))
   view.unmount()
   withServices(
     <DraftingCard

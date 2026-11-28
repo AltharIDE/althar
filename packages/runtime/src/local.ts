@@ -12,7 +12,8 @@ import { type Checkout, giveBack, holdupOf, isClean, readCheckout, takeCheckout 
 import { RuntimeConfig } from './Config'
 import { makeScratch } from './firstWrite'
 import { makeKeyedLock } from './keyedLock'
-import { branchExists, commitOf, git, gitOutcome, uncommittedFiles } from './git'
+import { branchExists, commitOf, git, gitOutcome, gitWith, uncommittedFiles } from './git'
+import { ALTHAR, committerIdentity } from './commitIdentity'
 import { Instance } from './Instance'
 import { branchName, prepareWorktree, startCommitOf, towardHere } from './Projects'
 import { startOf } from './startsFrom'
@@ -618,8 +619,10 @@ const commitLeft = (spot: Spot) =>
     if ((yield* uncommittedFiles(spot.path)).length === 0) return
     yield* git(spot.path, 'add', '-A')
     const message = 'Work in progress, as the task moved to Local'
-    yield* git(spot.path, 'commit', '-q', '-m', message).pipe(
-      Effect.catch(() => git(spot.path, '-c', 'user.name=Althar', '-c', 'user.email=althar@localhost', 'commit', '-q', '-m', message)),
+    const { as, warning } = yield* committerIdentity(spot.path)
+    if (warning !== null) yield* say(spot, warning)
+    yield* gitWith(as, spot.path, 'commit', '-q', '-m', message).pipe(
+      Effect.catch(() => gitWith(ALTHAR, spot.path, 'commit', '-q', '-m', message)),
     )
   })
 

@@ -67,11 +67,12 @@ import { addItem, betweenTurns, recorder } from './threads'
 import type { ToolServer } from './ToolServer'
 import { ToolRefused } from './toolErrors'
 import { taskWorker, type WorkerExecution } from './workerExecution'
+import { WorkerTaken } from './workerWait'
 import { workerSkillFiles } from './workerSkills'
 import { workerStdioMcp } from './workerMcp'
 import { startsAgain } from './startAgain'
 import { needsAcross, needsOn, toolsToInstall } from './toolNeeds'
-import { folderGoneWords, signInEndedWords, summarize } from './words'
+import { folderGoneWords, modelGoneWords, modelMissingWords, signInEndedWords, summarize } from './words'
 
 export interface SessionConnectionsDependencies {
   readonly accounts: Accounts['Service']
@@ -92,6 +93,10 @@ export interface SessionConnectionsDependencies {
   readonly questions: Questions['Service']
   /** Forgets what Althar holds of an agent, its sign-in as last checked and the models it offers, so both are read again. */
   readonly refreshAgent: (agentId: string) => Effect.Effect<void>
+  /** Whether Althar knows the agent to have offered the model lately, as the pickers and list_models show it (Models' catalog). */
+  readonly listedLately: (agentId: string, model: string) => Effect.Effect<boolean>
+  /** A start found the account no longer lists the model, after asking it again: the pickers leave it out there a while. */
+  readonly modelGone: (accountId: string, model: string) => Effect.Effect<void>
   readonly quietFor: Duration.Duration
   readonly run: <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.Effect<A, E>
   readonly runtimeConfig: RuntimeOptions
@@ -126,6 +131,30 @@ class StartAgain extends Data.TaggedError('StartAgain')<{}> {}
 /** A first start whose agent's own program isn't there yet, or is of another version: looked for again a while (`connectSession`). */
 class ProgramArriving extends Data.TaggedError('ProgramArriving')<{ readonly check: () => string | undefined }> {}
 
+/** A start whose agent doesn't list its model just now, where it listed it lately: asked again a while (`connectSession`). */
+class ModelMissing extends Data.TaggedError('ModelMissing')<{}> {}
+
+/**
+ * How long a start asks its agent again for a model it listed lately and doesn't list now, and how often. An agent's list
+ * can come back short for a while: Codex, whose list from OpenAI briefly left out GPT-6.2 Sol and GPT-6.1 Terra, keeps what it
+ * fetched for 5 minutes (`~/.codex/models_cache.json`). Each try is a new process of the agent, which reads its list afresh.
+ */
+const MODEL_WAIT = { every: Duration.seconds(30), within: Duration.minutes(6) }
+
+/** A while, as a person reads it: `6 minutes`, `90 seconds`. */
+const whileWords = (span: Duration.Duration) => {
+  const seconds = Math.max(1, Math.round(Duration.toSeconds(span)))
+  if (seconds >= 120 && seconds % 60 === 0) return `${seconds / 60} minutes`
+  if (seconds === 60) return 'a minute'
+  return seconds === 1 ? 'a second' : `${seconds} seconds`
+}
+
+/** Whether a start failed because the agent doesn't offer the model it was put on. */
+const modelRefused = (cause: Cause.Cause<unknown>, definition: AgentEntry['definition']) => {
+  const error = Cause.findErrorOption(cause)
+  return Option.isSome(error) && error.value instanceof OptionUnavailable && error.value.configId === definition.options.model
+}
+
 /**
  * How long a start waits for the program Althar brings for its agent, and
  * how often it looks: an install of Althar unpacks Claude Code's 364 MB in
@@ -158,7 +187,9 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     heardWork,
     instance,
     limits,
+    listedLately,
     live,
+    modelGone,
     permissions,
     policies,
     questions,
@@ -180,17 +211,16 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     wakeFor,
   } = dependencies
 
+  /** Starts waiting for their agent to list their model again, by thread: a stop calls each off (`callOffWaits`). */
+  const modelWaits = new Map<string, Set<Deferred.Deferred<void>>>()
+
   /**
    * Whether a start failed because the agent doesn't offer the step's model while its account's usage reads as needing its
    * sign-in again: a signed-out Codex lists fewer models, and its `login status` may still say it is signed in, so the model
    * missing is how its ended sign-in shows. Said as the sign-in, whose call offers signing in again, not as the model.
    */
-  const signedOutRefusal = (cause: Cause.Cause<unknown>, definition: AgentEntry['definition'], account: Account) => {
-    const error = Cause.findErrorOption(cause)
-    return Option.isSome(error) && error.value instanceof OptionUnavailable && error.value.configId === definition.options.model
-      ? signInFault(account.id)
-      : Effect.succeed(false)
-  }
+  const signedOutRefusal = (cause: Cause.Cause<unknown>, definition: AgentEntry['definition'], account: Account) =>
+    modelRefused(cause, definition) ? signInFault(account.id) : Effect.succeed(false)
 
   /**
    * Ends a session: closes it and its process, and records how both ended.
@@ -346,6 +376,12 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     model: string | undefined,
     effort: string | undefined,
     first: boolean,
+    /**
+     * Where it is asked again for a model its agent listed lately (`modelReturns`): the model's name as it was listed, which
+     * the start keeps for the whole wait, whatever the agent's list says meanwhile; and at its last try, how long it was asked
+     * again for, which a model still missing says.
+     */
+    again?: { readonly name: string; readonly last?: Duration.Duration },
   ) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -839,6 +875,21 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       if (Exit.isFailure(started)) {
         yield* Scope.close(scope, Exit.void)
         yield* tools.revoke
+        // Its worker taken by another run between looking and asking: no failure to say. The start waits for it again (Sessions.ts).
+        const taken = Option.getOrUndefined(Cause.findErrorOption(started.cause))
+        if (taken instanceof WorkerTaken) {
+          yield* Effect.logInfo('The worker was taken before the agent could start there').pipe(
+            Effect.annotateLogs({ agent: definition.id, session: sessionId, thread: thread.threadId, reason: taken.reason }),
+          )
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const revision = yield* moveSession(sessionId, 'failed', { endedAt: yield* timestamp })
+              // Kept apart from a start that failed: what waits for it isn't unsent (Queries.ts).
+              yield* sessionFact(thread, sessionId, revision, 'provider_session.failed', { reason: taken.reason, workerTaken: true })
+            }),
+          )
+          return yield* taken
+        }
         // The whole answer, its code and all its data (failures.ts' rawOf), is the log's and the record's; the person reads words.
         const answer = answerOf(started.cause)
         yield* Effect.logWarning(first ? 'Agent could not start' : 'Agent could not start again', started.cause).pipe(
@@ -857,16 +908,32 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         // Its own program missing, or of another version, as while an install of Althar is still under way: looked for again a
         // while, before anything is said.
         if (first && program !== undefined && check !== undefined) return yield* new ProgramArriving({ check })
+        // A model it listed lately and doesn't now, its sign-in not in question: its list may be short for a while, as Codex's
+        // can be, so it is asked again a while before anything is said. One it never listed is said at once, as before.
+        const missing =
+          model !== undefined &&
+          existsSync(folder) &&
+          !signInEnded &&
+          modelRefused(started.cause, entry.definition) &&
+          (again !== undefined || (yield* listedLately(definition.id, model)))
+        if (missing && again?.last === undefined) {
+          if (processId !== undefined) yield* change('processes', processId, { state: 'unknown', endedAt: yield* timestamp })
+          return yield* new ModelMissing()
+        }
         // One that may pass starts again once, afresh, by itself: what Althar holds of the agent read again first.
         if (first && program === undefined && existsSync(folder) && !signInEnded && startsAgain(started.cause)) {
           if (processId !== undefined) yield* change('processes', processId, { state: 'unknown', endedAt: yield* timestamp })
           return yield* new StartAgain()
         }
+        const gone = missing && again?.last !== undefined ? again : undefined
+        if (gone !== undefined && model !== undefined) yield* modelGone(account.id, model)
         const summary = existsSync(folder)
           ? signInEnded
             ? signInEndedWords
-            : // Whose copy to put right: Althar's, unless this launch drives the person's own (Codex's `CODEX_PATH`).
-              summarize(started.cause, { bundled: definition.source === 'bundled' && !ownCopy })
+            : gone?.last !== undefined
+              ? modelGoneWords(gone.name, whileWords(gone.last))
+              : // Whose copy to put right: Althar's, unless this launch drives the person's own (Codex's `CODEX_PATH`).
+                summarize(started.cause, { bundled: definition.source === 'bundled' && !ownCopy })
           : folderGoneWords(folder)
         yield* sql.withTransaction(
           Effect.gen(function* () {
@@ -881,8 +948,17 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           severity: 'error',
           title: `${definition.name} couldn't start.`,
           ...(summary === '' ? {} : { description: summary }),
+          // What it was started on: what waits for it is unsent, and Try again starts it so again (Queries.ts, Sessions.ts).
+          startFailed: { agentId: definition.id, model: model ?? null, effort: effort ?? null },
         })
-        return yield* new SessionFailed({ agentId: definition.id, reason, summary })
+        return yield* new SessionFailed({
+          agentId: definition.id,
+          reason,
+          summary,
+          ...(gone !== undefined && model !== undefined ? { modelGone: model } : {}),
+          // Refused its model, whether Althar knew it listed lately or not: handing on goes past it (Sessions.ts).
+          ...(model !== undefined && !signInEnded && modelRefused(started.cause, entry.definition) ? { modelRefused: model } : {}),
+        })
       }
       const { connection, agent, unavailableMcp } = started.value
       yield* Effect.logInfo('Agent started').pipe(
@@ -982,6 +1058,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     account: Account,
     model: string | undefined,
     effort: string | undefined,
+    /** Whether its thread was stopped since its start was asked for: a wait for its model then ends, starting nothing more. */
+    stopped: () => boolean = () => false,
   ) =>
     connectOnce(thread, sessionId, entry, account, model, effort, true).pipe(
       Effect.catchTag('ProgramArriving', ({ check }) =>
@@ -1009,9 +1087,105 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           )
         }),
       ),
+      Effect.catchTag('ModelMissing', () => modelReturns(thread, sessionId, entry, account, model, effort, stopped)),
     )
 
-  type Connected = Effect.Success<ReturnType<typeof connectSession>>
+  /**
+   * A start whose agent doesn't list its model just now, where it listed it lately: an agent's list can come back short for
+   * a while, so it is asked again, a new process of it each time, what Althar holds of the agent read again first, every so
+   * often for a bounded while (`MODEL_WAIT`). The thread says so once, as the start takes longer than a start does. Its last
+   * try that still finds the model missing fails as `modelGone`, which hands the work to the same model on another agent
+   * (Sessions.ts), or else says what happened.
+   */
+  const modelReturns = (
+    thread: ThreadContext,
+    sessionId: string,
+    entry: AgentEntry,
+    account: Account,
+    model: string | undefined,
+    effort: string | undefined,
+    stopped: () => boolean,
+  ) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { every, within } = runtimeConfig.modelWait ?? MODEL_WAIT
+      // Its name as listed now, while what Althar holds of the agent still has it: the agent's next list may not.
+      const named = yield* limits.named(entry.definition.id, model ?? null)
+      const name = named.model ?? model ?? 'its model'
+      yield* Effect.logInfo('The agent doesn’t list its model just now; asking it again').pipe(
+        Effect.annotateLogs({ agent: entry.definition.id, session: sessionId, thread: thread.threadId, model: model ?? '' }),
+      )
+      yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
+        source: 'runtime',
+        severity: 'info',
+        title: modelMissingWords(named.agent, name, whileWords(within)),
+      })
+      // A stop calls the wait off at once, without the thread's lock its start holds (`callOffWaits`).
+      const calledOff = yield* Deferred.make<void>()
+      const waits = modelWaits.get(thread.threadId) ?? new Set()
+      waits.add(calledOff)
+      modelWaits.set(thread.threadId, waits)
+      const tries = Math.max(1, Math.ceil(Duration.toMillis(within) / Math.max(1, Duration.toMillis(every))))
+      // Its last try says how long it was asked again for, and can't find it missing again: it fails, as any start does.
+      const once = (last: boolean) =>
+        connectOnce(thread, sessionId, entry, account, model, effort, false, last ? { name, last: within } : { name }).pipe(
+          Effect.map(Option.some),
+          Effect.catchTags({
+            StartAgain: (one) => Effect.die(one),
+            ProgramArriving: (one) => Effect.die(one),
+            ModelMissing: (one) => (last ? Effect.die(one) : Effect.succeed(Option.none())),
+          }),
+        )
+      // Stopped as it waited: no agent starts again, here or elsewhere, and its session ends as one that didn't start.
+      const stoppedWords = 'Stopped while it waited for its agent to list its model again.'
+      const halt = Effect.gen(function* () {
+        yield* sql.withTransaction(
+          Effect.gen(function* () {
+            const [row] = yield* sql<{ state: string }>`SELECT state FROM provider_sessions WHERE id = ${sessionId}`
+            if (row?.state !== 'starting') return
+            const revision = yield* moveSession(sessionId, 'failed', { endedAt: yield* timestamp })
+            yield* sessionFact(thread, sessionId, revision, 'provider_session.failed', { reason: stoppedWords, stopped: true })
+          }),
+        )
+        return yield* new SessionFailed({ agentId: entry.definition.id, reason: stoppedWords, summary: stoppedWords })
+      })
+      // Called off by a stop at any point: one counted before the wait was registered is read from `stopped`, one after wakes it.
+      const off = Effect.map(Deferred.isDone(calledOff), (done) => done || stopped())
+      return yield* Effect.gen(function* () {
+        for (let tried = 1; ; tried++) {
+          if (yield* off) return yield* halt
+          yield* refreshAgent(entry.definition.id)
+          yield* Effect.raceFirst(Effect.sleep(every), Deferred.await(calledOff))
+          if (yield* off) return yield* halt
+          const started = yield* once(tried >= tries)
+          if (Option.isNone(started)) continue
+          // Stopped while that try started: it never takes the thread.
+          if (yield* off) {
+            yield* discard(started.value, Cause.fail(stoppedWords))
+            return yield* halt
+          }
+          return started.value
+        }
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            waits.delete(calledOff)
+            if (waits.size === 0 && modelWaits.get(thread.threadId) === waits) modelWaits.delete(thread.threadId)
+          }),
+        ),
+      )
+    })
+
+  /** Calls off every start on the thread waiting for its agent to list its model again; whether there was one. */
+  const callOffWaits = (threadId: string) =>
+    Effect.gen(function* () {
+      const waits = [...(modelWaits.get(threadId) ?? [])]
+      for (const one of waits) yield* Deferred.succeed(one, undefined)
+      return waits.length > 0
+    })
+
+  // What a start gives, its retries' included: read from one try, as a wait for its model lets go of a try it was stopped during.
+  type Connected = Effect.Success<ReturnType<typeof connectOnce>>
 
   /**
    * Lets go of a session that started but never took over its thread, as
@@ -1301,7 +1475,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       )
     })
 
-  return { activate, beforeTakingOver, busyNow, connectSession, stopRunning }
+  return { activate, beforeTakingOver, busyNow, callOffWaits, connectSession, stopRunning }
 }
 
 /**

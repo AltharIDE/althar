@@ -339,6 +339,27 @@ describe('the wait for a reply', () => {
     expect(kinds(blocksOf({ ...source(sent), reading: true, turnEnded: later }, new Map(), at))).toEqual(['you', 'turn', 'you', 'waiting'])
   })
 
+  it('lets go of the wait once the person stopped the turn on what was asked, whatever session starts next', () => {
+    const stop = items.notice({ source: 'runtime', role: 'interrupted', title: 'Interrupted by you.' }, null)
+    const thread = [items.you('Go'), items.says('Done.'), items.you('.'), stop]
+    // A new session starting, which knows of no turn ended: what was stopped isn't waited on, however long ago.
+    expect(kinds(blocksOf({ ...source(thread), reading: true, turnEnded: null }, new Map(), at, after(62_000)))).toEqual([
+      'you',
+      'turn',
+      'you',
+      'interrupted',
+    ])
+    // Asked again since, the new ask is waited on.
+    expect(kinds(blocksOf({ ...source([...thread, items.you('Again')]), reading: true }, new Map(), at))).toEqual([
+      'you',
+      'turn',
+      'you',
+      'interrupted',
+      'you',
+      'waiting',
+    ])
+  })
+
   it('has what waits after the last reply asked as the agent starts to read it, and queued where nothing will', () => {
     const thread = [items.you('Go'), items.says('Done.'), items.you('And the docs?', { state: 'queued', interrupting: false })]
     const shown = (reading: boolean) => blocksOf({ ...source(thread), reading }, new Map(), at)
@@ -349,6 +370,29 @@ describe('the wait for a reply', () => {
     // Interrupting, it says so, read or not.
     const now = [items.you('Go'), items.says('Done.'), items.you('Stop', { state: 'queued', interrupting: true })]
     expect(blocksOf({ ...source(now), reading: true }, new Map(), at)[2]).toMatchObject({ delivery: Delivery.Interrupting })
+  })
+
+  it('says not sent of what no agent is on its way to read in the thread, never waited on, until it is sent again', () => {
+    // Its lead couldn't start: an interrupting message as a queued one shown in the thread, neither with a wait after it.
+    for (const interrupting of [false, true]) {
+      const thread = [
+        items.you('Go'),
+        items.says('Done.'),
+        items.you('my message not sending', { state: 'queued', interrupting, unsent: true }),
+      ]
+      const shown = blocksOf({ ...source(thread), reading: false, queue: false }, new Map(), at)
+      expect(kinds(shown)).toEqual(['you', 'turn', 'you'])
+      expect(shown[2]).toMatchObject({ delivery: Delivery.NotSent })
+      // Sent again, it is on its way at once.
+      const again = blocksOf({ ...source(thread), reading: true, resending: true }, new Map(), at)
+      expect(again[2]).toMatchObject({ delivery: interrupting ? Delivery.Interrupting : Delivery.Delivered })
+    }
+    // One the composer's queue shows stays there, where it can be edited, as before.
+    const queued = [items.you('Go'), items.says('Done.'), items.you('Edit me', { state: 'queued', interrupting: false, unsent: true })]
+    expect(kinds(blocksOf({ ...source(queued), reading: false, queue: true }, new Map(), at))).toEqual(['you', 'turn'])
+    // An interrupting one is in the thread even then, not sent, never with a spinner.
+    const now = [items.you('Go'), items.says('Done.'), items.you('Sent now', { state: 'queued', interrupting: true, unsent: true })]
+    expect(blocksOf({ ...source(now), reading: false, queue: true }, new Map(), at)[2]).toMatchObject({ delivery: Delivery.NotSent })
   })
 
   it('waits on what the coordinator passed on, and on what opens the thread from outside it, but not on what waits behind a turn', () => {

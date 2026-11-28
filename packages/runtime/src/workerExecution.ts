@@ -1,4 +1,4 @@
-import type { ProjectWorker, WorkerGrant, WorkerReadiness } from '@althar/contracts'
+import type { ProjectWorker, WorkerGrant, WorkerReadiness, WorkerUpdate } from '@althar/contracts'
 import type { AgentRequestFailed, AgentStartFailed, Transport } from '@althar/provider-adapters'
 import type {
   WorkerFile,
@@ -9,6 +9,7 @@ import type {
   WorkerSkillFile,
 } from '@althar/worker-protocol/agent-runs'
 import { Effect, type Scope } from 'effect'
+import type { WorkerTaken } from './workerWait'
 import { SqlClient } from 'effect/sql'
 
 /** A task’s accepted plan is the authority for where its processes run. */
@@ -90,6 +91,10 @@ export interface EnrolledWorkerState {
   readonly signedIn?: ReadonlyArray<string>
   /** The Althar release it runs, where it says. */
   readonly release?: string
+  /** It updates when its home asks, where it says. */
+  readonly updatesOnRequest?: boolean
+  /** Where an update asked of it stands, where one was. */
+  readonly update?: WorkerUpdate
   /** What its own check found, where it has checked. */
   readonly readiness?: WorkerReadiness
   /** It works on whatever project it is given: the home's grants say which. */
@@ -117,6 +122,9 @@ export interface WorkerExecutionPlatform {
   readonly enrolled?: () => ReadonlyArray<EnrolledWorkerState> | null
   /** Takes a worker out of this home for good: its certificate is no longer accepted. Fails with words to show. */
   readonly revoke?: (workerId: string) => Effect.Effect<void, string>
+  /** Asks a worker to update now, or takes that back while it hasn't started. Fails with words to show. */
+  readonly update?: (workerId: string) => Effect.Effect<void, string>
+  readonly cancelUpdate?: (workerId: string) => Effect.Effect<void, string>
   /** Adding workers, where the home does that itself; none where an operator enrolls them by command. */
   readonly admin?: WorkerAdmin
   /** Whether it adds workers itself now: it listens as its own authority, or doesn't listen yet. */
@@ -132,6 +140,16 @@ export interface WorkerExecutionPlatform {
     input: Pick<AssignedCommand, 'workerId' | 'projectId' | 'worktree'>,
   ) => Effect.Effect<void, AgentRequestFailed>
   readonly openHelper?: (input: AssignedHelper) => Effect.Effect<WorkerExecution, AgentStartFailed, Scope.Scope>
+  /**
+   * Holds a free worker for a task's workspace while its lead starts there, so no other start takes it in between: let go
+   * by what it gives back. None where another run holds it or is being readied there.
+   */
+  readonly reserve?: (workerId: string, workspaceId: string) => (() => void) | undefined
+  /**
+   * Where a connected worker holds a run no lead of this home holds any more, stops it, as the worker is asked to: true
+   * where it asked. A run the worker can't confirm stopped stays outstanding, for it to reconcile when it reconnects.
+   */
+  readonly settle?: (workerId: string) => boolean
   readonly open: (input: {
     readonly workerId: string
     readonly projectId: string
@@ -142,5 +160,5 @@ export interface WorkerExecutionPlatform {
     readonly setup?: WorkerSetup
     readonly repositories?: ReadonlyArray<AssignedRepository>
     readonly skills?: ReadonlyArray<WorkerSkillFile>
-  }) => Effect.Effect<WorkerExecution, AgentStartFailed, Scope.Scope>
+  }) => Effect.Effect<WorkerExecution, AgentStartFailed | WorkerTaken, Scope.Scope>
 }

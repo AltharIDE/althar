@@ -316,6 +316,85 @@ describe('the lead and coordinator’s integrations over MCP', () => {
     }).pipe(Effect.provide(h.layer))
   })
 
+  it.live('refuses host writes it can’t make as asked, before anything is sent for them', () => {
+    const h = harness((call) => {
+      const query = String(call.body['query'])
+      const variables = call.body['variables'] as { readonly id?: string } | undefined
+      if (call.url.endsWith('/user')) return { id: 'me' }
+      if (call.url.includes('/search/issues')) return { total_count: 0, incomplete_results: false, items: [] }
+      if (query.includes('node(id:'))
+        return { data: { node: { pullRequest: { url: variables?.id === 'elsewhere' ? `${h.pull.url}0` : h.pull.url } } } }
+      if (query.includes('mutation')) return { data: { result: { thread: { id: 'thread', isResolved: false } } } }
+      return { node_id: 'PR_node' }
+    })
+    return Effect.gen(function* () {
+      const { access, turn } = yield* coordinator
+      const message = yield* turn('Tidy up the retries pull request')
+      const refusedFor = (name: string, input: Readonly<Record<string, unknown>>, words: RegExp) =>
+        Effect.gen(function* () {
+          assert.match(yield* callTool(access, name, { message, ...input }), words)
+        })
+      const writes = () => h.sent.filter((one) => one.method !== 'GET' && !String(one.body['query']).startsWith('query')).length
+      const before = writes()
+      // Search: a page before the first, and a limit below one is taken as one.
+      yield* refusedFor('search_pull_requests', { query: 'org:meridian', page: 0 }, /positive integer/)
+      assert.include(yield* callTool(access, 'search_pull_requests', { query: 'org:meridian', limit: 0 }), '"next_page":null')
+      assert.include(h.sent.at(-1)?.url ?? '', 'per_page=1&')
+      // Reviewers: none named, or a link on no connected host.
+      yield* refusedFor('request_pull_request_reviewers', { pull_request: h.pull.url }, /at least one reviewer/)
+      yield* refusedFor(
+        'request_pull_request_reviewers',
+        { pull_request: 'https://elsewhere.test/meridian/api/pull/1', reviewers: ['ada'] },
+        /pull request link/,
+      )
+      // Threads: none named, or one on another pull request.
+      yield* refusedFor('resolve_review_thread', { pull_request: h.pull.url }, /thread ID/)
+      yield* refusedFor('resolve_review_thread', { pull_request: h.pull.url, thread: 'elsewhere' }, /another pull request/)
+      // Drafts: only an open pull request becomes one.
+      const closed = h.github.addPullRequest({ path: ['meridian', 'api'], title: 'Old', author: 'colleague', state: 'closed' })
+      yield* refusedFor('mark_pull_request_draft', { pull_request: closed.url }, /Only an open/)
+      // Reviews: a saved card takes only a verdict; a new review needs all of itself, on lines that exist.
+      yield* refusedFor('post_review', { draft: 'review-draft-none', body: 'Changed' }, /saved card/)
+      yield* refusedFor('post_review', { draft: 'review-draft-none' }, /No review draft/)
+      yield* refusedFor('post_review', { pull_request: h.pull.url, verdict: 'comment' }, /Give a draft ID/)
+      const review = { pull_request: h.pull.url, verdict: 'comment', body: 'Reviewed', commit: h.pull.headSha }
+      yield* refusedFor('post_review', { ...review, comments: [{ path: 'src/retry.ts', line: 0, body: 'Here' }] }, /positive integers/)
+      assert.strictEqual(writes(), before)
+      assert.lengthOf(h.github.reviewsPosted, 0)
+      // Reopening a thread of its own pull request asks GitHub to unresolve it.
+      assert.include(
+        yield* callTool(access, 'resolve_review_thread', { pull_request: h.pull.url, thread: 'thread', resolved: false, message }),
+        'isResolved',
+      )
+      assert.isTrue(h.sent.some((one) => String(one.body['query']).includes('unresolveReviewThread')))
+      // A pull request already in draft is left as it is.
+      const drafted = h.github.addPullRequest({ path: ['meridian', 'api'], title: 'Drafted', author: 'colleague', draft: true })
+      assert.include(yield* callTool(access, 'mark_pull_request_draft', { pull_request: drafted.url, message }), 'already a draft')
+    }).pipe(Effect.provide(h.layer))
+  })
+
+  it.live('keeps Linear’s own tools to Linear, and to what they need', () => {
+    const h = harness()
+    const issue = h.github.addIssue({ ref: 'meridian/api#12', title: 'Retry once' })
+    return Effect.gen(function* () {
+      const { access, turn } = yield* coordinator
+      const message = yield* turn('Relate the retry issues')
+      assert.match(yield* callTool(access, 'read_linear_resource', { entity: 'document' }), /Name the resource ID/)
+      assert.match(yield* callTool(access, 'change_issue_relation', { issue: 'MER-1', message }), /related and type/)
+      assert.match(yield* callTool(access, 'read_issue_relations', { issue: issue.url }), /uses Linear/)
+      assert.match(
+        yield* callTool(access, 'change_issue_relation', { issue: issue.url, related: 'MER-1', type: 'related', message }),
+        /uses Linear/,
+      )
+      assert.lengthOf(h.sent, 0)
+      // Read, a page on from where the last ended, in the direction asked.
+      yield* callTool(access, 'read_issue_relations', { issue: 'MER-1', direction: 'incoming', cursor: 'after-one' })
+      yield* callTool(access, 'list_linear_resource', { entity: 'document', cursor: 'after-one', limit: 500 })
+      assert.lengthOf(h.sent, 2)
+      assert.isTrue(h.sent.every((one) => JSON.stringify(one.body).includes('after-one')))
+    }).pipe(Effect.provide(h.layer))
+  })
+
   it.live('rejects uploading files outside the caller’s folder before preparing a remote upload', () => {
     const h = harness()
     const outside = mkdtempSync(join(tmpdir(), 'althar-attachment-outside-'))

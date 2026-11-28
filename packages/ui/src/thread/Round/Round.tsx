@@ -54,7 +54,7 @@ export function Round({ model, signed, at, part, children, copy, text, className
       {children}
       {/* Copy waits for the round to be hovered or reached by keyboard */}
       {copy !== undefined && copy !== '' && (
-        <div className={s.actions}>
+        <div className={s.actions} data-turn-actions="">
           <CopyButton value={copy} {...(text?.copy === undefined ? {} : { text: text.copy })} />
         </div>
       )}

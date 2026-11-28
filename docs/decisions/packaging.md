@@ -111,8 +111,8 @@ update.
 
 - **When:** a packaged app checks ten seconds after it starts, then every
   four hours, and from the app menu's Check for Updates…. A newer version
-  downloads in the background. One quiet line in the window's bar and in
-  Settings' foot says when it's ready.
+  downloads in the background. Settings' foot says when it's ready, and so
+  does the window's bar, under its one Updates glyph (below).
 - **How:** on a Mac, Squirrel takes the zip only if it is signed as the
   running app is. On Windows, the installer runs silently as Althar quits. On
   Linux, the AppImage is replaced.
@@ -129,6 +129,31 @@ update.
 
 Not built yet: a beta channel, and adapters that update without an app
 release.
+
+### Every update under one glyph
+
+The window's bar gathers every update under one glyph, left of CPU and MEM,
+in place of a line each: a dot while something can update, turning while
+something does, the problem mark where something didn't, and nothing at all
+while everything runs its newest. It opens to a row each, the most urgent
+first:
+
+- **Althar on this computer:** ready with Restart, or installing as Althar
+  quits while work runs; restarting; or why a restart didn't happen, with
+  Try again.
+- **The window's home,** where it's another computer and a newer host
+  release is out: updated from here as its Settings updates it, asking first
+  where its restart would stop its tasks.
+- **The home's workers,** each against the newest worker release: the home
+  asks a worker that can be asked to update now (`UpdateWorker`), between its
+  runs, after its task, or once it connects. The worker runs its own updater
+  in a unit of its own and says how it ended; on success it comes back on its
+  new release. One that can't be asked (an older worker, or one set up by
+  hand) updates on its own within the hour, and the row gives the command to
+  run there now. Settings › Computers says the same, worker by worker.
+
+Each row is put aside until its next release, kept by the window; with none
+left, the bar says for a moment where they still are.
 
 ## Off a Mac: windows and the keyring
 
@@ -344,3 +369,4 @@ its minified stacks read by name.
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) made the device bridge an ordinary command.
+- 28 Nov 2026: every update under one glyph in the window's bar, Althar's own with its home's and its workers', in place of Althar's own line; a home asks its workers to update now ([Every update under one glyph](#every-update-under-one-glyph)).

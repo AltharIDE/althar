@@ -338,6 +338,8 @@ contextBridge.exposeInMainWorld('althar', {
   setAppIcon: (icon: string): Promise<void> => ipcRenderer.invoke('althar:set-app-icon', icon),
   preferences: (): Promise<unknown> => ipcRenderer.invoke('althar:preferences'),
   setPreference: (key: string, value: unknown): Promise<unknown> => ipcRenderer.invoke('althar:set-preference', key, value),
+  // Homes are still experimental: true for the one dialog in the profile that says it first.
+  claimHomesExperimental: (): Promise<boolean> => ipcRenderer.invoke('althar:claim-homes-experimental'),
   sounds: (): Promise<ReadonlyArray<string>> => ipcRenderer.invoke('althar:sounds'),
   saveWorkerSnapshot: (request: { readonly projectId: string; readonly taskId: string }): Promise<void> =>
     ipcRenderer.invoke('althar:save-worker-snapshot', request),

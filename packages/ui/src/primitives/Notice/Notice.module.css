@@ -1,0 +1,32 @@
+/* the glyph on the first line, the line in ink beside it, what follows quieter under it */
+.notice {
+  --mark: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-lg);
+  background: var(--well);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+.mark {
+  flex: none;
+  margin-top: calc((1lh - var(--mark)) / 2);
+  color: var(--t-3);
+}
+.words {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.title {
+  font-weight: 550;
+  color: var(--t-1);
+}
+.body {
+  color: var(--t-2);
+}

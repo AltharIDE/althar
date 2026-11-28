@@ -191,3 +191,17 @@ describe('a task card whose drafting stopped short of a plan', () => {
     expect(container.querySelector('[data-words]')).toBeNull()
   })
 })
+
+describe('a plan’s efforts', () => {
+  it('names the one set for a step, or else the one it runs at by default, which says so to a screen reader', () => {
+    card({
+      steps: [
+        { ...lead(true), effort: 'Extra high', defaultEffort: 'High' },
+        { ...review(true), defaultEffort: 'Medium' },
+      ],
+    })
+    expect(screen.getByText('Extra high')).toHaveTextContent(/^Extra high$/)
+    expect(screen.queryByText('High')).toBeNull()
+    expect(screen.getByText('Medium')).toHaveTextContent('Medium by default')
+  })
+})

@@ -1,4 +1,4 @@
-import { shipsToOpen, workerName } from '@althar/contracts'
+import { ApiError, shipsToOpen, workerName } from '@althar/contracts'
 import type { ActorId, ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Duration, Effect, Layer, Option, Schema } from 'effect'
@@ -45,6 +45,8 @@ import { ToolRefused } from './toolErrors'
 import { cancelWaitingTurn, upNextMove } from './upNextMoves'
 import { blockersOf, stopWaiting, waitFor } from './waits'
 import { expected, words } from './words'
+import { refusalWords } from './toolRefusal'
+import { whereaboutsOf } from './workerLookup'
 
 /*
  * The coordinator and the leads steering a task as the person's buttons do
@@ -804,15 +806,12 @@ export class TaskActions extends Context.Service<
                 ? Effect.fail(error)
                 : Effect.andThen(
                     Effect.logWarning('A task action did not succeed', error),
+                    // What failed, in the window's words, else in its own; nothing was done where it says why.
                     Effect.fail(
                       new ToolRefused({
-                        message: (() => {
-                          // What failed, in the window's words; a failure with none of its own is named by its kind.
-                          const said = words(error, (agentId) => agentId)
-                          return said.reason === 'Unknown' || said.message.startsWith("Althar's runtime couldn't do that")
-                            ? `Althar could not do that${said.reason === 'Unknown' ? '' : ` (${said.reason})`}, and what it did is in its log. Try again, or tell the person.`
-                            : `Nothing was done: ${said.message}`
-                        })(),
+                        message: ((said) => (said.startsWith('Althar could not do that') ? said : `Nothing was done: ${said}`))(
+                          refusalWords(error),
+                        ),
                       }),
                     ),
                   ),
@@ -1037,8 +1036,11 @@ export class TaskActions extends Context.Service<
             if (error instanceof PushRefused) return Effect.fail(new ToolRefused({ message: pushRefused(error) }))
             if (error instanceof CantMerge) return Effect.fail(new ToolRefused({ message: cantMerge(slug, error) }))
             const said = words(error, (agentId) => agentId)
+            // What the runtime refused in the window's words (ApiError), as the window would say it.
             return Effect.fail(
-              expected.has(said.reason) ? new ToolRefused({ message: `Nothing changed for ${slug}: ${said.message}` }) : error,
+              expected.has(said.reason) || error instanceof ApiError
+                ? new ToolRefused({ message: `Nothing changed for ${slug}: ${said.message}` })
+                : error,
             )
           }),
         )
@@ -1626,24 +1628,42 @@ export class TaskActions extends Context.Service<
           }
         })
 
-      /** Moves a task between the home and its workers (taskPlaces.ts), by the worker's name as the person says it, or its id. */
-      const runsOn = (
-        access: ToolAccess,
-        task: { readonly id: string; readonly slug: string; readonly projectId: string },
-        where: string,
-        model: string | undefined,
-        fromLastTurn: boolean,
-      ) =>
+      /**
+       * Where a task runs, at any stage, by the worker's name as the person says it, or its id (workerLookup.ts): a plan not
+       * begun yet, counting down or held, is placed as its card's Runs on places it (Plans.place), a held one staying held;
+       * a task under way moves between the home and its workers (taskPlaces.ts).
+       */
+      const runsOn = (access: ToolAccess, input: unknown, task: Task, where: string, model: string | undefined, fromLastTurn: boolean) =>
         Effect.gen(function* () {
-          const workers = runtimeConfig.workers?.list(task.projectId) ?? []
-          const wanted = where.trim().toLowerCase()
-          const worker = workers.find((one) => one.workerId === where.trim() || workerName(one).toLowerCase() === wanted)
-          const home = ['home', 'the home', 'this home', 'this mac', 'here', 'local'].includes(wanted)
-          if (!home && worker === undefined)
+          const sql = yield* SqlClient.SqlClient
+          const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${task.projectId}`
+          const place = whereaboutsOf(runtimeConfig.workers, task.projectId, where, project?.name ?? 'this project')
+          if (place.kind === 'refused') return yield* new ToolRefused({ message: place.message })
+          const placeName = place.kind === 'home' ? 'the home' : place.kind === 'any' ? 'any free worker' : workerName(place.worker)
+          const [plan] = yield* sql<{ id: string; state: string; startsAt: string | null }>`
+            SELECT id, state, starts_at FROM task_plans WHERE task_id = ${task.id} AND state IN ('proposed', 'accepted')
+            ORDER BY proposed_at DESC, rowid DESC LIMIT 1`
+          if (plan === undefined)
             return yield* new ToolRefused({
-              message: `No worker of this project is called ${where}. Its workers: ${workers.map(workerName).join(', ') || 'none connected'}; or the home.`,
+              message: `${task.slug} has no plan yet: propose_plan with runs_on plans it to run there.`,
             })
-          const to = home ? 'home' : (worker?.workerId ?? 'home')
+          if (plan.state === 'proposed') {
+            const runsOnId = place.kind === 'home' ? null : place.kind === 'any' ? 'auto' : place.worker.workerId
+            const heldNow = yield* plainly(plans.place(plan.id, runsOnId, actorOf(access)), task.slug)
+            const problem = yield* plainly(plans.problem(plan.id), task.slug)
+            yield* did(access, input, task, `Placed “${task.title}” on ${placeName}`, `placed this task on ${placeName}`)
+            const lead = model === undefined ? '' : ' Its lead stays as planned: change_lead changes its model before it starts.'
+            if (plan.startsAt === null)
+              return `${task.slug} runs on ${placeName} once it starts; it stays held until the person starts it.${problem === undefined ? '' : ` It can’t start there as it stands: ${problem}`}${lead}`
+            return heldNow
+              ? `${task.slug} is placed on ${placeName}, which can’t take it now, so it is held for the person rather than starting: ${problem ?? 'its card says why.'}${lead}`
+              : `${task.slug} runs on ${placeName} when its countdown ends.${lead}`
+          }
+          if (place.kind === 'any')
+            return yield* new ToolRefused({
+              message: `${task.slug} has started: it moves to a worker by its name, or to the home, not to any free one.`,
+            })
+          const to = place.kind === 'home' ? 'home' : place.worker.workerId
           const placed = yield* plainly(
             runs.place({
               envelope: yield* envelope('task.place', { taskId: task.id, to }, undefined, actorOf(access)),
@@ -1668,7 +1688,8 @@ export class TaskActions extends Context.Service<
           switch (asked.part) {
             case 'workspace': {
               if (asked.toward !== undefined) return yield* workToward(access, { task: asked.task, toward: asked.toward })
-              if (asked.runs_on !== undefined) return yield* runsOn(access, task, asked.runs_on, asked.model, asked.from_last_turn === true)
+              if (asked.runs_on !== undefined)
+                return yield* runsOn(access, input, task, asked.runs_on, asked.model, asked.from_last_turn === true)
               if (asked.to === undefined)
                 return yield* new ToolRefused({
                   message:
@@ -2252,7 +2273,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'change_part',
-          `Changes one of a task’s parts, with why, any task’s, your own included, either way and at any time, on the person’s word, in plain words or by voice (a task is a conversation plus parts): act at once, and say what you did in a line; never ask them again. preset gives it another preset’s parts all at once, by name as list_presets names it: a prototype the person wants built becomes a Change (a reviewer added, the project’s pull request ending, and a worktree with its branch where it had none), a change steps back into a Prototype (no review, so none runs and its card drops the step; ending with its branch, so nothing more goes up; an open pull request staying as it is, for the same task to carry on in once it is a Change again) or a Chat (no review, nothing going up, on Scratch), a chat becomes a Change; its lead stays (change_lead changes it). When the person names a reviewer or effort while choosing a preset, pass review in this same call so no other reviewer is selected first. checked_by puts a review of its own work on before it ships, by review’s model or, left out, the one its plan had or the project’s rules pick, or changes its reviewer; null takes it off, one under way stopping. ending: here (nothing goes up until it ships), branch (its branch pushed, no pull request; while one is open it stays as it is and nothing more goes to it, its work waiting on the branch here), draft or ready (a pull request: an open one carries on, and an open draft is marked ready). Never start a new task to change a task’s shape: change its parts here. Where the ending is a pull request and its work isn’t up, Ship runs its review and opens it: ship ships it now, as ship_task does, where the person asked for it to go up. workspace moves it between a worktree and Local (to: worktree or checkout; it waits for the lead’s turn to end, and asks the person before taking their checkout off a branch of their own), between the home and its workers or between workers, its work coming along (runs_on: the home, or a worker by its name; model, where the lead’s isn’t offered there, one that is), or points it at another branch to work toward (toward, null for the default); shelf puts it on Scratch or on the board. Running an outside author’s code is the person’s word alone: suggest Run it to them. ${TITLES_FOLLOW_WORK}`,
+          `Changes one of a task’s parts, with why, any task’s, your own included, either way and at any time, on the person’s word, in plain words or by voice (a task is a conversation plus parts): act at once, and say what you did in a line; never ask them again. preset gives it another preset’s parts all at once, by name as list_presets names it: a prototype the person wants built becomes a Change (a reviewer added, the project’s pull request ending, and a worktree with its branch where it had none), a change steps back into a Prototype (no review, so none runs and its card drops the step; ending with its branch, so nothing more goes up; an open pull request staying as it is, for the same task to carry on in once it is a Change again) or a Chat (no review, nothing going up, on Scratch), a chat becomes a Change; its lead stays (change_lead changes it). When the person names a reviewer or effort while choosing a preset, pass review in this same call so no other reviewer is selected first. checked_by puts a review of its own work on before it ships, by review’s model or, left out, the one its plan had or the project’s rules pick, or changes its reviewer; null takes it off, one under way stopping. ending: here (nothing goes up until it ships), branch (its branch pushed, no pull request; while one is open it stays as it is and nothing more goes to it, its work waiting on the branch here), draft or ready (a pull request: an open one carries on, and an open draft is marked ready). Never start a new task to change a task’s shape: change its parts here. Where the ending is a pull request and its work isn’t up, Ship runs its review and opens it: ship ships it now, as ship_task does, where the person asked for it to go up. workspace moves it between a worktree and Local (to: worktree or checkout; it waits for the lead’s turn to end, and asks the person before taking their checkout off a branch of their own), where it runs, at any stage (runs_on: the home, or a worker by its name or id): a plan counting down or held is placed there as its card’s Runs on places it, a held one staying held, or any free worker (any); one under way moves between the home and its workers or between workers, its work coming along (model, where the lead’s isn’t offered there, one that is), or points it at another branch to work toward (toward, null for the default); shelf puts it on Scratch or on the board. Running an outside author’s code is the person’s word alone: suggest Run it to them. ${TITLES_FOLLOW_WORK}`,
           {
             type: 'object',
             properties: {
@@ -2267,7 +2288,10 @@ export class TaskActions extends Context.Service<
                 description: 'Ship it now, its review first, where the person asked for it to go up: as ship_task does.',
               },
               to: { type: 'string', enum: ['worktree', 'checkout'] },
-              runs_on: { type: 'string', description: 'For workspace: the home, or one of its workers by name.' },
+              runs_on: {
+                type: 'string',
+                description: 'For workspace: the home, one of its workers by name or id, or, before it starts, any free worker (any).',
+              },
               model: { type: 'string', description: 'With runs_on: the model its lead starts on there, where its own isn’t offered.' },
               from_last_turn: {
                 type: 'boolean',

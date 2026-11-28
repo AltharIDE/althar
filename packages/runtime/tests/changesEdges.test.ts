@@ -1,4 +1,4 @@
-import { slashPath } from '@althar/testing'
+import { identify, slashPath } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -516,6 +516,26 @@ describe('removing a task’s worktree', () => {
   })
 })
 
+describe('a test identity in the repository’s config', () => {
+  it.live('is said in the task’s thread where Althar commits for it, naming the file and the value, and Althar commits as itself', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      // What a test left in the repository's own config, which every worktree of it shares.
+      identify(working, 'T', 't@t.test')
+      writeFileSync(join(task.path, 'notes.txt'), 'half done\n')
+      assert.include(yield* callTool(task.lead, 'remove_part', { part: 'workspace', why: 'Only reading now.' }), 'is a copy now')
+      assert.strictEqual(git(working, 'log', '-1', '--format=%an <%ae>', 'althar/add-a-retry'), 'Althar <althar@localhost>')
+      const said = (yield* notices(task.threadId)).find((title) => title.startsWith('Git here would write commits as a test’s identity'))
+      assert.include(said ?? '', '“T” (user.name) from ')
+      assert.include(said ?? '', '“t@t.test” (user.email) from ')
+      assert.include(said ?? '', join(slashPath(working), '.git', 'config'))
+      // The person's config is left as it was: Althar never edits it.
+      assert.strictEqual(git(working, 'config', '--local', '--get', 'user.email'), 't@t.test')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
 describe('pointing a running task’s change at another branch', () => {
   it.live('changes nothing for the branch it works toward already, a branch there isn’t, or work not committed', () => {
     const { working, github } = onGitHub({ 'RELEASE.md': '0.8.0' })
@@ -555,6 +575,9 @@ describe('pointing a running task’s change at another branch', () => {
         yield* callTool(task.lead, 'work_toward', { toward: 'release/0.8.0' }),
         /still works toward main: its commits conflict with release\/0\.8\.0 in change\.txt\.$/,
       )
+      // Nothing moved, it is refused, not done: whoever asked keeps the branch they named, and why.
+      const refused = yield* Effect.flip((yield* Runs).workToward({ taskId: task.taskId, toward: 'release/0.8.0' }))
+      assert.match(String((refused as { message?: unknown }).message), /still works toward main: its commits conflict/)
       const after = (yield* workspacesOf(task.taskId))[0]
       assert.deepStrictEqual([after?.branch, after?.toward], [before.branch, null])
       assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), before.branch)

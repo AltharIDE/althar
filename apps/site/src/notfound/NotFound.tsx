@@ -1,4 +1,4 @@
-import { RELEASES } from '../content/changelog'
+import { CURRENT } from '../content/changelog'
 import { Footer } from '../shared/footer/Footer'
 import { SiteNav } from '../shared/Bar'
 import { Night, night as n, Panes, Readout, Window } from '../shared/night/Night'
@@ -12,7 +12,7 @@ import s from './NotFound.module.css'
  */
 
 export function NotFound() {
-  const latest = RELEASES[0]
+  const latest = CURRENT
   return (
     <div className={s.page}>
       <SiteNav />

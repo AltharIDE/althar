@@ -219,11 +219,37 @@ describe('a conflict alone', () => {
   it.live('its host says, where the branch here merges cleanly, isn’t on its way to the lead', () => {
     const { working, bare } = hosted()
     let stale = false
-    const github = hostOf(bare, undefined, undefined, { says: () => (stale ? true : undefined) })
+    let held = false
+    let gate = Effect.runSync(Deferred.make<void>())
+    const github = hostOf(bare, undefined, undefined, {
+      says: () => (stale ? true : undefined),
+      waitsFor: (method) => (held && method === 'change' ? Deferred.await(gate) : Effect.void),
+    })
+    const reads = () => github.calls.filter((method) => method === 'change').length
+    const read = (after: number) =>
+      until(
+        Effect.sync(() => [reads()]),
+        ([now]) => (now ?? 0) > after,
+      )
     return Effect.gen(function* () {
       const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve]')
+      // A look at its pull request under way, holding the task's lock, long enough for the sweep to read the pull request as
+      // Althar last saw it and wait for the lock.
+      held = true
+      yield* read(reads())
+      yield* Effect.sleep('1 second')
       // The host says it conflicts, out of date: main hasn't moved, and the branch here merges with it cleanly.
       stale = true
+      // That look hears it, the sweep looks after it, and the look after that is held: the sweep, which read the pull request
+      // before the look heard it conflicts, leaves it waiting on nothing all the same.
+      const first = gate
+      gate = Effect.runSync(Deferred.make<void>())
+      const heard = reads()
+      yield* Deferred.succeed(first, undefined)
+      yield* read(heard)
+      assert.isNull(yield* (yield* Changes).conflictStanding(taskId))
+      held = false
+      yield* Deferred.succeed(gate, undefined)
       yield* until(
         Effect.map(cardOf(projectId), (one) => [one]),
         ([one]) => one?.change?.conflicts === true,

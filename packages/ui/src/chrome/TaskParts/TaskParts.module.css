@@ -305,13 +305,20 @@
 
 .acts {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding-top: 2px;
+  margin: 2px -12px 0;
+  padding: 8px 12px 0;
+  border-top: 1px solid var(--line);
 }
 
 .end {
   margin-left: auto;
+}
+
+.end ~ .end {
+  margin-left: 0;
 }
 
 .sure {

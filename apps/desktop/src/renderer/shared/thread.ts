@@ -641,6 +641,8 @@ export interface ThreadSource {
    * not a queue, though the agent may still be starting to read it.
    */
   readonly reading?: boolean
+  /** The person just sent again what wasn't sent: it shows as on its way, not as not sent. */
+  readonly resending?: boolean
   /** A locally sent first message is starting an absent session. */
   readonly readingLocally?: boolean
   /** When the agent's last turn ended, by the runtime's clock: a message delivered before it was answered, if with nothing. */
@@ -900,13 +902,16 @@ export const blocksOf = (
             !(source.readingLocally === true && locallyReading(item)))
         )
           continue
-        // Being read now, it is the agent's already, in the store's word a moment later.
+        // Being read now, it is the agent's already, in the store's word a moment later. One no agent is on its way to read
+        // says so, with Send again, unless the person just sent it again: one in the composer's queue stays there, to edit.
         const delivery =
-          item.input?.state === 'queued' && item.input.claimed !== true && (item.input.interrupting || source.reading !== true)
-            ? item.input.interrupting
-              ? Delivery.Interrupting
-              : Delivery.Queued
-            : Delivery.Delivered
+          item.input?.state === 'queued' && item.input.unsent === true && source.resending !== true
+            ? Delivery.NotSent
+            : item.input?.state === 'queued' && item.input.claimed !== true && (item.input.interrupting || source.reading !== true)
+              ? item.input.interrupting
+                ? Delivery.Interrupting
+                : Delivery.Queued
+              : Delivery.Delivered
         blocks.push({
           kind: 'you',
           id: item.id,
@@ -1074,7 +1079,11 @@ export const blocksOf = (
   // Between turns it is waited on only on its way to the agent, or given to it with no turn ended since: a turn that ended on it,
   // interrupted or with nothing said, has answered it as far as it will.
   const over = !onItsWay && source.turnEnded != null && askedWhen != null && Date.parse(source.turnEnded) >= Date.parse(askedWhen)
-  const waiting = startingTurn || (askedAt !== null && askedAt > lastTurn && (turnRunning || (source.reading === true && !over)))
+  // The person stopped the turn on it: answered as far as it will be, even where the session starting next knows of no turn ended.
+  const stoppedAt = blocks.findLastIndex((block) => block.kind === 'interrupted')
+  const stopped = askedAt !== null && stoppedAt > askedAt && stoppedAt > lastTurn
+  const waiting =
+    startingTurn || (askedAt !== null && askedAt > lastTurn && !stopped && (turnRunning || (source.reading === true && !over)))
   // Nor where Althar carried the step on after it, after a restart: the turn running is a later one that has said nothing yet.
   const runningTurn = turnRunning && !waiting && restartedAt < lastTurn ? lastTurn : -1
   // What an agent says after its step's result, closing its turn, folds with the work that led to it. A run it starts on its own after, with tool calls or a plan, is work of its own: it folds under its own time, and its last message shows.

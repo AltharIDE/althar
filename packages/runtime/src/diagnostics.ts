@@ -66,6 +66,16 @@ const QUERY_SECRET = /([?&](?:key|api[_-]?key|access[_-]?token|token|secret|sig|
  * credential it doesn't recognise stays.
  */
 export const redact = (text: string) =>
+  redactCredentials(text).replace(NAMED, (pair, name: string, between: string) =>
+    SECRET_NAME.test(name) ? `${name}${between}[REDACTED]` : pair,
+  )
+
+/**
+ * Only what has a credential's own shape, taken out: a private key, `Bearer …`, a provider's token, a URL's key or user
+ * and password. For words Althar wrote itself, which name files and lines (`passwd:1`) as `redact`'s `name: value` would
+ * misread, and which carry a credential only where they quote a service or a name the agent gave (toolRefusal.ts).
+ */
+export const redactCredentials = (text: string) =>
   text
     .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/g, '[REDACTED PRIVATE KEY]')
     .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9+/_.=-]+/gi, '$1 [REDACTED]')
@@ -74,7 +84,6 @@ export const redact = (text: string) =>
       '[REDACTED]',
     )
     .replace(QUERY_SECRET, '$1[REDACTED]')
-    .replace(NAMED, (pair, name: string, between: string) => (SECRET_NAME.test(name) ? `${name}${between}[REDACTED]` : pair))
     .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1[REDACTED]@')
 
 /** How much of a long output is read for credentials: far more than is kept, from its start and its end. */

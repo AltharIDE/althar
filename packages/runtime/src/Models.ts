@@ -118,6 +118,11 @@ const ASK_AGAIN = Duration.minutes(1)
 const SIGNING_IN = 15 * 60 * 1000
 /** How far before an agent's asking its sessions still say what it offers, where the asking got an older list. */
 const RECENT = 24 * 60 * 60 * 1000
+/**
+ * How long a model a start found gone from an account's list, after asking it again a while (sessionConnections.ts), stays
+ * out of what the account offers, its sessions of the day before included, unless the account lists it again meanwhile.
+ */
+const GONE_FOR = 60 * 60 * 1000
 
 // Settings kept before names were, by their values alone.
 const choices = (option: ConfigOption | undefined) =>
@@ -283,6 +288,11 @@ export class Models extends Context.Service<
      * background. What it said last stays until it answers, so its models keep their names meanwhile.
      */
     refresh(agentId: string): Effect.Effect<void>
+    /**
+     * A start found the account no longer lists the model, after asking it again a while: it is left out of what the account
+     * offers, its sessions' lists included, until the account lists it again or a while passes (`GONE_FOR`).
+     */
+    gone(accountId: string, model: string): Effect.Effect<void>
   }
 >()('@althar/runtime/Models') {
   static readonly layer: Layer.Layer<Models, never, Store> = Layer.effect(
@@ -328,6 +338,20 @@ export class Models extends Context.Service<
         }
       >()
       const lastEntries = new Map<string, AgentEntry>()
+      /* The models a start found gone from each account's list, by the account, with when. */
+      const goneFrom = new Map<string, Map<string, number>>()
+      /** Whether a start found the model gone from the account's list lately. */
+      const isGone = (accountId: string, id: string, now: number) => {
+        const at = goneFrom.get(accountId)?.get(id)
+        return at !== undefined && now - at < GONE_FOR
+      }
+      /** What the account offers, less what a start found gone from its list lately. */
+      const lessGone = (accountId: string, offer: Offered | null) =>
+        Effect.map(Clock.currentTimeMillis, (now) =>
+          offer === null || goneFrom.get(accountId) === undefined
+            ? offer
+            : { ...offer, models: offer.models.filter((model) => !isGone(accountId, model.id, now)) },
+        )
       /* When each account's sign-in was opened in Terminal. */
       const terminal = new Map<string, number>()
       /* When each account that couldn't say was asked, so it is asked again a while on. */
@@ -348,6 +372,7 @@ export class Models extends Context.Service<
       }
       /** Forgets what asking an account found, and what its sessions offered since. */
       const forgetOne = (accountId: string) => {
+        goneFrom.delete(accountId)
         stale.delete(accountId)
         probed.delete(accountId)
         since.delete(accountId)
@@ -395,6 +420,9 @@ export class Models extends Context.Service<
             if (one === undefined) continue
             const said = modelsOf(definition, settingsIn(one.config))
             for (const model of said.models) {
+              // A session that started listing it since a start found it gone: the account lists it again.
+              const gone = goneFrom.get(account.id)?.get(model.id)
+              if (gone !== undefined && Date.parse(row.startedAt) > gone) goneFrom.get(account.id)?.delete(model.id)
               const kept = model.id === one.model || model.id === said.model ? later.own : later.models
               if (model.efforts.length > 0 || !kept.has(model.id)) kept.set(model.id, model)
             }
@@ -510,6 +538,8 @@ export class Models extends Context.Service<
               if (!ownsProbe(account.id, reservation)) return
               probed.set(account.id, found)
               if (found !== null) stale.delete(account.id)
+              // A model it lists again is no longer gone.
+              for (const model of found?.models ?? []) goneFrom.get(account.id)?.delete(model.id)
               if (found === null) failedAt.set(account.id, yield* Clock.currentTimeMillis)
               else {
                 failedAt.delete(account.id)
@@ -548,6 +578,9 @@ export class Models extends Context.Service<
        * instant). One signed out counts as one that couldn't say, asked again a while on or once it is found signed in.
        */
       const offerOf = (entry: AgentEntry, account: Account) =>
+        Effect.flatMap(saidOf(entry, account), (offer) => lessGone(account.id, offer))
+
+      const saidOf = (entry: AgentEntry, account: Account) =>
         Effect.gen(function* () {
           const { definition } = entry
           owners.set(account.id, definition.id)
@@ -646,8 +679,10 @@ export class Models extends Context.Service<
               Effect.sync(() => {
                 for (const accountId of accountsOf(agentId)) {
                   const last = probed.get(accountId) ?? stale.get(accountId)
+                  const gone = goneFrom.get(accountId)
                   forgetOne(accountId)
                   if (last !== undefined && last !== null) stale.set(accountId, last)
+                  if (gone !== undefined) goneFrom.set(accountId, gone)
                 }
               }),
             ),
@@ -671,12 +706,22 @@ export class Models extends Context.Service<
             }),
           ),
         lacking: (agentId, model) =>
-          Effect.sync(() =>
+          Effect.map(Clock.currentTimeMillis, (now) =>
             accountsOf(agentId).filter((accountId) => {
+              const ids = [...(goneFrom.get(accountId)?.keys() ?? [])]
+              if (ids.some((id) => isModel(model, id) && isGone(accountId, id, now))) return true
               const asked = probed.get(accountId)
               if (asked == null) return false
-              const ids = [...asked.models.map((one) => one.id), ...(since.get(accountId)?.models.keys() ?? [])]
-              return !ids.some((id) => isModel(model, id))
+              const offered = [...asked.models.map((one) => one.id), ...(since.get(accountId)?.models.keys() ?? [])]
+              return !offered.some((id) => isModel(model, id))
+            }),
+          ),
+        gone: (accountId, model) =>
+          Effect.flatMap(Clock.currentTimeMillis, (now) =>
+            Effect.sync(() => {
+              const gone = goneFrom.get(accountId) ?? new Map<string, number>()
+              gone.set(model, now)
+              goneFrom.set(accountId, gone)
             }),
           ),
       })

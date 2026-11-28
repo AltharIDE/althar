@@ -24,6 +24,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, turns, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * What a small change's review after it merges brings back (docs/decisions/reviews.md, "A small change is reviewed after it
@@ -52,8 +53,7 @@ const onGitHub = () => {
   const { working, bare } = hosted()
   const github = makeFakeService({ pushUrl: () => bare })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github }
 }
 

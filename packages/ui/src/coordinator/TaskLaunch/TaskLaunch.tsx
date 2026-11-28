@@ -81,8 +81,10 @@ export interface LaunchStep {
   skipped?: boolean
   /** Its runtime is out, so it waits for the reset. */
   waits?: boolean
-  /** How hard its model thinks, as named after the model: High. */
+  /** How hard its model was set to think, as named after the model: High. */
   effort?: string | null
+  /** How hard it thinks with none set, yours for the model or else the model's own: named in its place, a little dimmer. */
+  defaultEffort?: string | null
 }
 
 export interface LaunchPick {
@@ -166,6 +168,8 @@ export interface TaskLaunchText {
   from: string
   owner: (stepIndex: number, step: LaunchStep, k: number) => string
   skipped: string
+  /** Said to a screen reader after an effort no one set for the step, which shows dimmer. */
+  byDefault: string
   skip: string
   addBack: string
   /** Why a step waits: whose runtime is out, until when. */
@@ -244,6 +248,7 @@ export const taskLaunchText: TaskLaunchText = {
     return step.label
   },
   skipped: 'skipped',
+  byDefault: 'by default',
   skip: 'Skip',
   addBack: 'Add back',
   waits: (name, until) => `${name} is out; waits until ${until}`,
@@ -952,6 +957,9 @@ export function TaskLaunch({
               ) : i === 0 && phase === 'sizing' ? (
                 <Going key="sizing">{`${t.phase.sizing}…`}</Going>
               ) : null
+            // The effort it runs at: the one set for it, or else its default.
+            const chosen = st.effort != null && st.effort !== ''
+            const effort = (chosen ? st.effort : st.defaultEffort) ?? ''
             const who =
               st.skipped === true ? (
                 <Roll key="skipped">
@@ -966,9 +974,15 @@ export function TaskLaunch({
                   </Roll>
                 )
               ) : (
-                <Roll key={`${agent.id}-${st.effort ?? ''}`}>
+                <Roll key={`${agent.id}-${effort}`}>
                   {agent.short}
-                  {st.effort != null && st.effort !== '' && <span className={s.effort}> {st.effort}</span>}
+                  {effort !== '' && (
+                    <span className={cx(s.effort, !chosen && s.byDefault)}>
+                      {' '}
+                      {effort}
+                      {!chosen && <VisuallyHidden> {t.byDefault}</VisuallyHidden>}
+                    </span>
+                  )}
                 </Roll>
               )
             const mark =

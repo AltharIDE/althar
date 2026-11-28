@@ -154,8 +154,8 @@ const phaseAt = (ms: number): LaunchPhase =>
 
 /** The steps drafted so far: each seat open until its model is chosen. */
 const draftedAt = (ms: number): LaunchStep[] => [
-  { id: 'impl', label: 'Implement', agents: ms >= LED ? [OPUS] : [] },
-  { id: 'review', label: 'Review', agents: ms >= REVIEWED ? [GEMINI_PRO] : [] },
+  { id: 'impl', label: 'Implement', agents: ms >= LED ? [OPUS] : [], defaultEffort: 'High' },
+  { id: 'review', label: 'Review', agents: ms >= REVIEWED ? [GEMINI_PRO] : [], defaultEffort: 'High' },
 ]
 
 /** The task the plan became, once it runs: where it stands, the step it is on, and who leads it, as the board has it. */

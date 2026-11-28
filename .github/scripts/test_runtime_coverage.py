@@ -43,9 +43,33 @@ class Tests(unittest.TestCase):
     def write(self, path, data):
         path.write_text(json.dumps(data))
 
-    def gate(self):
+    def gate(self, main=None):
         with contextlib.redirect_stdout(io.StringIO()), patch.dict('os.environ', GITHUB_STEP_SUMMARY=''):
-            return module.gate(self.root, self.merged, self.policy)
+            return module.gate(self.root, self.merged, self.policy, main)
+
+    def test_below_the_gate_a_pull_request_fails_only_where_it_lowers_mains_coverage(self):
+        main = self.root / 'main.json'
+        self.write(main, measurement(branches=89.73))
+        # Main's dip: the same, a little under or over it holds.
+        for pct in (89.73, 89.70, 89.74):
+            self.write(self.merged, measurement(branches=pct))
+            self.assertAlmostEqual(self.gate(main)['branches'], pct)
+        # Lower than main by more than its run-to-run variation is the pull request's own.
+        self.write(self.merged, measurement(branches=89.60))
+        with self.assertRaisesRegex(ValueError, 'below main’s'):
+            self.gate(main)
+        # Lines keep their own gate against main's lines.
+        self.write(self.merged, measurement(lines=89.5))
+        with self.assertRaisesRegex(ValueError, 'lines'):
+            self.gate(main)
+
+    def test_without_mains_measurement_the_gate_alone_decides(self):
+        self.write(self.merged, measurement(branches=89.73))
+        broken = self.root / 'broken.json'
+        broken.write_text('{')
+        for main in (None, broken):
+            with self.assertRaisesRegex(ValueError, 'below its gate'):
+                self.gate(main)
 
     def test_branch_variation_has_bounded_slack_and_lines_keep_their_gate(self):
         for pct in (90.13, 89.98, 89.75):

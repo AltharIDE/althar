@@ -93,6 +93,21 @@ Althar runs the agents under your own sign-ins. When one plan runs out of usage,
   <tr>
     <td width="36%" valign="middle">
 
+### Workers <sup><kbd>new</kbd></sup>
+
+Add a Linux machine of yours as a worker, and your tasks' agents run there instead of on your Mac, with their setup, tests and dev servers. Their work comes back as commits. In early access.
+
+</td>
+    <td width="64%" valign="middle">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/reels/workers-dark.gif" />
+        <img src="brand/export/reels/workers.gif" width="100%" alt="Settings, Computers: this Mac and four Linux workers, at work, free, full and offline. The one at work opens to its task and what it has free." />
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td width="36%" valign="middle">
+
 ### Automations
 
 Work that starts itself, at set times or every hour, such as a review of each new pull request. It runs on your computer while Althar is open, once you turn it on.

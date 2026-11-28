@@ -60,7 +60,7 @@ export const isInside = (
  * What Althar runs or opens on this computer for a project: runnables, scripts, launches and their output, terminals.
  * What a session left running in the background, and opening a task's files in an editor.
  */
-export const launchesHandlers = ({ sender, actorId, api, holdingFolder }: ApiKit) =>
+export const launchesHandlers = ({ actorId, api, holdingFolder }: ApiKit) =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
     const launches = yield* Launches
@@ -71,9 +71,6 @@ export const launchesHandlers = ({ sender, actorId, api, holdingFolder }: ApiKit
     const sql = yield* SqlClient.SqlClient
     const openingFolder = (taskId: string) => holdingFolder(taskId, Effect.void)
     const config = yield* RuntimeConfig
-    /** A terminal is the person's own shell: only their window opens, reads, types into or closes one, never a paired device or a socket. */
-    const terminalRefused = new ApiError({ reason: 'Forbidden', message: 'A terminal opens only in Althar’s window on this computer.' })
-    const windowOnly = <A, E, R>(effect: Effect.Effect<A, E, R>) => (sender.kind === 'window' ? api(effect) : Effect.fail(terminalRefused))
     return {
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
       OpenInEditor: ({ taskId, editor, path, line }) =>
@@ -157,7 +154,7 @@ export const launchesHandlers = ({ sender, actorId, api, holdingFolder }: ApiKit
       ClearLaunch: ({ id }) => api(launches.clear(id)),
       ReadLaunchOutput: ({ id }) => api(launches.output(id)),
       OpenTerminal: ({ commandId: _commandId, ...input }) =>
-        windowOnly(
+        api(
           terminals.open({
             id: input.id,
             projectId: input.projectId,
@@ -167,15 +164,14 @@ export const launchesHandlers = ({ sender, actorId, api, holdingFolder }: ApiKit
             ...(input.launchId === undefined ? {} : { launchId: input.launchId }),
           }),
         ),
-      ListTerminals: ({ projectId }) => windowOnly(terminals.ofProject(projectId)),
+      // A terminal is the person's own shell, on the computer whose window or paired window opens it: a home runs it where its files are.
+      ListTerminals: ({ projectId }) => api(terminals.ofProject(projectId)),
       ListLaunches: ({ projectId }) => api(launches.ofProject(projectId)),
       AttachTerminal: ({ id }) =>
-        sender.kind === 'window'
-          ? Stream.mapError(terminals.attach(id), (error) => new ApiError({ reason: 'NotFound', message: `No terminal ${error.id}.` }))
-          : Stream.fail(terminalRefused),
+        Stream.mapError(terminals.attach(id), (error) => new ApiError({ reason: 'NotFound', message: `No terminal ${error.id}.` })),
       // Each key as it is pressed: straight to the shell, not through the call log a command keeps.
-      WriteTerminal: ({ id, data }) => windowOnly(terminals.write(id, data)),
-      ResizeTerminal: ({ id, cols, rows }) => windowOnly(terminals.resize(id, cols, rows)),
-      CloseTerminal: ({ id }) => windowOnly(terminals.close(id)),
+      WriteTerminal: ({ id, data }) => api(terminals.write(id, data)),
+      ResizeTerminal: ({ id, cols, rows }) => api(terminals.resize(id, cols, rows)),
+      CloseTerminal: ({ id }) => api(terminals.close(id)),
     } satisfies Partial<ApiHandlers>
   })

@@ -31,7 +31,9 @@ on:
   merge_group:
 
 permissions:
-  # The workflows it calls read the test durations post-merge measured on main (.github/actions/durations).
+  # The workflows it calls read the test durations post-merge measured on main (.github/actions/durations), and
+  # harness.yml's coverage job main's measurement from post-merge's runs. That runs on a pull request only, but a called
+  # workflow may ask for no more than its caller gives, or the whole run fails to start.
   actions: read
   contents: read
   # The workflows it calls file flaky tests as issues (.github/actions/flaky).

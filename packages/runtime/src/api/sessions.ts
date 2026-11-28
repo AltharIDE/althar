@@ -40,7 +40,15 @@ export const sessionsHandlers = ({ sender, actorId, api, envelope }: ApiKit) =>
     const automations = yield* Automations
     return {
       StartSession: ({ threadId, agentId, model, effort }) =>
-        api(sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) })),
+        api(
+          sessions.start({
+            threadId,
+            agentId,
+            ...(model === undefined ? {} : { model }),
+            ...(effort === undefined ? {} : { effort }),
+            waitsAside: true,
+          }),
+        ),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
       // A lead between turns, a turn Althar asked of it waiting for a place up next: that turn is let go (stop_task with turn).
       Interrupt: ({ threadId }) =>

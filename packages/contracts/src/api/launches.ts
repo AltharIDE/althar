@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 import { CodeLine } from './internal'
-import { call, ClientAuthority, command } from './rpc'
+import { call, ClientAuthority, command, SocketAllowed, socketCanCall } from './rpc'
 import { ApiError, Launch, OutputText, ShownTerminal } from './shared'
 
 /** An open pull request the Run menu offers to run (ADR-066). */
@@ -167,7 +167,10 @@ export const LaunchesApi = RpcGroup.make(
   /** What Althar runs of the project itself, its tasks' too, in the order they started. */
   call('ListLaunches', { projectId: Schema.String }, Schema.Array(Launch)),
   /** What a terminal prints: what it printed so far, kept to its end, then each piece as it comes, until it ends or is closed. */
-  Rpc.make('AttachTerminal', { payload: { id: Schema.String }, success: TerminalChunk, error: ApiError, stream: true }),
+  Rpc.make('AttachTerminal', { payload: { id: Schema.String }, success: TerminalChunk, error: ApiError, stream: true }).annotate(
+    SocketAllowed,
+    socketCanCall('AttachTerminal'),
+  ),
   /** What the person typed or pasted into a terminal, as its keys send it. */
   call('WriteTerminal', { id: Schema.String, data: Schema.String.check(Schema.isMaxLength(1_000_000)) }, Schema.Void),
   /** A terminal's new size, in characters. */

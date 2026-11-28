@@ -30,7 +30,6 @@ export interface ArtifactsText {
   kind: string
   all: string
   search: string
-  shown: (shown: number, of: number) => string
   columns: Readonly<Record<SortKey, string>>
   none: string
   noMatch: (words: string) => string
@@ -61,7 +60,6 @@ export const artifactsText: ArtifactsText = {
   kind: 'Kind',
   all: 'All',
   search: 'Find an artifact',
-  shown: (shown, of) => (shown === of ? String(of) : `${shown} of ${of}`),
   columns: { title: 'Name', kind: 'Kind', versions: 'Versions', comments: 'Comments', by: 'Made by', updated: 'Updated' },
   none: 'none',
   noMatch: (words) => `Nothing matches “${words}”.`,
@@ -380,7 +378,6 @@ export function Artifacts({
                   aria-label={t.search}
                 />
               </label>
-              <span className={s.count}>{t.shown(rows.length, canvases.length)}</span>
               <span className={s.toolsEnd}>
                 <Menu
                   label={t.filter}

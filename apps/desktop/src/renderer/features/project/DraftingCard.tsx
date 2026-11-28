@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 import type { Draft, ThreadItem } from '@althar/contracts'
 import { type LaunchPhase, type LaunchStep, TaskLaunch } from '@althar/ui'
 
-import { useEffortNames, useModelNames } from '../../shared/modelNames'
+import { useModelNames, useStepEfforts } from '../../shared/modelNames'
 import { stepText } from '../../shared/steps'
 import type { TaskCardContent } from '../../shared/thread'
 
@@ -47,7 +47,7 @@ export function DraftingCard({
   onDiscard?: (taskId: string) => Promise<void>
 }) {
   const named = useModelNames()
-  const effortOf = useEffortNames()
+  const effortsOf = useStepEfforts()
   // Discarded from here shows at once, and as it was again where the runtime turns it down.
   const [discarding, setDiscarding] = useState(false)
   const discarded = draft.discarded === true || discarding
@@ -60,7 +60,7 @@ export function DraftingCard({
     id: key,
     label: stepText.label[key],
     agents: who === null ? [] : [named(who.agentId, who.model)],
-    ...(who === null ? {} : { effort: effortOf(who.agentId, who.model, who.effort) }),
+    ...(who === null ? {} : effortsOf(who.agentId, who.model, who.effort)),
   })
   // A plan made without a review has no row for one; until that is known, its seat waits.
   const steps = [step('implement', draft.lead), ...(draft.noReview ? [] : [step('review', draft.review)])]

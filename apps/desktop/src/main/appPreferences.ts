@@ -96,6 +96,8 @@ export const PREFERENCES = {
   browserLinks: links,
   /** How long pages beside a conversation keep cookies and storage; the main process clears them at that moment (browser/cookies.ts). */
   browserCookies: cookies,
+  /** Homes are still experimental, said once, the first time a home is connected or managed, in whichever window: every window's (Experimental.tsx). */
+  homesExperimentalSaid: onOff(false),
 } as const
 
 type Kinds = typeof PREFERENCES

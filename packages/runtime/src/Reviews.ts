@@ -56,6 +56,7 @@ import { notInstalled } from './lockOutside'
 import { addItem, moveToEnd, updateItem } from './threads'
 import { ToolServer, type ToolAccess } from './ToolServer'
 import { ToolRefused } from './toolErrors'
+import { toolRefusalOf } from './toolRefusal'
 import { ChecksAsked, inspectChecks } from './readChecks'
 
 /*
@@ -1476,7 +1477,7 @@ export class Reviews extends Context.Service<
                   ? Effect.fail(error)
                   : Effect.andThen(
                       Effect.logWarning('draft_review did not succeed', error),
-                      Effect.fail(new ToolRefused({ message: 'Althar could not keep that draft. Try again, or tell the person.' })),
+                      Effect.fail(toolRefusalOf(error, 'Althar could not keep that draft')),
                     ),
               ),
             ),
@@ -1613,7 +1614,7 @@ export class Reviews extends Context.Service<
                 )
               return Effect.andThen(
                 Effect.logWarning('A coordinator pull request tool did not succeed', error),
-                Effect.fail(new ToolRefused({ message: 'Althar could not do that. Try again, or tell the person.' })),
+                Effect.fail(toolRefusalOf(error)),
               )
             }),
           )

@@ -73,6 +73,7 @@ export const homeHandlers = ({ identity, api, personHome, cursorNow, accountStat
           addsAccounts: entry.definition.home.accounts !== 'one',
           ...(entry.definition.native === undefined && entry.definition.signIn.logout !== undefined ? { signsOut: true } : {}),
           guide: entry.definition.cli?.guide ?? null,
+          ...(install.noBuild ? { noBuild: true } : {}),
           problem: null,
         } satisfies AgentStatus
       }).pipe(

@@ -1,7 +1,7 @@
 import { fn } from 'storybook/test'
 
 import type { RoadmapItem } from '../screens/ComingNext/ComingNext'
-import { HostAndWorkers } from '../screens/WhatsNew/HostAndWorkers'
+import { YourWorkers } from '../screens/WhatsNew/YourWorkers'
 import type { ReleaseNotes } from '../screens/WhatsNew/notes'
 import type { FollowLink, WhatsNewFeature, WhatsNewLead } from '../screens/WhatsNew/WhatsNew'
 
@@ -14,15 +14,15 @@ export const RELEASE_0_10: ReleaseNotes = {
   changes: [
     {
       kind: 'new',
-      text: 'Your own host: run Althar on a Linux server of yours, x64 or arm64, as a home for your projects. Their tasks and agents live there, and keep working when you close the window.',
+      text: 'Your own workers, in early access: add a Linux machine of yours as a worker, and your tasks’ agents run on it instead of your Mac. Their work comes back to your Mac as commits.',
     },
     {
       kind: 'new',
-      text: 'Computer use: a task’s lead uses the apps on your computer, with one ask a turn. Its card shows what it’s doing and its latest screenshot.',
+      text: 'Computer use: a task’s agent uses the apps on your Mac as you would, opening any app, clicking and typing, with one permission request a turn. Its card shows its latest screenshot, with Take over and Stop.',
     },
     {
       kind: 'new',
-      text: 'Goals: give a task’s lead a `/goal`, and it keeps working toward it turn after turn, until it’s met, blocked or you pause it.',
+      text: 'Goals: type `/goal` and a task’s agent keeps working toward it, turn after turn, until it’s done, stuck, or you pause it.',
     },
     { kind: 'improved', text: 'Althar answers at once, however busy your computer is: the model picker, search and the board included.' },
     { kind: 'improved', text: 'Long threads open and scroll smoothly, at any length.' },
@@ -54,16 +54,17 @@ export const RELEASE_0_8: ReleaseNotes = {
 export const RELEASES = [RELEASE_0_10, RELEASE_0_9, RELEASE_0_8] as const
 
 export const LEAD: WhatsNewLead = {
-  title: 'Your own host, your own workers',
-  why: 'Run Althar on a server of yours, and your own machines as its workers. Close the laptop, and the work goes on.',
-  picture: { title: 'Where the work runs now', drawing: <HostAndWorkers /> },
+  title: 'Your own workers',
+  why: 'Add a Linux machine of yours, and your tasks’ agents run there, with their setup, tests and dev servers. Your Mac stays free, and the commits come back to it.',
+  picture: { title: 'Where the work runs now', drawing: <YourWorkers /> },
 }
 
 export const FEATURES: readonly WhatsNewFeature[] = [
   {
     name: 'Computer use',
-    line: 'A task’s lead uses the apps on your computer, with one ask a turn.',
-    whole: 'A task’s lead uses the apps on your computer, with one ask a turn. Its card shows what it’s doing and its latest screenshot.',
+    line: 'A task’s agent uses the apps on your Mac as you would, opening any app, clicking and typing, with one permission request a turn.',
+    whole:
+      'A task’s agent uses the apps on your Mac as you would, opening any app, clicking and typing, with one permission request a turn. Its card shows its latest screenshot, with Take over and Stop.',
     icon: 'viewport',
     art: 'computer-use',
   },
@@ -74,7 +75,13 @@ export const FEATURES: readonly WhatsNewFeature[] = [
     icon: 'canvas',
     art: 'artifacts',
   },
-  { name: 'Goals', line: 'Give a task’s lead a `/goal`.', whole: 'Give a task’s lead a `/goal`.', icon: 'pin', art: 'goals' },
+  {
+    name: 'Goals',
+    line: 'Type `/goal` and a task’s agent keeps working toward it.',
+    whole: 'Type `/goal` and a task’s agent keeps working toward it.',
+    icon: 'pin',
+    art: 'goals',
+  },
   {
     name: 'More agents',
     line: 'Connect any coding agent from the ACP registry.',
@@ -88,10 +95,10 @@ export const FEATURES: readonly WhatsNewFeature[] = [
 ]
 
 export const BETTER = [
-  'Althar answers at once, however busy your computer is.',
-  'Idle coordinators rest after half an hour and wake on your message.',
-  'A full session compacts in place and carries on.',
-  'Long threads open and scroll smoothly, at any length.',
+  'Althar answers at once however busy your computer is, the model picker, search and the board included.',
+  'Switching an agent’s model shows the new one at once.',
+  'Plan usage shows when each limit resets, and how far through it you are.',
+  'When a plan runs low, Althar keeps the same model, through another account or agent, before it switches models, and the task says which.',
 ] as const
 
 export const FOLLOW: readonly FollowLink[] = [

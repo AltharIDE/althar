@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 import { type Credential, type Fetch, type ProductInfo, products } from '@althar/connectors'
-import { budget } from '@althar/testing'
+import { budget, setConfig } from '@althar/testing'
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
@@ -412,7 +412,7 @@ describe('connecting', () => {
       const projects = yield* Projects
       const { personId } = yield* Instance
       const working = repository()
-      execFileSync('git', ['config', 'user.email', 'you@northwind.io'], { cwd: working })
+      setConfig(working, 'user.email', 'you@northwind.io')
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
       const guide = yield* connections.guide('jira')
       assert.deepStrictEqual(guide, {
@@ -469,7 +469,7 @@ describe('connecting', () => {
       // A repository on Bitbucket that commits as someone of its own.
       const working = repository()
       execFileSync('git', ['remote', 'add', 'origin', 'https://bitbucket.org/northwind/api.git'], { cwd: working })
-      execFileSync('git', ['config', 'user.email', 'you@northwind.io'], { cwd: working })
+      setConfig(working, 'user.email', 'you@northwind.io')
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
       const guide = yield* connections.guide('bitbucket')
       assert.deepStrictEqual(guide.email, { address: 'you@northwind.io', project: project.name })

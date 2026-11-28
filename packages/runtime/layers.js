@@ -54,11 +54,10 @@ export const layers = {
       ],
     },
     {
-      /* What the coordinator and the agents' tools do: the coordinator, steering a task as the person's buttons do, the merge line, canvases, releases, helpers, and the tool modules of Settings, pages, the computer and integrations. */
+      /* What the coordinator and the agents' tools do: the coordinator, steering a task as the person's buttons do, the merge line, canvases, helpers, and the tool modules of Settings, pages, the computer and integrations. */
       name: 'coordinator · tools',
       modules: [
         'Coordinator.ts',
-        'coordinatorReleases.ts',
         'TaskActions.ts',
         'MergeLine.ts',
         'Canvases.ts',
@@ -79,7 +78,7 @@ export const layers = {
       ],
     },
     {
-      /* A task's work as it goes: places among the agents at work, runs and their steps, its change on the code host and listening to it, reviews, plans, the task's course, automations, the errands the merge line keeps. */
+      /* A task's work as it goes: places among the agents at work, runs and their steps, its change on the code host and listening to it, releases there (the coordinator's, and a lead's tag), reviews, plans, the task's course, automations, the errands the merge line keeps. */
       name: 'workflow',
       modules: [
         'Busy.ts',
@@ -89,6 +88,7 @@ export const layers = {
         'runPlanChanges.ts',
         'runRecords.ts',
         'runRecovery.ts',
+        'lostLead.ts',
         'runShipping.ts',
         'runTools.ts',
         'Changes.ts',
@@ -100,6 +100,7 @@ export const layers = {
         'changeRecords.ts',
         'changeShipping.ts',
         'coordinatorPullRequests.ts',
+        'coordinatorReleases.ts',
         'Follow.ts',
         'followBudget.ts',
         'Reviews.ts',
@@ -343,10 +344,13 @@ export const layers = {
         'placedOn.ts',
         'shipBranchMove.ts',
         'workerExecution.ts',
+        'workerLookup.ts',
+        'workerWait.ts',
         'screenshots.ts',
         'Failures.ts',
         'words.ts',
         'pushFailure.ts',
+        'toolRefusal.ts',
         'device.ts',
       ],
     },
@@ -358,6 +362,7 @@ export const layers = {
         'toolErrors.ts',
         'git.ts',
         'gitSaid.ts',
+        'commitIdentity.ts',
         'forks.ts',
         'refStamps.ts',
         'standsOn.ts',

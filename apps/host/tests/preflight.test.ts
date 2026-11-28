@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Effect } from 'effect'
 
 import metadata from '../package.json'
-import { verifyBundledPrograms } from '../src/updates/preflight'
+import { type StartPty, verifyBundledPrograms } from '../src/updates/preflight'
 import { runCommand } from '../src/commands'
 import { parseOptions } from '../src/options'
 import { temporary } from './support'
@@ -31,6 +31,30 @@ const fixture = () => {
   }
   return { root, entry: join(root, 'host.js') }
 }
+
+/** A pseudo-terminal that prints what it is given and ends with the code given. */
+const pty =
+  (printed: string, code: number): StartPty =>
+  () => {
+    const exits: Array<(exit: { exitCode: number }) => void> = []
+    const data: Array<(text: string) => void> = []
+    queueMicrotask(() => {
+      for (const listener of data) listener(printed)
+      for (const listener of exits) listener({ exitCode: code })
+    })
+    return {
+      pid: 1,
+      process: 'sh',
+      onData: (listener) => void data.push(listener),
+      onExit: (listener) => void exits.push(listener),
+      write: () => {},
+      resize: () => {},
+      pause: () => {},
+      resume: () => {},
+      kill: () => {},
+    }
+  }
+const shell = pty('althar-pty\r\n', 0)
 describe('portable release provider preflight', () => {
   it('probes binaries with no provider credentials or inherited home and removes the probe home', async () => {
     const at = fixture()
@@ -43,7 +67,8 @@ describe('portable release provider preflight', () => {
     )
     providers.claude.mockReturnValue(program)
     providers.codex.mockReturnValue(program)
-    await verifyBundledPrograms(at.entry)
+    await verifyBundledPrograms(at.entry, shell)
+    // verify-release itself starts a real shell, through the runtime's own node-pty.
     const commandOutput: string[] = []
     await Effect.runPromise(
       runCommand(parseOptions(['verify-release', '--json'], {}, at.root), {
@@ -63,13 +88,23 @@ describe('portable release provider preflight', () => {
   it('refuses incomplete, wrong-version and failing native bundles', async () => {
     const at = fixture()
     providers.claude.mockReturnValue(null)
-    await expect(verifyBundledPrograms(at.entry)).rejects.toMatchObject({ code: 'UpdateFailed' })
+    await expect(verifyBundledPrograms(at.entry, shell)).rejects.toMatchObject({ code: 'UpdateFailed' })
     const failed = join(at.root, 'fail')
     writeFileSync(failed, '#!/bin/sh\nexit 1\n', { mode: 0o700 })
     providers.claude.mockReturnValue(failed)
-    await expect(verifyBundledPrograms(at.entry)).rejects.toThrow()
+    await expect(verifyBundledPrograms(at.entry, shell)).rejects.toThrow()
     writeFileSync(join(at.root, 'node_modules/@agentclientprotocol/codex-acp/package.json'), '{"version":"0.0.0"}')
-    await expect(verifyBundledPrograms(at.entry)).rejects.toMatchObject({ code: 'ReleaseRejected' })
+    await expect(verifyBundledPrograms(at.entry, shell)).rejects.toMatchObject({ code: 'ReleaseRejected' })
+  })
+
+  it('refuses a release whose terminals can’t start a shell: a node-pty missing or that won’t load, or a shell that ends badly', async () => {
+    const at = fixture()
+    const terminal = { code: 'UpdateFailed', message: expect.stringContaining('can’t start a terminal') }
+    const refusing: StartPty = () => {
+      throw new Error('posix_spawnp failed.')
+    }
+    await expect(verifyBundledPrograms(at.entry, refusing)).rejects.toMatchObject(terminal)
+    await expect(verifyBundledPrograms(at.entry, pty('', 1))).rejects.toMatchObject(terminal)
   })
 
   it('refuses a release that carries the worker but not its sandbox’s programs', async () => {
@@ -81,17 +116,20 @@ describe('portable release provider preflight', () => {
     writeFileSync(codex, '#!/bin/sh\n[ "$1" = --version ]\n', { mode: 0o700 })
     providers.claude.mockReturnValue(codex)
     providers.codex.mockReturnValue(codex)
-    await verifyBundledPrograms(entry)
+    await verifyBundledPrograms(entry, shell)
     writeFileSync(join(at.root, 'althar-worker'), '', { mode: 0o700 })
-    await expect(verifyBundledPrograms(entry)).rejects.toMatchObject({ code: 'UpdateFailed', message: expect.stringContaining('bwrap') })
+    await expect(verifyBundledPrograms(entry, shell)).rejects.toMatchObject({
+      code: 'UpdateFailed',
+      message: expect.stringContaining('bwrap'),
+    })
     const shipped = [join(target, 'codex-resources', 'bwrap'), join(target, 'codex-path', 'rg'), join(at.root, 'tools', 'bin', 'socat')]
     for (const program of shipped) {
       mkdirSync(join(program, '..'), { recursive: true })
       writeFileSync(program, '', { mode: 0o600 })
     }
     // There but not runnable is missing too.
-    await expect(verifyBundledPrograms(entry)).rejects.toMatchObject({ code: 'UpdateFailed' })
+    await expect(verifyBundledPrograms(entry, shell)).rejects.toMatchObject({ code: 'UpdateFailed' })
     for (const program of shipped) chmodSync(program, 0o700)
-    await verifyBundledPrograms(entry)
+    await verifyBundledPrograms(entry, shell)
   })
 })

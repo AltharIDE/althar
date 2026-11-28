@@ -20,7 +20,7 @@ import type { PlanStep } from './planParameters'
 import { change, fact } from './records'
 import type { Sessions } from './Sessions'
 import { addItem } from './threads'
-import { workerRequirementsOf } from './workerRequirements'
+import { homeOnlyOf, workerRequirementsOf } from './workerRequirements'
 
 /*
  * Moving a task between the home and its workers, and between workers (ADR-103), from its ⋯ menu: between its lead's
@@ -136,12 +136,15 @@ export const makeTaskPlaces = ({ sessions }: { readonly sessions: Sessions['Serv
         SELECT id, project_id, parameters FROM task_plans WHERE task_id = ${input.taskId} AND state = 'accepted'
         ORDER BY decided_at DESC, rowid DESC LIMIT 1`
       if (task.state !== 'open' || plan === undefined)
-        return yield* invalid('Only a task under way moves. Choose where one runs on its plan before it starts.')
+        return yield* invalid(
+          'Only a task under way moves. One not started yet runs where its plan places it, and one that ended stays where it ran.',
+        )
       const parameters = JSON.parse(plan.parameters) as {
         readonly workerId?: string
         readonly steps: ReadonlyArray<PlanStep>
         readonly worksIn?: 'worktree' | 'checkout'
         readonly here?: boolean
+        readonly homeOnly?: boolean
         readonly reads?: boolean
         readonly movingTo?: MovingTo
       }
@@ -206,7 +209,7 @@ export const makeTaskPlaces = ({ sessions }: { readonly sessions: Sessions['Serv
           : parameters.steps.map((step) => (step.key === 'implement' ? { ...step, agentId, model } : step))
       if (input.to !== 'home') {
         const requirements = yield* workerRequirementsOf(input.taskId, {
-          homeOnly: parameters.here === true,
+          homeOnly: homeOnlyOf(parameters),
           readOnly: parameters.reads === true,
         })
         const kept = workerPlanUnfit(requirements, parameters.worksIn, steps)

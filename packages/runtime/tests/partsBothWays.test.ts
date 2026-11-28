@@ -20,6 +20,7 @@ import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, items, notices, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * Every part of a task changes either way on the person's word to its lead (a task is a conversation plus parts; the person's
@@ -39,8 +40,7 @@ const onGitHub = () => {
   const { working, bare } = hosted()
   const github = makeFakeService({ pushUrl: () => bare })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github }
 }
 

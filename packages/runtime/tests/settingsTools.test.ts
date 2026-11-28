@@ -435,13 +435,13 @@ describe('each section of the settings, as agents change it', () => {
         yield* callTool(coordinator, 'change_settings', { section: 'althar/tasks', change: { rounds: 3 } }),
         /^Nothing changed: Tasks is so already\./,
       )
-      // Where the change fails in Althar, the agent hears that much, not the error.
+      // Where the change fails in Althar, the agent hears why, in the runtime's words.
       assert.strictEqual(
         yield* callTool(coordinator, 'change_settings', {
           section: 'project/code',
           change: { tracker: { connectionId: 'conn_none', container: null } },
         }),
-        'Althar could not do that. Try again, or tell the person.',
+        "That thing isn't there any more.",
       )
     }).pipe(Effect.provide(withQueries())),
   )

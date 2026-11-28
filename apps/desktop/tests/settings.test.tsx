@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type HomeWorker } from '@althar/contracts'
+import { type AgentStatus, ApiError, type HomeWorker } from '@althar/contracts'
 import { EdgeSpot } from '@althar/ui'
 
 import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
@@ -15,6 +15,7 @@ import { ServicesProvider } from '../src/renderer/data/services'
 import { QuickSettings } from '../src/renderer/features/settings/QuickSettings'
 import { isSection, type Section, SECTIONS, sectionOf, type SettingsFocus } from '../src/renderer/features/settings/sections'
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
+import { homesUi } from '../src/renderer/features/homes/useHomes'
 import { reviewOf } from '../src/renderer/features/settings/useSkills'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { edgeSpotOf, edgeWords } from '../src/renderer/shared/edge'
@@ -498,6 +499,36 @@ describe('the Settings tab', () => {
     expect(within(install).getByText(/from GitHub, about 45 MB/)).toBeTruthy()
     await userEvent.click(within(install).getByRole('button', { name: 'Download OpenCode' }))
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
+  })
+
+  it('never sends anyone to install Antigravity themselves: its download, or that there is no build for this computer', async () => {
+    const codex = agents.find((agent) => agent.id === 'codex')
+    if (codex === undefined) throw new Error('No Codex in the fixtures')
+    const antigravity: AgentStatus = {
+      ...codex,
+      id: 'antigravity',
+      name: 'Google Antigravity',
+      installed: false,
+      accounts: [],
+      guide: null,
+      download: { size: '125 MB', installing: false, pinned: '1.3.0' },
+    }
+    let here = antigravity
+    const status = vi.fn(async () => ({ apiVersion: 1, appVersion: '0.0.0', agents: [...agents, here] }))
+    const { client } = fakeClient({ status })
+    withServices(<Settings />, client, fakeHost())
+    await userEvent.click(await screen.findByRole('tab', { name: /Google Antigravity/ }))
+    const install = screen.getByRole('region', { name: 'Google Antigravity isn’t on this Mac' })
+    expect(within(install).getByText('Google Antigravity 1.3.0, from Google, about 125 MB.')).toBeTruthy()
+    expect(within(install).queryByText(/installer/)).toBeNull()
+    await userEvent.click(within(install).getByRole('button', { name: 'Download Google Antigravity' }))
+    expect(client.installAgent).toHaveBeenCalledWith('antigravity')
+    // Where Google builds none for this computer, it says so, and offers nothing to press.
+    here = { ...antigravity, download: null, noBuild: true }
+    await userEvent.click(within(install).getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(within(install).getByText(/There’s no build of Google Antigravity for this Mac/)).toBeTruthy())
+    expect(within(install).queryByText(/installer/)).toBeNull()
+    expect(within(install).queryByRole('button')).toBeNull()
   })
 
   it('looks again at once for an agent the person installed themselves', async () => {
@@ -1837,5 +1868,52 @@ describe('Settings › Browser', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Clear all' }))
     expect(clearAll).toHaveBeenCalled()
     expect(await screen.findByText('None kept.')).toBeTruthy()
+  })
+})
+
+describe('Add a worker… from the Computers menu', () => {
+  const bridge = (): WorkersHost =>
+    ({
+      release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.2.0', base: 'https://example.invalid/host-v0.2.0' })),
+      setUp: vi.fn(async () => undefined),
+      act: vi.fn(async () => undefined),
+      setup: vi.fn(async () => null),
+      onSetup: vi.fn(() => () => undefined),
+      agents: vi.fn(async () => []),
+      signIn: vi.fn(async () => undefined),
+      signInAct: vi.fn(async () => undefined),
+      onSignIn: vi.fn(() => () => undefined),
+    }) as unknown as WorkersHost
+
+  it('holds the dialog until the home’s workers are read, then opens the one that adds over SSH', async () => {
+    type Read = { enabled: boolean; adds: boolean; workers: HomeWorker[] }
+    let answer: (workers: Read) => void = () => undefined
+    const { client } = fakeClient({ getWorkers: vi.fn(() => new Promise<Read>((resolve) => (answer = resolve))) })
+    homesUi.set({ addWorker: true })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge() }))
+    await waitFor(() => expect(client.getWorkers).toHaveBeenCalled())
+    // Not the dialog that adds one by hand, nor any, while it's read.
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await act(async () => answer({ enabled: true, adds: true, workers: [] }))
+    const adding = await screen.findByRole('dialog', { name: 'Add a worker to This Mac' })
+    expect(within(adding).getByRole('radio', { name: 'Over SSH' })).toBeTruthy()
+    expect(homesUi.get().addWorker).toBe(false)
+  })
+
+  it('says where the workers couldn’t be read, and opens the dialog once they are', async () => {
+    let fails = true
+    const { client } = fakeClient({
+      getWorkers: vi.fn(async () => {
+        if (fails) throw new Error('offline')
+        return { enabled: true, adds: true, workers: [] }
+      }),
+    })
+    homesUi.set({ addWorker: true })
+    withServices(<Settings at="computers" />, client, fakeHost({ workers: bridge() }))
+    expect(await screen.findByText('Althar couldn’t read This Mac’s workers, so it can’t add one yet.')).toBeTruthy()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fails = false
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByRole('dialog', { name: 'Add a worker to This Mac' })).toBeTruthy()
   })
 })

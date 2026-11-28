@@ -12,9 +12,9 @@
   grid-template-columns: clamp(208px, 20vw, 256px) minmax(0, 1fr);
   align-items: start;
   gap: clamp(16px, 2.2vw, 32px);
-  max-width: 1320px;
+  max-width: var(--page-width);
   margin: 0 auto;
-  padding: clamp(16px, 2vw, 28px) clamp(16px, 3vw, 48px) 72px;
+  padding: clamp(16px, 2vw, 28px) var(--page-inline) 72px;
 }
 
 /* the side stays in sight while a long section scrolls */

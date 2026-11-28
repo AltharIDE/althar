@@ -6,13 +6,16 @@ import { acceptWorkerPatch, prepareWorkerWorkspace, verifyWorkerIndex } from '..
 import type { CapturedWorkerCheckout, WorkerAdmin, WorkerExecution, WorkerExecutionPlatform, WorkerSetupOutcome } from '../workerExecution'
 import { AgentRunOutcome } from '@althar/worker-protocol'
 import {
+  isWorkerBusy,
   MAX_WORKER_BUNDLE_BYTES,
   type AgentWorkerPool,
   type WorkerAgentProcess,
   type WorkerManagedProcess,
+  WORKER_UPDATE_UNSUPPORTED,
 } from '@althar/worker-protocol/agent-runs'
 import { Effect, Scope, Semaphore } from 'effect'
 
+import { WorkerTaken } from '../workerWait'
 import { WorkerHomeError } from './errors'
 import type { WorkerEnrollment } from './network'
 import type { EnrolledWorker } from './store'
@@ -66,10 +69,17 @@ export const workerExecution = (
       readonly homeToolPort: number
     }
   >()
-  const preparing = new Set<string>()
+  /** The workers being readied for a task, each by the workspace it is readied for: it holds the worker as a run does. */
+  const preparing = new Map<string, string>()
+  /** The workers held for a start that hasn't opened there yet, each by its workspace (`reserve`): used once, by its open. */
+  const reserved = new Map<string, string>()
+  /** Being readied for a task, or held for one about to be. */
+  const readying = (workerId: string) => preparing.get(workerId) ?? reserved.get(workerId)
+  /** The agent each worker runs for a lead of this home now: a run a worker holds with none here is no lead's any more. */
+  const live = new Map<string, WorkerAgentProcess>()
   /** A worker at work, or being readied for a task: taking it out would cut its task off, so it waits. */
   const working = (workerId: string) =>
-    preparing.has(workerId) || (active()?.connected() ?? []).some((one) => one.workerId === workerId && one.busy)
+    readying(workerId) !== undefined || (active()?.connected() ?? []).some((one) => one.workerId === workerId && one.busy)
   const named = () => new Map((ledger?.()?.workers() ?? []).flatMap(({ workerId, name }) => (name === undefined ? [] : [[workerId, name]])))
   /** The home's managed enrollment, its worker port opened first where it isn't yet. */
   const managed = Effect.gen(function* () {
@@ -90,6 +100,21 @@ export const workerExecution = (
         }
   return {
     ...(admin === undefined ? {} : { admin }),
+    reserve: (workerId, workspaceId) => {
+      if (working(workerId)) return
+      reserved.set(workerId, workspaceId)
+      return () => {
+        if (reserved.get(workerId) !== workspaceId) return
+        reserved.delete(workerId)
+        // Held no longer, and not run after all: an update asked meanwhile goes now.
+        if (readying(workerId) === undefined) active()?.retryUpdate(workerId)
+      }
+    },
+    settle: (workerId) => {
+      // Being readied, or run by a lead here, it is in use; else what it holds is no lead's.
+      if (readying(workerId) !== undefined || live.has(workerId)) return false
+      return active()?.stopRun(workerId) ?? false
+    },
     adds: () => {
       const listening = ledger?.()
       return admin !== undefined && (listening === undefined || listening.managed !== undefined)
@@ -104,7 +129,7 @@ export const workerExecution = (
           ...(name === undefined ? {} : { name }),
           providers: capabilities.map(({ providerId }) => providerId),
           ...(multiRepoProviders.length === 0 ? {} : { multiRepoProviders }),
-          busy: busy || preparing.has(workerId),
+          busy: busy || readying(workerId) !== undefined,
           ...(capacity === undefined ? {} : { capacity }),
           ...(signedIn === undefined ? {} : { signedIn: [...signedIn] }),
           ...(readiness === undefined ? {} : { readiness }),
@@ -118,9 +143,14 @@ export const workerExecution = (
       return listing.workers().map(({ workerId, projectIds, name, ssh }) => {
         const worker = live.get(workerId)
         // The workspace its run holds, connected or not: one that dropped mid-run still holds it until it says it stopped.
-        const workspaceId = listing.outstanding?.(workerId)?.workspaceId
+        const workspaceId = listing.outstanding?.(workerId)?.workspaceId ?? readying(workerId)
         const holding = workspaceId === undefined ? {} : { workspaceId }
-        const known = { ...(name === undefined ? {} : { name }), ...(ssh === undefined ? {} : { ssh }) }
+        const update = active()?.updateOf(workerId)
+        const known = {
+          ...(name === undefined ? {} : { name }),
+          ...(ssh === undefined ? {} : { ssh }),
+          ...(update === undefined ? {} : { update }),
+        }
         if (worker === undefined)
           return { workerId, ...known, connected: false, busy: workspaceId !== undefined, providers: [], projectIds, ...holding }
         return {
@@ -128,10 +158,11 @@ export const workerExecution = (
           ...known,
           ...(worker.signedIn === undefined ? {} : { signedIn: worker.signedIn }),
           ...(worker.release === undefined ? {} : { release: worker.release }),
+          ...(worker.updatesOnRequest === true ? { updatesOnRequest: true } : {}),
           ...(worker.readiness === undefined ? {} : { readiness: worker.readiness }),
           ...(worker.anyProject === undefined ? {} : { anyProject: worker.anyProject }),
           connected: true,
-          busy: worker.busy || preparing.has(workerId) || workspaceId !== undefined,
+          busy: worker.busy || workspaceId !== undefined,
           ...(worker.capacity === undefined ? {} : { capacity: worker.capacity }),
           providers: [...new Set(worker.capabilities.map(({ providerId }) => providerId))],
           projectIds,
@@ -152,6 +183,25 @@ export const workerExecution = (
           listing.revoke(workerId)
         },
         catch: (error) => (error instanceof Error ? error.message : 'Could not remove the worker.'),
+      }),
+    update: (workerId) =>
+      Effect.try({
+        try: () => {
+          const pool = active()
+          const listing = ledger?.()
+          if (pool === undefined || listing === undefined) throw new Error('This home takes no workers.')
+          if (!listing.workers().some((one) => one.workerId === workerId)) throw new Error('This home has no such worker.')
+          // Not while the home readies it for a task: told once that's let go, or after the run, between runs.
+          if (!pool.update(workerId, undefined, (id) => readying(id) !== undefined)) throw new Error(WORKER_UPDATE_UNSUPPORTED)
+        },
+        catch: (error) => (error instanceof Error ? error.message : 'Could not ask the worker to update.'),
+      }),
+    cancelUpdate: (workerId) =>
+      Effect.try({
+        try: () => {
+          if (active()?.cancelUpdate(workerId) !== true) throw new Error('Its update has started already, or wasn’t asked for.')
+        },
+        catch: (error) => (error instanceof Error ? error.message : 'Could not take the update back.'),
       }),
     startCommand: (input) =>
       Effect.gen(function* () {
@@ -319,18 +369,30 @@ export const workerExecution = (
       Effect.gen(function* () {
         const { workerId, projectId, workspaceId, providerId, worktree, toolPort, setup, repositories, skills } = input
         const failed = (error: unknown) =>
-          error instanceof AgentStartFailed ? error : new AgentStartFailed({ command: providerId, reason: unavailable(error) })
+          error instanceof AgentStartFailed || error instanceof WorkerTaken
+            ? error
+            : isWorkerBusy(error)
+              ? new WorkerTaken({ workerId, reason: unavailable(error) })
+              : new AgentStartFailed({ command: providerId, reason: unavailable(error) })
         const pool = active()
         if (pool === undefined) return yield* failed(new Error('The home’s worker listener is unavailable.'))
         const made = Effect.scoped(
           Effect.gen(function* () {
+            // Reserved for this workspace by its start (`reserve`), this open uses the reservation; else it takes the worker here.
             yield* Effect.acquireRelease(
               Effect.suspend(() => {
-                if (preparing.has(workerId)) return Effect.fail(new Error('This worker is preparing another task.'))
-                preparing.add(workerId)
+                if (preparing.has(workerId) || (reserved.has(workerId) && reserved.get(workerId) !== workspaceId))
+                  return Effect.fail(new WorkerTaken({ workerId, reason: 'This worker is preparing another task.' }))
+                reserved.delete(workerId)
+                preparing.set(workerId, workspaceId)
                 return Effect.void
               }),
-              () => Effect.sync(() => void preparing.delete(workerId)),
+              () =>
+                Effect.sync(() => {
+                  preparing.delete(workerId)
+                  // Readied, or let go: an update asked meanwhile goes where nothing runs there now.
+                  if (readying(workerId) === undefined) active()?.retryUpdate(workerId)
+                }),
             )
             const entries = yield* Effect.forEach(
               repositories ?? [{ workspaceId, directory: '', worktree }],
@@ -382,6 +444,13 @@ export const workerExecution = (
           scope,
           Effect.sync(() => {
             for (const entry of entries) if (workspaces.get(entry.worktree)?.agent === agent) workspaces.delete(entry.worktree)
+          }),
+        )
+        live.set(workerId, agent)
+        yield* Scope.addFinalizer(
+          scope,
+          Effect.sync(() => {
+            if (live.get(workerId) === agent) live.delete(workerId)
           }),
         )
         const writes = yield* Semaphore.make(1)

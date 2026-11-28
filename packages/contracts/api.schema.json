@@ -1369,6 +1369,16 @@
         "name": {
           "type": "string"
         },
+        "noBuild": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "problem": {
           "anyOf": [
             {
@@ -11372,6 +11382,12 @@
               "type": "null"
             }
           ]
+        },
+        "update": {
+          "$ref": "#/$defs/WorkerUpdate"
+        },
+        "updatesOnRequest": {
+          "type": "boolean"
         },
         "workerId": {
           "type": "string"
@@ -24330,6 +24346,16 @@
                 "state": {
                   "enum": ["queued", "delivered", "superseded", "withdrawn"],
                   "type": "string"
+                },
+                "unsent": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": ["state", "interrupting"],
@@ -24728,6 +24754,85 @@
       },
       "required": ["workspaceId", "name", "bytes", "sha256", "head", "tree", "index"],
       "type": "object"
+    },
+    "WorkerUpdate": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "properties": {
+            "state": {
+              "enum": ["asked"],
+              "type": "string"
+            }
+          },
+          "required": ["state"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "state": {
+              "enum": ["started"],
+              "type": "string"
+            }
+          },
+          "required": ["state"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "state": {
+              "enum": ["waiting"],
+              "type": "string"
+            }
+          },
+          "required": ["state"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "state": {
+              "enum": ["done"],
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": ["state", "version"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "state": {
+              "enum": ["current"],
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": ["state"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "state": {
+              "enum": ["failed"],
+              "type": "string"
+            }
+          },
+          "required": ["state", "message"],
+          "type": "object"
+        }
+      ]
     },
     "WorksIn": {
       "enum": ["worktree", "checkout"],
@@ -25342,7 +25447,7 @@
         "required": ["id"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/TerminalChunk"
       }
@@ -25436,6 +25541,31 @@
           }
         },
         "required": ["commandId", "flowId"],
+        "type": "object"
+      },
+      "socket": true,
+      "success": {
+        "type": "null"
+      }
+    },
+    "CancelWorkerUpdate": {
+      "error": {
+        "$ref": "#/$defs/ApiErrorEncoded"
+      },
+      "kind": "command",
+      "lane": "immediate",
+      "payload": {
+        "additionalProperties": true,
+        "properties": {
+          "commandId": {
+            "$ref": "#/$defs/CommandId"
+          },
+          "workerId": {
+            "pattern": "^wrk_[a-f0-9]{32}$",
+            "type": "string"
+          }
+        },
+        "required": ["commandId", "workerId"],
         "type": "object"
       },
       "socket": true,
@@ -25869,7 +25999,7 @@
         "required": ["commandId", "id"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -26046,7 +26176,7 @@
         "required": ["commandId", "id"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -29002,7 +29132,7 @@
         "required": ["projectId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "items": {
           "$ref": "#/$defs/Launch"
@@ -29179,7 +29309,7 @@
         "required": ["projectId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "items": {
           "$ref": "#/$defs/ShownTerminal"
@@ -29973,7 +30103,7 @@
         "required": ["commandId", "id", "projectId", "taskId", "cols", "rows"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/ShownTerminal"
       }
@@ -30706,7 +30836,7 @@
         "required": ["id"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/OutputText"
       }
@@ -31347,7 +31477,7 @@
         "required": ["id", "cols", "rows"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -31713,7 +31843,7 @@
         "required": ["commandId", "projectId", "taskId", "threadId"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "$ref": "#/$defs/Launch"
       }
@@ -34415,7 +34545,7 @@
         "required": ["commandId", "id"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }
@@ -34971,6 +35101,31 @@
         "type": "null"
       }
     },
+    "UpdateWorker": {
+      "error": {
+        "$ref": "#/$defs/ApiErrorEncoded"
+      },
+      "kind": "command",
+      "lane": "immediate",
+      "payload": {
+        "additionalProperties": true,
+        "properties": {
+          "commandId": {
+            "$ref": "#/$defs/CommandId"
+          },
+          "workerId": {
+            "pattern": "^wrk_[a-f0-9]{32}$",
+            "type": "string"
+          }
+        },
+        "required": ["commandId", "workerId"],
+        "type": "object"
+      },
+      "socket": true,
+      "success": {
+        "type": "null"
+      }
+    },
     "Watch": {
       "error": {
         "$ref": "#/$defs/ApiErrorEncoded"
@@ -35126,7 +35281,7 @@
         "required": ["id", "data"],
         "type": "object"
       },
-      "socket": false,
+      "socket": true,
       "success": {
         "type": "null"
       }

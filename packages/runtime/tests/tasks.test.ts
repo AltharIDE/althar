@@ -1,4 +1,4 @@
-import { removeTreeSync } from '@althar/testing'
+import { identify, removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -539,8 +539,7 @@ describe('a task’s course', () => {
       const tasks = yield* Tasks
       const sql = yield* SqlClient.SqlClient
       const root = repository()
-      git(root, 'config', 'user.name', 'T')
-      git(root, 'config', 'user.email', 't@t.test')
+      identify(root, 'T', 't@t.test')
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: root })
       const task = yield* projects.createTask({
         envelope: yield* command('task.create'),
@@ -659,8 +658,7 @@ describe('a task’s course', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     const gate = Deferred.makeUnsafe<void>()
     // Opening the pull request waits until the test lets it go.
     const slow: FakeService = {
@@ -708,8 +706,7 @@ describe('a task’s course', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       const plans = yield* Plans
       const tasks = yield* Tasks

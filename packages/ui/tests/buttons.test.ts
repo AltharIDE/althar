@@ -50,6 +50,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'outputs/LineComments/LineComments.tsx': 'a sent comment’s file and lines, heading its excerpt, which open the diff at its line',
   'chrome/TaskParts/TaskParts.tsx':
     'the parts’ marks in the bar, the whole of which opens them; a part’s row or chip, which opens it in place; Add and Back, a popover’s own head',
+  'chrome/TaskParts/WorktreeBody.tsx':
+    'the branch it goes into, a chip in its line that opens Work toward in place; the bar of what it changed, which folds its files',
   'setup/ToolTiles/ToolParts.tsx':
     'a dashed tile, the whole of which adds one; a role’s round switch with its name under it; a project’s mark and name, pressed in or out',
   'setup/ToolTiles/AddServerDialog.tsx': 'an agent’s mark and name, pressed in or out, as a project’s are',
@@ -88,6 +90,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'composer/ContextRing/ContextRing.tsx': 'the ring',
   'chrome/LoadMeter/LoadMeter.tsx': 'the meters, drawn in steps as the ring is drawn',
   'chrome/PlanGauge/PlanGauge.tsx': 'the plan gauge, drawn in steps as the load meters are',
+  'chrome/Updates/Updates.tsx': 'the updates glyph, drawn turning, marked or as the problem mark by what is under it, beside the meters',
   'composer/Composer/Composer.tsx': 'the dictation button, drawn as your voice',
   'thread/Shots/Shots.tsx': 'a screenshot’s thumbnail',
   'thread/Gallery/Gallery.tsx': 'a screenshot, large, which opens full size',

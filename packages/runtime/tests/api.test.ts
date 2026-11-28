@@ -56,7 +56,6 @@ import {
 import { NotConnected } from '../src/Connections'
 import { forgetTold } from '../src/forks'
 import { Projects } from '../src/Projects'
-import { Terminals } from '../src/Terminals'
 import * as Runtime from '../src/Runtime'
 import { ALWAYS } from '../src/sandboxReach'
 import { Folders } from '../src/Folders'
@@ -1357,6 +1356,61 @@ describe('the API', () => {
           (yield* Effect.flip(client.GetThreadItem({ threadId: task.threadId, itemId: 'itm_missing' }))).reason,
           'NotFound',
         )
+      }),
+    ),
+  )
+
+  it.live('says a message is not sent while no agent is on its way to read it, and sends it again', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, context } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Unsent' })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: task.threadId,
+          body: 'my message not sending',
+          disposition: 'after_current',
+        })
+        const message = (thread: ThreadSnapshot) =>
+          thread.items.flatMap((item) => (item.kind === 'user_message' && item.content.text === 'my message not sending' ? [item] : []))[0]
+        // Queued for a lead that hasn't started yet, it is on its way.
+        assert.isUndefined(message(yield* client.GetThread({ threadId: task.threadId }))?.input?.unsent)
+        // Refused before any session is recorded, as for a task abandoned meanwhile: unsent too, and its start can be tried
+        // again, though no session ever was.
+        const gone = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Abandoned meanwhile' })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: gone.threadId,
+          body: 'my message not sending',
+          disposition: 'after_current',
+        })
+        yield* client.AbandonTask({ commandId: commandId(), taskId: gone.id })
+        yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: gone.threadId, agentId: 'codex' }))
+        const early = yield* client.GetThread({ threadId: gone.threadId, fresh: true })
+        assert.isNull(early.session)
+        assert.deepInclude(message(early)?.input, { state: 'queued', unsent: true })
+        assert.isTrue(early.retryable)
+        // Its lead couldn't start: nothing is on its way to read it.
+        yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'missing' }))
+        assert.deepInclude(message(yield* client.GetThread({ threadId: task.threadId, fresh: true }))?.input, {
+          state: 'queued',
+          unsent: true,
+        })
+        // Stuck so before starts that failed said what they were started on: its failed session says it all the same.
+        const sql = Context.get(context, SqlClient.SqlClient)
+        yield* sql`UPDATE thread_items SET content = json_remove(content, '$.startFailed') WHERE thread_id = ${task.threadId}`
+        assert.deepInclude(message(yield* client.GetThread({ threadId: task.threadId, fresh: true }))?.input, {
+          state: 'queued',
+          unsent: true,
+        })
+        // Sent again, by a lead that starts: it reads it, and it isn't said to be unsent any more.
+        yield* client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'codex' })
+        const read = yield* until(
+          client.GetThread({ threadId: task.threadId, fresh: true }),
+          (thread) => message(thread)?.input?.state === 'delivered',
+        )
+        assert.isUndefined(message(read)?.input?.unsent)
       }),
     ),
   )
@@ -4446,44 +4500,53 @@ describe('a project set up where it starts, through the API', () => {
 })
 
 describe('terminals, through the API', () => {
-  it.live('are the window’s alone: a paired device opens, reads, types into, resizes and closes none', () =>
+  // A home's window reaches it over SSH, with a socket's authority, or paired; either opens the home's own shell there.
+  for (const sender of [{ kind: 'paired_device', deviceId: 'phone-1' }, { kind: 'socket' }] as const) {
+    it.live(`open in a ${sender.kind === 'socket' ? 'home’s window over SSH' : 'paired window'}, run what is typed, and close`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client, context } = yield* connected({ sender })
+          const projectId = yield* Effect.provideContext(
+            Effect.gen(function* () {
+              const opened = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+              return opened.projectId
+            }),
+            context,
+          )
+          const id = 'term_home01'
+          const shown = yield* client.OpenTerminal({ commandId: commandId(), id, projectId, taskId: null, cols: 80, rows: 24 })
+          assert.strictEqual(shown.id, id)
+          assert.deepStrictEqual(
+            (yield* client.ListTerminals({ projectId })).map((one) => one.id),
+            [id],
+          )
+          yield* client.ResizeTerminal({ id, cols: 100, rows: 30 })
+          yield* client.WriteTerminal({ id, data: 'echo althar-home\r' })
+          // What was typed comes back, and then what the shell printed for it: the word twice.
+          const printed = yield* client.AttachTerminal({ id }).pipe(
+            Stream.filter((chunk) => chunk._tag === 'Data'),
+            Stream.scan(
+              () => '',
+              (was, chunk) => was + chunk.data,
+            ),
+            Stream.takeUntil((all) => all.split('althar-home').length > 2),
+            Stream.runLast,
+          )
+          assert.isTrue(Option.isSome(printed) && printed.value.split('althar-home').length > 2)
+          yield* client.CloseTerminal({ commandId: commandId(), id })
+          assert.deepStrictEqual(yield* client.ListTerminals({ projectId }), [])
+        }),
+      ),
+    )
+  }
+
+  it.live('say a terminal they don’t have is gone, and close it as closed', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { client, context } = yield* connected({ sender: { kind: 'paired_device', deviceId: 'phone-1' } })
-        const projectId = yield* Effect.provideContext(
-          Effect.gen(function* () {
-            const opened = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
-            return opened.projectId
-          }),
-          context,
-        )
-        const refused = <A, E>(call: Effect.Effect<A, E>) =>
-          Effect.map(Effect.flip(call), (error) => (error instanceof ApiError ? error.reason : String(error)))
-        const reasons = [
-          yield* refused(client.OpenTerminal({ commandId: commandId(), id: 'term_phone1', projectId, taskId: null, cols: 80, rows: 24 })),
-          yield* refused(client.ListTerminals({ projectId })),
-          yield* refused(Stream.runDrain(client.AttachTerminal({ id: 'term_phone1' }))),
-          yield* refused(client.WriteTerminal({ id: 'term_phone1', data: 'echo hi\n' })),
-          yield* refused(client.ResizeTerminal({ id: 'term_phone1', cols: 100, rows: 30 })),
-          yield* refused(client.CloseTerminal({ commandId: commandId(), id: 'term_phone1' })),
-        ]
-        assert.deepStrictEqual(reasons, Array(6).fill('Forbidden'))
-        // The window's own calls go through: to the shells it has, and to none it hasn't.
         const { client: window } = yield* connected({})
-        assert.deepStrictEqual(yield* window.ListTerminals({ projectId }), [])
         const unknown = yield* Effect.flip(Stream.runDrain(window.AttachTerminal({ id: 'term_none' })))
         assert.strictEqual(unknown.reason, 'NotFound')
         yield* window.CloseTerminal({ commandId: commandId(), id: 'term_none' })
-        // No shell was started for it.
-        assert.deepStrictEqual(
-          yield* Effect.provideContext(
-            Effect.gen(function* () {
-              return yield* (yield* Terminals).ofProject(projectId)
-            }),
-            context,
-          ),
-          [],
-        )
       }),
     ),
   )

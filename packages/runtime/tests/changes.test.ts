@@ -24,6 +24,7 @@ import * as Runtime from '../src/Runtime'
 import { HOST, hosted, items, notices, pushLog, until } from './support'
 
 import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals, withoutReview } from './changesSupport'
+import { identify } from '@althar/testing'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -40,8 +41,7 @@ describe('a task that ends in a pull request', () => {
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
     github.addRepository(['meridian', 'api'])
     // The fake lead commits as the person, as agents do: Althar credits only the person's own commits.
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:answer] [review:pass]')
@@ -168,8 +168,7 @@ describe('a task that ends in a pull request', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       // Its reviewer finds something every time: the check of the fix reopens it, and the lead's second fix is read by none.
@@ -190,8 +189,7 @@ describe('a task that ends in a pull request', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       yield* setPlansAndReviews({ rounds: 1 })
       yield* setReviewSeal(false)

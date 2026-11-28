@@ -19,6 +19,7 @@ import type { HomeProjects, HomeState, HomesHost, HomesOverview, RemoteHome } fr
 import { kitInk } from '../../shared/inks'
 import { ConnectionFields, useEdit } from './EditConnection'
 import { Identity } from './ConnectHome'
+import { type ExperimentalStore, useExperimental } from './Experimental'
 import { homeProblem, homesUi, keyOf, type Liveness, livenessOf, openedAgo } from './useHomes'
 import s from './ManageHomes.module.css'
 
@@ -45,6 +46,8 @@ export interface ManageProps {
   readonly here: HomeState | null
   readonly onClose: () => void
   readonly onConnect: () => void
+  /** Where Homes being experimental is kept as said, once for every window. Without it, it isn't said. */
+  readonly said?: ExperimentalStore | undefined
 }
 
 /**
@@ -165,12 +168,13 @@ const useSaved = (homes: HomesHost, overview: HomesOverview | null) => {
   }
 }
 
-export function ManageHomes({ homes, overview, here, onClose, onConnect }: ManageProps) {
+export function ManageHomes({ homes, overview, here, onClose, onConnect, said }: ManageProps) {
   const saved = useSaved(homes, overview)
   const [editing, setEditing] = useState<Editing>(null)
   const list = useRef<HTMLUListElement>(null)
   useQuietFocus(list)
   const ownKey = here !== null && here.current.kind !== 'local' ? here.current.home.homeId : 'local'
+  const experimental = useExperimental(said, s.experimental)
   const open = (id: string, projectId?: string) => {
     onClose()
     void saved
@@ -199,6 +203,7 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
       }}
       actions={<Button onClick={onClose}>Done</Button>}
     >
+      {experimental}
       <ListMotion within={list} enter="grow">
         <ul className={s.homes} ref={list}>
           <li data-move="local" className={s.home}>

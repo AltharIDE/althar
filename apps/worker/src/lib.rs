@@ -38,6 +38,7 @@ pub mod project;
 pub mod relay;
 #[cfg(target_os = "linux")]
 pub mod uninstall;
+pub mod update;
 
 pub mod wire {
     include!(concat!(env!("OUT_DIR"), "/althar.worker.v1.rs"));

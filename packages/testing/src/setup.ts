@@ -2,7 +2,11 @@ import { beforeEach } from 'vite-plus/test'
 
 import { begin } from './deadline'
 import { fromRoot } from './flaky'
+import { isolateGit } from './git'
 import { held, lapsedOf } from './quarantine'
+
+/* A test's git never looks for a repository above the temporary folder, so it can't write into a task's (git.ts). */
+isolateGit()
 
 /* What this job read of the quarantine as it started (quarantine.ts): none on a computer, or at night. */
 const quarantine = held()

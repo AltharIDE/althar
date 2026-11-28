@@ -109,7 +109,8 @@ export const Narrowed: Story = {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('radio', { name: 'Document' }))
     await expect(names(canvasElement)).toEqual(['Sign-in, three directions'])
-    await expect(c.getByText('1 of 5')).toBeInTheDocument()
+    // No bare count beside the search: the rows say how many there are.
+    await expect(c.queryByText('1 of 5')).toBeNull()
     await userEvent.click(c.getByRole('radio', { name: 'All' }))
     await userEvent.type(c.getByRole('searchbox', { name: 'Find an artifact' }), 'sign')
     await userEvent.click(c.getByRole('button', { name: 'Name' }))

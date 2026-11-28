@@ -208,7 +208,7 @@ export const useHomesOverview = (homes: HomesHost | undefined): HomesOverview | 
 /** A home being set up over SSH, as main tells it; null while there's none, and until first read. */
 export const useHomeSetup = (homes: HomesHost | undefined): HomeSetup | null => useFollowed(homes?.setup, homes?.onSetup)
 
-/** Asks the window to show its homes, as File › Homes… does: the chip's menu, or Connect a home where there's no chip yet. */
+/** Asks the window to show its homes, as File › Computers… does: the chip's menu, or Connect a home where there's no chip yet. */
 export const showHomes = () => window.dispatchEvent(new Event('althar:show-homes'))
 
 export type HomesDialog = 'connect' | 'manage' | 'phones' | null
@@ -217,8 +217,10 @@ interface HomesUi {
   readonly dialog: HomesDialog
   /** How many chips are drawn: with none, there's no menu to open. */
   readonly chips: number
+  /** Add a worker…, asked from the menu: Settings › Computers opens it as it shows. */
+  readonly addWorker: boolean
 }
-let ui: HomesUi = { menu: false, dialog: null, chips: 0 }
+let ui: HomesUi = { menu: false, dialog: null, chips: 0, addWorker: false }
 const listeners = new Set<() => void>()
 /** What is open over this window for its homes. Each window is its own page, so this is the window's own. */
 export const homesUi = {

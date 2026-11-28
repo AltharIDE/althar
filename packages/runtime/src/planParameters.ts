@@ -52,6 +52,12 @@ export const PlanParameters = Schema.Struct({
    */
   here: Schema.optional(Schema.Boolean),
   /**
+   * Whether it runs only on this home (`homeOnly` in its worker requirements): as `here` says, without it. A task started
+   * at once and placed on a worker (`start_task` with `runs_on`) keeps `here`, so nothing of it goes up when it is done,
+   * and sets this false, so it runs where it was placed; its work comes home at each turn's end as any worker's does.
+   */
+  homeOnly: Schema.optional(Schema.Boolean),
+  /**
    * An aside the person started (`StartTask` with `chat`, docs/decisions/tasks.md, "Asides"): its first step ends with its
    * lead's turn, its reply the answer, as a turn after a plan does, and the coordinator hears nothing of it. Not once it is
    * work: its lead changed the repository and it left Scratch for the board.

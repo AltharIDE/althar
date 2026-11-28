@@ -150,3 +150,29 @@ describe('to the agent that made it', () => {
     expect(said(many)).toBe(`${many.slice(0, 8).join('; ')}; and 22 more`)
   })
 })
+
+describe('a value of no list or map', () => {
+  it('is said as it is, a map by its pairs and an object in a list by its values', () => {
+    expect(inWords({})).toBe('none')
+    expect(inWords({ rounds: 3, on: true })).toBe('rounds: 3, on: on')
+    expect(inWords(BigInt(7))).toBe('7')
+    expect(inWords(() => 1)).toBe('')
+    expect(changesOf('Accounts', ['a'], [{ name: 'codex', note: 'b' }])).toEqual(['Added codex b to Accounts', 'Removed a from Accounts'])
+  })
+
+  it('between a list and a plain value is the value’s before and after', () => {
+    expect(changesOf('Never', ['force-push'], 'force-push')).toEqual(['Never: force-push → force-push'])
+    expect(changesOf('Agents', { codex: 1 }, 4)).toEqual(['Agents: codex: 1 → 4'])
+  })
+
+  it('in an agent’s models or efforts, where it isn’t a map, is none of them', () => {
+    expect(modelsTurnedOff('codex', { codex: ['luna'] }, names)).toEqual([`Turned off ${names.model('codex', 'luna')} in Codex`])
+    expect(modelsTurnedOff({ codex: ['luna'] }, null, names)).toEqual([])
+    expect(defaultEfforts(null, { 'codex/luna': 'high', plain: 'low' }, names)).toEqual([
+      `Default effort for ${names.model('codex', 'luna')}: none → high`,
+      'Default effort for plain: none → low',
+    ])
+    expect(defaultEfforts({ 'codex/luna': null }, { 'codex/luna': undefined }, names)).toEqual([])
+    expect(defaultEfforts({ 'codex/luna': 'high' }, 'none', names)).toEqual([])
+  })
+})

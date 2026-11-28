@@ -25,6 +25,7 @@ import * as Runtime from '../src/Runtime'
 import { callTool, HOST, hosted, notices, turns, until } from './support'
 
 import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals, pushByHand } from './changesSupport'
+import { identify } from '@althar/testing'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -285,8 +286,7 @@ describe('a pull request, by the person and the lead', () => {
     const github = makeFakeService({ pushUrl: () => bare, headOf: tip })
     github.addRepository(['meridian', 'api'])
     // Commits are the person's own, which is what Althar credits.
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       const changes = yield* Changes
@@ -613,8 +613,7 @@ describe('a branch that parted from its pull request', () => {
     const tip = tipOf(bare)
     const github = makeFakeService({ pushUrl: () => bare, headOf: tip })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       yield* setCoAuthor(false)

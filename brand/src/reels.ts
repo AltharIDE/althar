@@ -220,6 +220,24 @@ export const REELS: readonly Reel[] = [
     ],
   }),
   row({
+    file: 'workers',
+    height: 525,
+    shows: "Your workers in Settings: one opens to the task it's running and what it has free",
+    scenes: [
+      {
+        story: 'setup-computers--default',
+        width: 980,
+        height: 660,
+        density: 2,
+        /* the settings' column from the top of the page, its home and its workers */
+        region: { x: 0, y: 0, width: 932, height: 612 },
+        slow: 0.5,
+        cursor: true,
+        steps: [{ wait: 1400 }, { click: 'Linux worker 3c3f9a' }, { wait: 2800 }, { click: 'Computers' }, { wait: 1800 }],
+      },
+    ],
+  }),
+  row({
     file: 'canvas',
     height: 640,
     shows: 'A diagram a lead drew on the canvas: you comment on it, and the next version answers',

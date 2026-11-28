@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 
 import { Heading, Logo, TaskHeader, TaskStatus, TitleBar } from '@althar/ui'
-import { ComingNext, HostAndWorkers, WhatsNew, type WhatsNewFeature } from '@althar/ui/screens'
+import { ComingNext, WhatsNew, type WhatsNewFeature, YourWorkers } from '@althar/ui/screens'
 
 import { CHANGELOG, COMMUNITY, ISSUES } from '../../shared/links'
 import { useUpdate } from '../../shared/useUpdate'
@@ -36,7 +36,7 @@ const LISTED = 6
 const leadPicture = (picture: string | undefined) => {
   const title = picture === undefined ? undefined : text.pictures[picture]
   if (picture !== 'home' || title === undefined) return undefined
-  return { title, drawing: <HostAndWorkers /> }
+  return { title, drawing: <YourWorkers /> }
 }
 
 export function AltharPage({ view, onView, onWay }: { view: View; onView: (view: View) => void; onWay: (to: Way) => void }) {

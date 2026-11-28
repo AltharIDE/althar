@@ -95,6 +95,17 @@ export const signInEndedWords = 'Its sign-in has ended. Sign it in again in Sett
 /** An agent that couldn't reach its servers: nothing to sign in, the connection to look at. */
 export const unreachableWords = (device: string) => `Its servers can't be reached. Check ${device}'s connection, then try again.`
 
+/**
+ * A start whose agent doesn't list the model it was put on just now, where it listed it lately: an agent's list can come
+ * back short for a while, so it is asked again for a while before the work goes elsewhere.
+ */
+export const modelMissingWords = (agent: string, model: string, within: string) =>
+  `${agent} doesn't list ${model} just now. Asking it again for up to ${within} before the work goes to another agent.`
+
+/** A start whose agent stopped listing its model, and still didn't list it when asked again for a while. */
+export const modelGoneWords = (model: string, within: string) =>
+  `It stopped listing ${model}, and still didn't after ${within} of asking again.`
+
 /** An agent that couldn't start where the folder it starts in is gone: deleted by hand, or a Local task's checkout moved. */
 export const folderGoneWords = (path: string) => `Its folder isn't there any more: ${path}.`
 
@@ -598,6 +609,9 @@ export const words = (
         return `Althar only gives ${text(error, 'tool')}'s sign-in to a server it knows, over HTTPS. ${text(error, 'address')} isn't one.`
       case 'OtherAccount':
         return `This token is ${text(error, 'login')}'s. Make one as ${text(error, 'expected')}, or connect ${text(error, 'login')} as well from the list.`
+      // Worded already, for the window (`@althar/contracts`' ApiError): the runtime's own sentence, as the window shows it.
+      case 'ApiError':
+        return text(error, 'message') === '' ? "Althar's runtime couldn't do that. Its log has the details." : text(error, 'message')
       default:
         return agentSaid(error) ?? "Althar's runtime couldn't do that. Its log has the details."
     }

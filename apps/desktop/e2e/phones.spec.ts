@@ -42,7 +42,7 @@ test('pairs a phone with This Mac from the homes menu, over HTTPS, and takes it 
   try {
     await openFirstProject(electronApp, page, repository(home))
     const openPairing = async () => {
-      await page.getByRole('button', { name: 'Homes', exact: true }).click()
+      await page.getByRole('button', { name: 'Computers', exact: true }).click()
       await page.getByRole('menuitem', { name: 'Pair a phone…', exact: true }).click()
       return page.getByRole('dialog', { name: 'Pair a phone with This Mac' })
     }

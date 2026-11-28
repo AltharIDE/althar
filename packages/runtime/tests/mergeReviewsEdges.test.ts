@@ -1,4 +1,4 @@
-import { removeTree } from '@althar/testing'
+import { identify, removeTree } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -17,6 +17,7 @@ import { FastLane } from '../src/fastLane'
 import { Instance } from '../src/Instance'
 import { Live } from '../src/Live'
 import { MergeReviews } from '../src/MergeReviews'
+import { Models } from '../src/Models'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -92,8 +93,7 @@ const onGitHub = (heads = false) => {
   const { working, bare } = hosted()
   const github = makeFakeService({ pushUrl: () => bare, ...(heads ? { headOf: tipOf(bare) } : {}) })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github }
 }
 
@@ -572,6 +572,37 @@ describe('the review after a merge, at its edges', () => {
         SELECT model FROM provider_sessions WHERE thread_id = ${yield* reviewerThread(task.taskId)} ORDER BY started_at LIMIT 1`
       assert.strictEqual(session?.model, 'large')
     }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('never hands a reviewer whose agent stopped listing its model to the lead it reviews, a failed switch of it after', () => {
+    const { working, bare, github } = onGitHub()
+    const sol = { id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol' }
+    const large = { id: 'large', name: 'Large' }
+    const small = { id: 'small', name: 'Small' }
+    // The lead's agent offers the reviewer's model, and its lead is on it: the only other way to that model is the lead itself.
+    const each: Record<string, FakeAgentOptions> = {
+      'codex@usual': { models: [sol, large] },
+      'claude-code@usual': { models: [sol, small] },
+      'opencode@usual': { models: [small] },
+    }
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working, '[review:pass]')
+      const [plan] = yield* sql<{ id: string; parameters: string }>`SELECT id, parameters FROM task_plans WHERE task_id = ${task.taskId}`
+      const parameters = JSON.parse(plan?.parameters ?? '{}') as { steps: Array<Record<string, unknown>> }
+      for (const step of parameters.steps) if (step.key === 'review') Object.assign(step, { model: sol.id })
+      yield* sql`UPDATE task_plans SET parameters = ${JSON.stringify(parameters)} WHERE id = ${plan?.id ?? ''}`
+      yield* until((yield* Models).catalog, (all) => all.every((agent) => !agent.probing))
+      // A switch of its lead to another agent that failed: the lead it reviews is still the one on Claude Code and Sol.
+      yield* Effect.flip((yield* Sessions).switchAgent({ threadId: task.threadId, agentId: 'opencode', model: 'nowhere' }))
+      // Codex stops listing Sol before the review after merge starts.
+      each['codex@usual'] = { models: [large] }
+      yield* mergeIt(bare, github, task.taskId)
+      yield* until(reviewOf(task.url), (row) => (row?.attempts ?? 0) > 0 && row?.state !== 'running')
+      const started = yield* sql<{ agentId: string }>`
+        SELECT DISTINCT agent_id FROM provider_sessions WHERE thread_id = ${yield* reviewerThread(task.taskId)}`
+      assert.deepStrictEqual(started, [{ agentId: 'codex' }])
+    }).pipe(Effect.provide(runtimeWith(github, {}, each)))
   })
 
   it.live('is owed where the task’s worktree is on another computer, says why it hasn’t started, and starts once it is here', () => {
