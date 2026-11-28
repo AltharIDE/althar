@@ -511,7 +511,11 @@ function LiveRounds({
           items: snapshot.items,
           turnRunning: session?.turnRunning ?? false,
           turnStarted: session?.turnStartedAt ?? null,
-          reading: readingNow(session, pending, snapshot.task.queued !== null || snapshot.task.waits !== null, snapshot.accepting),
+          // What no agent is on its way to read isn't being read, unless the person just sent it again.
+          reading:
+            (pending || !snapshot.items.some((item) => item.kind === 'user_message' && item.input?.unsent === true)) &&
+            readingNow(session, pending, snapshot.task.queued !== null || snapshot.task.waits !== null, snapshot.accepting),
+          resending: pending,
           readingLocally: readingLocallyOf(session, snapshot.accepting, snapshot.task.queued !== null || snapshot.task.waits !== null),
           turnEnded: session?.turnEndedAt ?? null,
           // What the person asked for, which opens the thread above, is what the lead's first turn answers.

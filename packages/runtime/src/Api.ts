@@ -1480,7 +1480,13 @@ export const handlers = apiLayer(
         once(
           commandId,
           api(
-            sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }),
+            sessions.start({
+              threadId,
+              agentId,
+              ...(model === undefined ? {} : { model }),
+              ...(effort === undefined ? {} : { effort }),
+              waitsAside: true,
+            }),
           ),
         ),
       SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, files, dictated, comments }) =>

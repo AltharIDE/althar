@@ -9,6 +9,7 @@ import type {
   WorkerSkillFile,
 } from '@althar/worker-protocol/agent-runs'
 import { Effect, type Scope } from 'effect'
+import type { WorkerTaken } from './workerWait'
 import { SqlClient } from 'effect/sql'
 
 export type { ProjectWorker } from '@althar/contracts'
@@ -134,6 +135,16 @@ export interface WorkerExecutionPlatform {
     input: Pick<AssignedCommand, 'workerId' | 'projectId' | 'worktree'>,
   ) => Effect.Effect<void, AgentRequestFailed>
   readonly openHelper?: (input: AssignedHelper) => Effect.Effect<WorkerExecution, AgentStartFailed, Scope.Scope>
+  /**
+   * Holds a free worker for a task's workspace while its lead starts there, so no other start takes it in between: let go
+   * by what it gives back. None where another run holds it or is being readied there.
+   */
+  readonly reserve?: (workerId: string, workspaceId: string) => (() => void) | undefined
+  /**
+   * Where a connected worker holds a run no lead of this home holds any more, stops it, as the worker is asked to: true
+   * where it asked. A run the worker can't confirm stopped stays outstanding, for it to reconcile when it reconnects.
+   */
+  readonly settle?: (workerId: string) => boolean
   readonly open: (input: {
     readonly workerId: string
     readonly projectId: string
@@ -144,5 +155,5 @@ export interface WorkerExecutionPlatform {
     readonly setup?: WorkerSetup
     readonly repositories?: ReadonlyArray<AssignedRepository>
     readonly skills?: ReadonlyArray<WorkerSkillFile>
-  }) => Effect.Effect<WorkerExecution, AgentStartFailed, Scope.Scope>
+  }) => Effect.Effect<WorkerExecution, AgentStartFailed | WorkerTaken, Scope.Scope>
 }

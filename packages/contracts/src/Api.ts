@@ -2095,6 +2095,8 @@ export const UserMessageItem = Schema.Struct({
       interrupting: Schema.Boolean,
       /** A turn has taken this input, even if delivery to the agent is still pending. */
       claimed: Schema.optional(Schema.Boolean),
+      /** Queued, and no agent is on its way to read it: the agent started for it couldn't start, and none has since. */
+      unsent: Schema.optional(Schema.Boolean),
       /** Some of its words came from dictation: the agent was told it may have been misheard. Taken back, it goes back to the composer so. */
       dictated: Schema.optional(Schema.Boolean),
     }),
