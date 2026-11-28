@@ -649,8 +649,14 @@
   font-size: 12px;
   color: var(--t-3);
 }
-/* An agent's own sign-in, as the line that runs it on the worker: code, wrapping where it is long. */
+/* An agent's own sign-in, as the line that runs it on the worker: code, wrapping where it is long, its copy beside it. */
+.commandRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
 .signInCommand {
+  flex: 1;
   min-width: 0;
   padding: 6px 8px;
   border-radius: 8px;

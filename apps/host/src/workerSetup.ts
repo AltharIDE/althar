@@ -107,6 +107,10 @@ const running = () => resolve(dirname(process.argv[1] ?? ''), '..')
 const stable = (path: string, release: string, current: string) =>
   path.startsWith(`${release}/`) ? `${current}${path.slice(release.length)}` : path
 
+/** A command as the worker's shell takes it, its home folder said `~`, which that shell expands: shorter to read and to copy. */
+const homeSaid = (command: string, home: string = homedir()) =>
+  command.startsWith(`${home}/`) ? `~${command.slice(home.length)}` : command
+
 const shellQuoted = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
 
 /**
@@ -162,7 +166,7 @@ const checkAgents = async (folder: string) => {
         unknown: status === 'unknown',
         // Its own sign-in where it has none inside Althar: the command to run on the worker, as it would be typed there.
         ...(agent.definition.signIn.inApp === undefined && agent.definition.signIn.login !== ''
-          ? { login: agent.definition.signIn.login }
+          ? { login: homeSaid(agent.definition.signIn.login) }
           : {}),
       }
     }),
@@ -641,7 +645,7 @@ export const signIn = async (id: string, way: SignInWay, out: (text: string) => 
       // Its sign-in is its own command, in a terminal on the worker: what to run there, as it would be typed. The window
       // gives it with the SSH address it reaches the worker by, and checks again once it is run.
       if (agent.definition.signIn.inApp === undefined && agent.definition.signIn.login !== '')
-        say(out, { step: 'sign-in', kind: 'terminal', command: agent.definition.signIn.login })
+        say(out, { step: 'sign-in', kind: 'terminal', command: homeSaid(agent.definition.signIn.login) })
       else say(out, { step: 'sign-in', kind: 'failed', message: 'This agent doesn’t sign in that way on a worker.' })
       lines.close()
       return resolve()

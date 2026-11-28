@@ -783,7 +783,7 @@ function Agents({
                 {signing.step.kind === 'terminal' && (
                   <>
                     <span className={s.addressHint}>{t.signInSteps.terminal}</span>
-                    <span className={s.signInRow}>
+                    <span className={s.commandRow}>
                       <code className={s.signInCommand}>{signing.step.command}</code>
                       <CopyButton value={signing.step.command} ghost />
                     </span>
