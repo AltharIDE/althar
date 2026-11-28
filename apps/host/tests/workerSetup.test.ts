@@ -27,6 +27,10 @@ import { releaseIdentity } from '../src/updates/release'
 import {
   bringAgent,
   enroll,
+  homeSaid,
+  prepareRelease,
+  shipped,
+  signedInAs,
   install,
   join_,
   listAgents,
@@ -1087,6 +1091,93 @@ describe('its agents, every one Althar runs', () => {
       said = []
       await bringAgent('gemini', out)
       expect(said).toEqual([])
+    } finally {
+      back()
+    }
+  })
+
+  it('lists every agent Althar runs as the worker has them, with its maker’s page where Althar can’t bring it', () => {
+    const listed = shipped(release('bundle-plain'))
+    expect(listed.map((agent) => agent.id)).toEqual(expect.arrayContaining(['claude-code', 'codex', 'opencode', 'junie']))
+    const junie = listed.find((agent) => agent.id === 'junie')
+    expect(junie).toMatchObject({ downloadable: false, guide: expect.stringMatching(/^https:\/\//u) })
+    // Where it isn't there yet, its program is named as its launch names it.
+    expect(junie?.program).toBe('junie')
+    expect(listed.find((agent) => agent.id === 'codex')).toMatchObject({ downloadable: true })
+  })
+
+  it('reads a sign-in check as signed in, out, or unknown, and gives a command with its home said as ~', () => {
+    expect([signedInAs('signed_in'), signedInAs('signed_out'), signedInAs('unknown'), signedInAs('error')]).toEqual([
+      true,
+      false,
+      'unknown',
+      false,
+    ])
+    expect(homeSaid('/home/w/.local/share/althar-worker/programs/opencode/current/opencode auth login', '/home/w')).toBe(
+      '~/.local/share/althar-worker/programs/opencode/current/opencode auth login',
+    )
+    expect(homeSaid('opencode auth login', '/home/w')).toBe('opencode auth login')
+    expect(homeSaid('/home/wx/opencode', '/home/w')).toBe('/home/wx/opencode')
+  })
+
+  it('readies a release by its own commands and Node, and a release from before as it is', async () => {
+    const before = temporary()
+    await prepareRelease(before)
+    const ready = temporary()
+    mkdirSync(join(ready, 'dist'), { recursive: true })
+    mkdirSync(join(ready, 'node', 'bin'), { recursive: true })
+    writeFileSync(join(ready, 'dist', 'althar-worker.js'), '')
+    const asked = join(ready, 'asked')
+    writeFileSync(join(ready, 'node', 'bin', 'node'), `#!/bin/sh\nprintf '%s' "$2" > '${asked}'\n`, { mode: 0o700 })
+    await prepareRelease(ready)
+    expect(readFileSync(asked, 'utf8')).toBe('prepare')
+    writeFileSync(join(ready, 'node', 'bin', 'node'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+    await expect(prepareRelease(ready)).rejects.toThrow()
+  })
+
+  it('says a download’s progress at most once a second, and a failure without words of its own plainly', async () => {
+    const steps: number[] = []
+    const back = withWorkerSystem({
+      agents: () => [
+        { id: 'codex' as const, definition: agents.codex, program: '/x/codex', installed: false, downloadable: true },
+        { id: 'junie' as const, definition: agents.junie, program: 'junie', installed: false, downloadable: false },
+      ],
+      bring: async (_id, _releases, progress) => {
+        progress?.(10, 100)
+        progress?.(20, 100)
+        progress?.(30, undefined)
+        throw 'npm went away'
+      },
+    })
+    try {
+      await install(release(), out)
+      said = []
+      await expect(bringAgent('codex', out)).rejects.toMatchObject({ message: 'Its program couldn’t be brought onto this worker.' })
+      for (const one of said) if (one.kind === 'getting' && typeof one.bytes === 'number') steps.push(one.bytes)
+      // The start, then the first of those within a second.
+      expect(steps).toEqual([0, 10])
+      // One with no maker's page to give.
+      await expect(bringAgent('junie', out)).rejects.toMatchObject({ code: 'NotInstalled', message: expect.not.stringContaining('(') })
+      const plain = withWorkerSystem({ bring: async () => Promise.reject(new Error('socket hang up')) })
+      await expect(bringAgent('codex', out)).rejects.toMatchObject({ message: 'socket hang up' })
+      plain()
+    } finally {
+      back()
+    }
+  })
+
+  it('brings a program with no release here to lend it, where none is current yet', async () => {
+    const asked: Array<ReadonlyArray<string>> = []
+    const back = withWorkerSystem({
+      agents: () => [{ id: 'codex' as const, definition: agents.codex, program: '/x/codex', installed: false, downloadable: true }],
+      bring: async (_id, releases) => {
+        asked.push(releases)
+        return 'downloaded'
+      },
+    })
+    try {
+      await bringAgent('codex', out)
+      expect(asked).toEqual([[]])
     } finally {
       back()
     }

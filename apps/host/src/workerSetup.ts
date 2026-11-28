@@ -108,7 +108,7 @@ const stable = (path: string, release: string, current: string) =>
   path.startsWith(`${release}/`) ? `${current}${path.slice(release.length)}` : path
 
 /** A command as the worker's shell takes it, its home folder said `~`, which that shell expands: shorter to read and to copy. */
-const homeSaid = (command: string, home: string = homedir()) =>
+export const homeSaid = (command: string, home: string = homedir()) =>
   command.startsWith(`${home}/`) ? `~${command.slice(home.length)}` : command
 
 const shellQuoted = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
@@ -213,12 +213,19 @@ export interface WorkerSystem {
   /** Readies a release just unpacked, by its own commands, before the worker moves to it (`prepare`); throws where it can't. */
   readonly prepare: (release: string) => Promise<void>
 }
+/** A sign-in check's status as the worker keeps it: signed in, not, or `unknown` where the agent can't say. */
+export const signedInAs = (status: string): boolean | 'unknown' =>
+  status === 'signed_in' ? true : status === 'unknown' ? 'unknown' : false
+
+/** Readies a release just unpacked by its own commands (`prepare`), with its own Node; one from before has none to run. */
+export const prepareRelease = async (release: string) => {
+  if (!existsSync(join(release, 'dist', 'althar-worker.js'))) return
+  await run(join(release, 'node', 'bin', 'node'), [join(release, 'dist', 'althar-worker.js'), 'prepare'], { timeout: 60 * 60_000 })
+}
+
 let system: WorkerSystem = {
   systemctl: async (args) => (await run('systemctl', ['--user', ...args], { timeout: 30_000 })).stdout,
-  signedIn: async (agent) => {
-    const { status } = await Effect.runPromise(signInCheck(agent, process.execPath))
-    return status === 'signed_in' ? true : status === 'unknown' ? 'unknown' : false
-  },
+  signedIn: async (agent) => signedInAs((await Effect.runPromise(signInCheck(agent, process.execPath))).status),
   agents: shipped,
   check: checkHere,
   sudo: async (script) => (await checkHere.run('sudo', ['-n', 'sh', '-c', script], { timeout: 30_000 })).ok,
@@ -227,11 +234,7 @@ let system: WorkerSystem = {
     const folder = workerFolder()
     return bringProgram(folder, workerPath(folder, join(programFolder(), 'current')), id, releases, progress)
   },
-  prepare: async (release) => {
-    // A release from before `prepare` has nothing to ready.
-    if (!existsSync(join(release, 'dist', 'althar-worker.js'))) return
-    await run(join(release, 'node', 'bin', 'node'), [join(release, 'dist', 'althar-worker.js'), 'prepare'], { timeout: 60 * 60_000 })
-  },
+  prepare: (release) => prepareRelease(release),
 }
 /** For tests: the system it runs on, in part; puts it back when called. */
 export const withWorkerSystem = (given: Partial<WorkerSystem>) => {
