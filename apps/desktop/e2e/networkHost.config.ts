@@ -8,7 +8,7 @@ export default defineConfig({
     ssr: 'e2e/networkHost.ts',
     outDir: 'test-results/network-host',
     target: 'node24',
-    rollupOptions: { external: ['sharp'], output: { entryFileNames: 'network-host.js' } },
+    rollupOptions: { external: ['sharp', 'node-pty'], output: { entryFileNames: 'network-host.js' } },
   },
   ssr: { noExternal: true, target: 'node' },
 })

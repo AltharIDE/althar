@@ -5,6 +5,11 @@ export const homePartition = (home: WindowHome): string | undefined => {
   if (!/^home_[0-9a-f]{32}$/.test(home.home.homeId)) throw new Error('This home identity is invalid.')
   return `persist:althar-home-${home.home.homeId}`
 }
+/**
+ * What a home's window may ask its session for: only to write the clipboard, as this computer's own window may, so
+ * copying its terminal's selection or a message works there too. Never to read it, a microphone or anything else.
+ */
+export const homeWindowAllows = (permission: string): boolean => permission === 'clipboard-sanitized-write'
 export const localServicesUnavailable =
   'This connection cannot use files, previews or credentials on this computer. Use a local window for them.'
 

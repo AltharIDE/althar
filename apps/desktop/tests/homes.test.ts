@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { homeController, type HomeUsageEvent } from '../src/main/homes/controller'
 import { homeGlances, reportedProjects } from '../src/main/homes/glances'
 import { homeName, homeStore, homeTarget } from '../src/main/homes/store'
-import { homePartition, remoteExternalUrl } from '../src/main/homes/policy'
+import { homePartition, homeWindowAllows, remoteExternalUrl } from '../src/main/homes/policy'
 import type { RemoteHome, WindowHome } from '../src/homes'
 
 const homeId = `home_${'1'.repeat(32)}`
@@ -494,6 +494,12 @@ describe('home confirmations', () => {
       { name: 'home_connection', properties: { transport: 'https', outcome: 'connected' } },
     ])
   })
+})
+
+it('lets a home’s window write the clipboard, as its terminal copies, and ask for nothing else', () => {
+  expect(homeWindowAllows('clipboard-sanitized-write')).toBe(true)
+  for (const permission of ['clipboard-read', 'media', 'notifications', 'geolocation', 'openExternal'])
+    expect(homeWindowAllows(permission), permission).toBe(false)
 })
 
 it('isolates storage and refuses desktop-local addresses in links from a remote home', () => {

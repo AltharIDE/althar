@@ -16,7 +16,7 @@ import {
   homeHttpsAgent,
 } from '@althar/transport-node'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Exit, Scope } from 'effect'
+import { Effect, Exit, Option, Scope, Stream } from 'effect'
 
 import { services } from '../src/Api'
 import { DevicePairings } from '../src/DevicePairings'
@@ -204,6 +204,50 @@ describe('direct HTTPS and WSS home connections', () => {
         const again = yield* apiClient(yield* openHttpsConnection(target, (message) => signDeviceMessage(key.privateKey, message)))
         assert.strictEqual(again.info.identity.deviceId, target.deviceId)
         assert.strictEqual((yield* again.api.GetThread({ threadId: task.threadId })).task.title, command.title)
+      }).pipe(Effect.provide(environment)),
+    ),
+  )
+
+  it.live('opens a terminal for a paired window over WSS, runs what it types and streams back what it prints', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { code } = yield* home
+        const project = yield* (yield* Projects).open({ envelope: yield* envelope('project.open', {}), path: repository() })
+        const key = yield* createDeviceKey
+        const target = yield* completeDevicePairing(code, key, 'Desktop')
+        const { api, info } = yield* apiClient(yield* openHttpsConnection(target, (message) => signDeviceMessage(key.privateKey, message)))
+        // The home tells the window it may: what the window's status line goes by.
+        for (const tag of [
+          'OpenTerminal',
+          'ListTerminals',
+          'AttachTerminal',
+          'WriteTerminal',
+          'ResizeTerminal',
+          'CloseTerminal',
+          'ListLaunches',
+        ])
+          assert.include(info.calls ?? [], tag)
+        const id = 'term_paired01'
+        yield* api.OpenTerminal({ commandId: commandId(), id, projectId: project.projectId, taskId: null, cols: 80, rows: 24 })
+        assert.deepStrictEqual(
+          (yield* api.ListTerminals({ projectId: project.projectId })).map((one) => one.id),
+          [id],
+        )
+        yield* api.ResizeTerminal({ id, cols: 100, rows: 30 })
+        yield* api.WriteTerminal({ id, data: 'echo althar-paired\r' })
+        // The word in what was typed, echoed back, and again in what the shell printed for it.
+        const printed = yield* api.AttachTerminal({ id }).pipe(
+          Stream.filter((chunk) => chunk._tag === 'Data'),
+          Stream.scan(
+            () => '',
+            (was, chunk) => was + chunk.data,
+          ),
+          Stream.takeUntil((all) => all.split('althar-paired').length > 2),
+          Stream.runLast,
+        )
+        assert.isTrue(Option.isSome(printed) && printed.value.split('althar-paired').length > 2)
+        yield* api.CloseTerminal({ commandId: commandId(), id })
+        assert.deepStrictEqual(yield* api.ListTerminals({ projectId: project.projectId }), [])
       }).pipe(Effect.provide(environment)),
     ),
   )

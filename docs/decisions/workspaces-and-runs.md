@@ -499,8 +499,9 @@ PATH, as an xterm-256color terminal with true colour.
   window never reads the clipboard itself: paste goes through the Edit
   menu's own. What a shell prints never reaches the clipboard (no OSC 52):
   copy is only ever the person's selection.
-- **Only the person's own window** opens one: a paired device or another
-  connection can't, as it can't other calls the window alone makes.
+- **The person's windows** open one: this computer's own, and a home's
+  window, over SSH or paired, which opens it on the home, where the
+  project's folders are. The home's status line shows its runs too.
 
 ## Fetching for leads
 
@@ -683,3 +684,4 @@ in its editor's storage.
 - 17 Nov 2026: bringing in other tools' worktrees, setups and conversations (DEV-211, DEV-37): each worktree a task in place, which Althar never sets up, moves or removes.
 - 19 Nov 2026: the status line along the foot, and terminals: picked from a prototype of five places for runs and a terminal (beside the conversation, along the foot, in the thread, a tab of its own, and three spin-offs of the foot).
 - 19 Nov 2026: a send to a conversation brought in waits while Claude Code or Codex still has it open (DEV-264).
+- 28 Nov 2026: a home's window opens terminals on the home and sees its runs; only this computer's own window could, so the status line never showed there.

@@ -84,7 +84,7 @@ import { text as stuckText } from '../task/StuckCall'
 import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
 import { arrivesQuietly, markArrived, watch } from './arrived'
 import s from './Board.module.css'
-import { type Lanes, movesInLine, runningIn, type Waiting, yoursOf } from './lanes'
+import { type Lanes, movesInLine, type RunningOrder, type Waiting, yoursOf } from './lanes'
 import { useRunningOrder } from './runningOrder'
 import type { LineActions } from './useBoard'
 import type { WorkActions } from './useWorkActions'
@@ -517,29 +517,47 @@ export const runningCardOf = (work: BoardTask, now: string, name: (id: string | 
   return card
 }
 
-const runningCard = (work: BoardTask, now: string, name: (id: string | null) => string): Card => {
-  // Held for a usage limit or the connection, waiting for a free agent, or stopped, it says so rather than that it runs: where it
-  // stands is its card's, as its header and the home say it (`taskStatusOf`).
+/**
+ * Where a card in Running stands and the word it says: all Status sorts by, so apart from the rest of its card, which is
+ * costly to build. Held for a usage limit or the connection, waiting for a free agent, or stopped, it says so rather than
+ * that it runs: where it stands is its card's, as its header and the home say it (`taskStatusOf`).
+ */
+const runningSaid = (work: BoardTask): { readonly status: TaskStatus; readonly word: string } => {
   const status = taskStatusOf(work)
-  const still: Pick<Card, 'status' | 'word' | 'why'> | null =
-    status === TaskStatus.Running && work.externalWait !== undefined
-      ? { status, word: 'Waiting', why: externalWaitWords(work.externalWait, clock) }
-      : status === TaskStatus.Paused && work.waits !== null
-        ? {
-            status,
-            word: text.status[status],
-            why: waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left),
-          }
-        : status === TaskStatus.Paused && work.reconnects != null
-          ? { status, word: text.status[status], why: reconnectsWords(work.reconnects, clock) }
-          : status === TaskStatus.Queued
-            ? { status, word: text.status[status], ...(work.queued === null ? {} : { why: busyWords(work.queued) }) }
-            : status === TaskStatus.Stopped
-              ? { status, word: text.status[status], ...whyStopped(work) }
-              : // Its folder set up before its lead starts: what holds it, in place of the step its lead hasn't begun.
-                work.settingUp != null
-                ? { status: TaskStatus.Running, word: text.settingUp[work.settingUp] }
-                : null
+  if (status === TaskStatus.Running && work.externalWait !== undefined) return { status, word: text.status[TaskStatus.Queued] }
+  if (
+    (status === TaskStatus.Paused && (work.waits !== null || work.reconnects != null)) ||
+    status === TaskStatus.Queued ||
+    status === TaskStatus.Stopped
+  )
+    return { status, word: text.status[status] }
+  // Its folder set up before its lead starts: what holds it, in place of the step its lead hasn't begun.
+  if (work.settingUp != null) return { status: TaskStatus.Running, word: text.settingUp[work.settingUp] }
+  switch (work.kind) {
+    case 'plain':
+      return { status: TaskStatus.Running, word: text.working }
+    case 'review':
+      return { status: TaskStatus.Running, word: text.reading }
+    case 'change':
+      return { status: TaskStatus.Running, word: stepWordOf(work) }
+    default:
+      return unreachable(work.kind)
+  }
+}
+
+/** Under its word, why it stands still, where it does. */
+const runningWhy = (work: BoardTask, status: TaskStatus, name: (id: string | null) => string): Pick<Card, 'why'> => {
+  if (status === TaskStatus.Running) return work.externalWait === undefined ? {} : { why: externalWaitWords(work.externalWait, clock) }
+  if (status === TaskStatus.Paused) {
+    if (work.waits !== null) return { why: waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left) }
+    return work.reconnects == null ? {} : { why: reconnectsWords(work.reconnects, clock) }
+  }
+  if (status === TaskStatus.Queued) return work.queued === null ? {} : { why: busyWords(work.queued) }
+  return status === TaskStatus.Stopped ? whyStopped(work) : {}
+}
+
+const runningCard = (work: BoardTask, now: string, name: (id: string | null) => string): Card => {
+  const said = { ...runningSaid(work), ...runningWhy(work, taskStatusOf(work), name) }
   const beforeWork = work.queued !== null && work.inLine === true
   const base = {
     kind: kindOf(work),
@@ -552,13 +570,11 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
   }
   switch (work.kind) {
     case 'plain':
-      return { ...base, status: TaskStatus.Running, word: text.working, ...still }
+      return { ...base, ...said }
     case 'review':
       return {
         ...base,
-        status: TaskStatus.Running,
-        word: text.reading,
-        ...still,
+        ...said,
         ...(work.reviewing == null
           ? {}
           : { object: theirs(work.reviewing), foot: <Fact>{text.findingsSoFar(work.reviewing.findings)}</Fact> }),
@@ -566,12 +582,9 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
     case 'change': {
       const { steps, at, done } = trackOf(work)
       const change = work.change
-      const status = still?.status ?? TaskStatus.Running
       return {
         ...base,
-        status,
-        word: stepWordOf(work),
-        ...still,
+        ...said,
         // A track of one step says nothing more than its word; before any work it has no progress to show.
         ...(steps.length > 1 && !beforeWork ? { track: trackItems(steps, at, at, done) } : {}),
         ...(beforeWork
@@ -591,6 +604,50 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
       return unreachable(work.kind)
   }
 }
+
+/**
+ * The words a card in Running says, in the order Status puts them: what an agent or Althar is at work on, in the order the
+ * work goes; then what waits on something. "Waiting" is what waits outside and what waits for a free agent alike.
+ */
+const SAID_IN_ORDER: ReadonlyArray<string | undefined> = [
+  text.settingUp.install,
+  text.settingUp.kept,
+  text.conversation,
+  text.step.implement,
+  text.followUp,
+  text.working,
+  text.step.review,
+  text.reading,
+  stepNow('conflict'),
+  stepNow('checks'),
+  stepNow('publish'),
+  stepNow('publish', 'ready'),
+  stepNow('pushing'),
+  stepNow('merging'),
+  stepNow('checks_running'),
+  stepNow('publish', 'merge'),
+  stepNow('merge_queue'),
+  text.status[TaskStatus.Queued],
+  text.status[TaskStatus.Paused],
+]
+
+/** Where a card in Running goes by Status, from what it says: by its word; after those, one that needs the person; stopped last. */
+const saidRank = (work: BoardTask): number => {
+  const { status, word } = runningSaid(work)
+  if (status === TaskStatus.Stopped) return SAID_IN_ORDER.length + 1
+  // A conflict its lead wasn't asked to resolve: its card says why, with Resolve now for the person.
+  if (work.conflictUnsent != null) return SAID_IN_ORDER.length
+  return SAID_IN_ORDER.indexOf(word)
+}
+
+/** Running's cards in the order the person picked; by status, each keeps its place among those that say what it does. */
+export const runningIn = (running: ReadonlyArray<BoardTask>, order: RunningOrder): ReadonlyArray<BoardTask> =>
+  order === 'oldest'
+    ? running
+    : running
+        .map((work) => ({ work, rank: saidRank(work) }))
+        .toSorted((a, b) => a.rank - b.rank)
+        .map(({ work }) => work)
 
 /** Who stopped a task and the reason they gave, or the task its work went on in, under its title; nothing where nothing says. */
 const whyStopped = (work: BoardTask): Pick<Card, 'why'> => {
