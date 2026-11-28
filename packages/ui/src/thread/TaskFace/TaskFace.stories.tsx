@@ -173,7 +173,7 @@ export const LastMessageClearsTheEdge: Story = {
     const host = canvasElement.querySelector<HTMLElement>('[data-floats-host]')!
     await waitFor(() => expect(host.style.getPropertyValue('--composer-floats')).not.toBe(''))
     const last = c.getByText('This is the last message.')
-    const chip = canvasElement.querySelector('button[aria-expanded]')!
+    const chip = canvasElement.querySelector('[data-tray-host] button[aria-expanded]')!
     const alert = c.getByRole('alert')
     const keep = c.getByRole('button', { name: /^Keep/ })
     // Boxes exist only in a browser; jsdom draws none, so the geometry is asserted there alone.
@@ -186,6 +186,36 @@ export const LastMessageClearsTheEdge: Story = {
     )
     await expect(chip.getBoundingClientRect().bottom).toBeLessThanOrEqual(alert.getBoundingClientRect().top)
     await expect(alert.getBoundingClientRect().bottom).toBeLessThanOrEqual(keep.getBoundingClientRect().top)
+  },
+}
+
+/** At its end the thread sits close to the composer: the last turn's unseen Copy takes its room from the end's, and an empty slot on the composer's edge takes none. */
+export const EndSitsClose: Story = {
+  render: () => (
+    <div style={{ height: 420, width: 640 }}>
+      <TaskFace composer={<Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Tell the lead" above={<></>} />}>
+        <Thread label="Task 432">
+          {THREAD}
+          <Turn model={OPUS} at="12:01" copy="This is the last message.">
+            <Prose>This is the last message.</Prose>
+          </Turn>
+        </Thread>
+      </TaskFace>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const host = canvasElement.querySelector<HTMLElement>('[data-floats-host]')!
+    const last = c.getByText('This is the last message.')
+    const composer = canvasElement.querySelector('form')!
+    // Boxes exist only in a browser; jsdom draws none, so the geometry is asserted there alone.
+    if (composer.getBoundingClientRect().width === 0) return
+    await expect(host.style.getPropertyValue('--composer-floats')).toBe('0px')
+    await waitFor(() => expect(composer.getBoundingClientRect().top - last.getBoundingClientRect().bottom).toBeLessThanOrEqual(48))
+    // Copy, shown on hover, still ends above the composer.
+    await expect(Array.from(canvasElement.querySelectorAll('[data-turn-actions]')).at(-1)!.getBoundingClientRect().bottom).toBeLessThan(
+      composer.getBoundingClientRect().top,
+    )
   },
 }
 
