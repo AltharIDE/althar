@@ -150,6 +150,7 @@ it.live('reads what history a worker holds from its hello, and takes whole sends
 
 const stopped: AgentRunExit = {
   $typeName: 'althar.worker.v1.AgentRunExit',
+  problem: '',
   workerBusy: false,
   runId: 'war_' + '5'.repeat(32),
   outcome: AgentRunOutcome.STOPPED,

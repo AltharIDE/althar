@@ -195,3 +195,77 @@ it('says how much a send was and what it carried', () => {
   )
   assert.include(sentWords({ bytes: 81 * 1024 ** 2, thin: false, keeps: false }, 'Niko’s box'), 'Update the worker')
 })
+
+it.live('leaves out a large uncommitted file the worker was sent before, as its last send’s commit holds it', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const home = repository()
+      const head = yield* git(home, 'rev-parse', 'HEAD')
+      // A large file the task made and hasn't committed, and a large change to one Git tracks.
+      writeFileSync(join(home, 'model.bin'), randomBytes(2 * 1024 * 1024))
+      writeFileSync(join(home, 'README.md'), randomBytes(1024 * 1024).toString('base64'))
+      const limits = { maxBytes: 2 ** 32 - 1, keeps: true }
+      const first = yield* prepareWorkerWorkspace(home, { ...limits, known: [head] })
+      assert.isAbove(first.size, 2 * 1024 * 1024)
+      // It leaves out the history the worker holds, and its commit's first parent is still HEAD.
+      assert.isTrue(first.thin)
+      const whole = yield* prepareWorkerWorkspace(home, limits)
+      assert.isAbove(whole.size, first.size)
+      // Unchanged since, and a small edit beside it: the worker holds the first send's commit, so only the edit goes.
+      writeFileSync(join(home, 'notes.txt'), 'A small edit\n')
+      const second = yield* prepareWorkerWorkspace(home, { ...limits, known: [first.basis, head] })
+      assert.isTrue(second.thin)
+      assert.isBelow(second.size, 16 * 1024)
+      // The worker's copy, holding the first send, takes the second.
+      const copy = mkdtempSync(join(tmpdir(), 'althar-worker-history-'))
+      execFileSync('git', ['init', '-q', '--bare', copy])
+      // It holds the history already, from an earlier send.
+      const wholeBundle = join(copy, 'whole.bundle')
+      writeFileSync(wholeBundle, yield* bytesOf(whole))
+      yield* git(copy, 'fetch', '--no-tags', wholeBundle, `refs/althar/worker-snapshot:refs/althar/known/${head}`)
+      yield* git(copy, 'update-ref', `refs/althar/known/${head}`, head)
+      const firstBundle = join(copy, 'first.bundle')
+      writeFileSync(firstBundle, yield* bytesOf(first))
+      yield* git(copy, 'fetch', '--no-tags', firstBundle, 'refs/althar/worker-snapshot:refs/althar/incoming')
+      // The worker keeps the first send's files as the same commit the home made of them.
+      const kept = execFileSync(
+        'git',
+        ['commit-tree', yield* git(copy, 'rev-parse', 'refs/althar/incoming^{tree}'), '-m', 'Althar worker basis'],
+        {
+          cwd: copy,
+          env: {
+            ...process.env,
+            GIT_AUTHOR_NAME: 'Althar',
+            GIT_AUTHOR_EMAIL: 'althar@localhost',
+            GIT_COMMITTER_NAME: 'Althar',
+            GIT_COMMITTER_EMAIL: 'althar@localhost',
+            GIT_AUTHOR_DATE: '1700000000 +0000',
+            GIT_COMMITTER_DATE: '1700000000 +0000',
+          },
+        },
+      )
+        .toString()
+        .trim()
+      assert.strictEqual(kept, first.basis)
+      yield* git(copy, 'update-ref', `refs/althar/known/${kept}`, kept)
+      yield* git(copy, 'update-ref', '-d', 'refs/althar/incoming')
+      const secondBundle = join(copy, 'second.bundle')
+      writeFileSync(secondBundle, yield* bytesOf(second))
+      yield* git(copy, 'fetch', '--no-tags', secondBundle, 'refs/althar/worker-snapshot:refs/althar/incoming')
+      assert.strictEqual(yield* git(copy, 'rev-parse', 'refs/althar/incoming:model.bin'), yield* git(home, 'hash-object', 'model.bin'))
+    }),
+  ),
+)
+
+it.live('tells a large change to a file Git tracks from a new one: ignoring it would change nothing', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const home = repository()
+      writeFileSync(join(home, 'README.md'), randomBytes(1024 * 1024).toString('base64'))
+      const tracked = yield* Effect.flip(prepareWorkerWorkspace(home, { maxBytes: 256 * 1024, keeps: true }))
+      assert.include(tracked.reason, 'Most of it is an uncommitted change to README.md')
+      assert.include(tracked.reason, 'undo it with git restore README.md')
+      assert.notInclude(tracked.reason ?? '', '.gitignore')
+    }),
+  ),
+)

@@ -509,6 +509,8 @@ struct Slot {
     reserve_before_transfer: bool,
     /// How much of a checkpoint its home takes at once, as its hello said.
     checkpoint_limits: CheckpointLimits,
+    /// Why its last start failed, in words for the home, where it knows them.
+    problem: Option<String>,
     /// Where it keeps which agents are signed in, and the agents it has: said again with its capacity.
     sign_ins: Option<(PathBuf, Vec<String>)>,
 }
@@ -1175,6 +1177,7 @@ pub async fn watch_agent_slot(
             }),
             reserve_before_transfer: hello.reserve_before_transfer,
             checkpoint_limits: CheckpointLimits::of(hello.takes_large_checkpoints),
+            problem: None,
         }))
     })
     .await??
@@ -1203,6 +1206,7 @@ pub async fn watch_agent_slot(
                     outcome: outcome.into(),
                     exit_code,
                     worker_busy,
+                    problem: slot.problem.take().unwrap_or_default(),
                 }
             }
             HomeMessage::Reconcile(run) => {
@@ -1227,6 +1231,7 @@ pub async fn watch_agent_slot(
                     .into(),
                     exit_code: None,
                     worker_busy: false,
+                    problem: String::new(),
                 }
             }
             // Only ever sent between runs: the home refuses to remove a worker at work.
@@ -1369,6 +1374,16 @@ async fn execute(
         Ok(None) => return Ok((AgentRunOutcome::Stopped, None)),
         Err(error) => {
             eprintln!("Could not stage the agent checkout: {error}");
+            // What the home shows: a disk without room, or a send too large, in words that say what to do.
+            slot.problem = error
+                .downcast_ref::<io::Error>()
+                .filter(|error| {
+                    matches!(
+                        error.kind(),
+                        io::ErrorKind::StorageFull | io::ErrorKind::FileTooLarge
+                    )
+                })
+                .map(ToString::to_string);
             return Ok((AgentRunOutcome::StartFailed, None));
         }
     };

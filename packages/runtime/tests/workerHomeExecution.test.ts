@@ -53,6 +53,7 @@ it.live('keeps each repository’s own baseline and sends commands to the select
       let fenceChecks = 0
       const stopped: AgentRunExit = {
         $typeName: 'althar.worker.v1.AgentRunExit',
+        problem: '',
         workerBusy: false,
         runId: 'war_' + '5'.repeat(32),
         outcome: AgentRunOutcome.STOPPED,
@@ -286,6 +287,7 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
     const input = request(worktree)
     const exit: AgentRunExit = {
       $typeName: 'althar.worker.v1.AgentRunExit',
+      problem: '',
       workerBusy: false,
       runId: 'war_' + '4'.repeat(32),
       outcome: AgentRunOutcome.STOPPED,

@@ -350,6 +350,9 @@ message AgentRunExit {
   // Present only for a confirmed process exit with an exit code.
   optional uint32 exit_code = 3;
   bool worker_busy = 4;
+  // Where it couldn't start: why, in words to show, such as the disk the
+  // task's checkout needs there.
+  string problem = 5;
 }
 
 enum AgentRunOutcome {

@@ -253,7 +253,7 @@ void test('the enrolled stream owns one project-scoped agent run and confirms st
   equal(stop.value.runId, runId)
   worker.send({
     case: 'exit',
-    value: { $typeName: 'althar.worker.v1.AgentRunExit', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
+    value: { $typeName: 'althar.worker.v1.AgentRunExit', problem: '', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
   })
   equal((await stopping).outcome, AgentRunOutcome.STOPPED)
   equal(await worker.read(), undefined)
@@ -293,7 +293,7 @@ void test('stops a run no lead holds any more, and frees the slot once the worke
   equal(stop.value.runId, runId)
   worker.send({
     case: 'exit',
-    value: { $typeName: 'althar.worker.v1.AgentRunExit', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
+    value: { $typeName: 'althar.worker.v1.AgentRunExit', problem: '', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
   })
   equal((await agent.exit).outcome, AgentRunOutcome.STOPPED)
   equal(await worker.read(), undefined)
@@ -788,7 +788,7 @@ void test('managed output and stop stay attached to the selected task lease', { 
   equal((await worker.read())?.case, 'stop')
   worker.send({
     case: 'exit',
-    value: { $typeName: 'althar.worker.v1.AgentRunExit', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
+    value: { $typeName: 'althar.worker.v1.AgentRunExit', problem: '', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
   })
   equal((await agent.exit).outcome, AgentRunOutcome.STOPPED)
 })
@@ -893,7 +893,7 @@ void test('withdrawing one project grant rejects new work and lets the enrolled 
   equal((await worker.read())?.case, 'stop')
   worker.send({
     case: 'exit',
-    value: { $typeName: 'althar.worker.v1.AgentRunExit', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
+    value: { $typeName: 'althar.worker.v1.AgentRunExit', problem: '', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
   })
   equal((await agent.exit).outcome, AgentRunOutcome.STOPPED)
 })
@@ -1057,6 +1057,21 @@ void test(
         yield bundle
       },
     }
+    // A later send, as the home makes it for a worker that holds HEAD: the task's files alone, without the history.
+    const again = git('commit-tree', tree, '-p', head, '-m', 'Snapshot again')
+    git('update-ref', 'refs/althar/worker-snapshot', again)
+    const thinArchive = join(root, 'thin.bundle')
+    git('bundle', 'create', thinArchive, 'refs/althar/worker-snapshot', '^' + head)
+    const thinBundle = readFileSync(thinArchive)
+    ok(thinBundle.length < bundle.length)
+    const thin = {
+      size: thinBundle.length,
+      head,
+      sha256: createHash('sha256').update(thinBundle).digest(),
+      contents: async function* () {
+        yield thinBundle
+      },
+    }
     const provider = join(root, 'agent.sh')
     writeFileSync(
       provider,
@@ -1132,27 +1147,33 @@ void test(
     const open = async (grouped: boolean) => {
       for await (const _ of setInterval(30, undefined, { signal: AbortSignal.timeout(8000) })) {
         if (child.exitCode !== null) throw new Error(stderr())
-        if (pool.list(projectId).some((slot) => !slot.busy))
-          return pool.start(workerId, placement, {
-            ...(grouped
-              ? {
-                  repositories: [
-                    { workspaceId, directory: 'api', checkout },
-                    { workspaceId: webId, directory: 'web', checkout },
-                  ],
-                }
-              : { checkout }),
-            toolPort,
-            skills: [{ path: '.agents/skills/fixture/SKILL.md', data: Buffer.from('Worker skill'), executable: false }],
-            setup: grouped
-              ? {
-                  repositories: [
-                    { workspaceId, directory: '', commands: ['printf worker-setup > setup.log', 'printf ready'] },
-                    { workspaceId: webId, directory: '', commands: ['printf second-setup > web-setup.log; printf web-failed; exit 7'] },
-                  ],
-                }
-              : { directory: '', commands: ['printf worker-setup > setup.log', 'printf ready'] },
-          })
+        if (!pool.list(projectId).some((slot) => !slot.busy)) continue
+        // Back for its next run, it says it keeps the history it was sent, and holds HEAD: that run is sent only what's new.
+        if (grouped) {
+          const told = pool.history(workerId, projectId)
+          equal(told?.keeps, true)
+          ok(told.commits.includes(head), stderr())
+        }
+        return pool.start(workerId, placement, {
+          ...(grouped
+            ? {
+                repositories: [
+                  { workspaceId, directory: 'api', checkout: thin },
+                  { workspaceId: webId, directory: 'web', checkout: thin },
+                ],
+              }
+            : { checkout }),
+          toolPort,
+          skills: [{ path: '.agents/skills/fixture/SKILL.md', data: Buffer.from('Worker skill'), executable: false }],
+          setup: grouped
+            ? {
+                repositories: [
+                  { workspaceId, directory: '', commands: ['printf worker-setup > setup.log', 'printf ready'] },
+                  { workspaceId: webId, directory: '', commands: ['printf second-setup > web-setup.log; printf web-failed; exit 7'] },
+                ],
+              }
+            : { directory: '', commands: ['printf worker-setup > setup.log', 'printf ready'] },
+        })
       }
       throw new Error(stderr() || 'The native worker did not connect')
     }
@@ -1327,7 +1348,7 @@ void test(
     await rejects(pool.start(workerId, placement), /already running/)
     resumed.send({
       case: 'exit',
-      value: { $typeName: 'althar.worker.v1.AgentRunExit', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
+      value: { $typeName: 'althar.worker.v1.AgentRunExit', problem: '', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
     })
     equal(await resumed.read(), undefined)
     const reconnected = connect()

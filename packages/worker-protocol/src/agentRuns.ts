@@ -1232,7 +1232,12 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
         current.ready.reject(
           payload.value.workerBusy
             ? workerBusyError('This worker account is busy. Wait for its current task to finish.')
-            : new Error('The worker could not start the agent. Check the worker log and provider setup.'),
+            : new Error(
+                // Its own words where it gave them, such as the disk the task's checkout needs there.
+                SHOWN_PROBLEM.test(payload.value.problem)
+                  ? payload.value.problem
+                  : 'The worker could not start the agent. Check the worker log and provider setup.',
+              ),
         )
         current.files.close(new Error('The worker workspace ended.'))
         current.managed.close(new Error('The worker workspace ended.'))
@@ -1364,6 +1369,12 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
       const limit = sendLimitOf(slot.history.keeps)
       if (checkout !== undefined && !validCheckout(checkout, limit)) throw new Error('The worker needs a valid, bounded Git bundle.')
       if (repositories !== undefined) {
+        const together = repositories.reduce((sum, one) => sum + one.checkout.size, 0)
+        // Each fits, but not all at once: an older worker takes a set only up to its own limit.
+        if (checkout === undefined && !slot.history.keeps && together > MAX_WORKER_SET_BYTES)
+          throw new Error(
+            `The task’s repositories come to ${sendSizeWords(together)} together; this worker takes at most ${sendSizeWords(MAX_WORKER_SET_BYTES)} at once on its release. Update the worker, or run this task on the home.`,
+          )
         if (checkout !== undefined || !validRepositorySet(repositories, placement.workspaceId, slot.history.keeps))
           throw new Error('The worker needs a valid, bounded set of Git repositories.')
         if (

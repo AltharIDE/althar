@@ -11,7 +11,7 @@ use rustix::fs::{CWD, RenameFlags, renameat_with};
 use tokio::process::Command;
 
 use crate::{
-    agent_checkpoint::{CheckpointLimits, Part, Written},
+    agent_checkpoint::{CheckpointLimits, Part, Written, size_words},
     agent_history::{History, git_command, run_git},
     wire::AgentWorkspaceSource,
 };
@@ -153,6 +153,23 @@ impl WorkspaceTransfer {
         taken: &crate::agent_history::Taken,
         source: &AgentWorkspaceSource,
     ) -> io::Result<PathBuf> {
+        // The checkout holds what the copy holds once more, as a pack, and its files beside it: about twice the copy.
+        let needed = history
+            .stored_bytes()
+            .saturating_mul(2)
+            .saturating_add(KEPT_FREE);
+        let free = rustix::fs::statvfs(&self.project)
+            .map_or(u64::MAX, |disk| disk.f_bavail.saturating_mul(disk.f_frsize));
+        if needed > free {
+            return Err(io::Error::new(
+                io::ErrorKind::StorageFull,
+                format!(
+                    "The worker has {} free; this task’s checkout needs about {} there. Free space on the worker, or run this task on the home.",
+                    size_words(free),
+                    size_words(needed)
+                ),
+            ));
+        }
         history.fetch_into(checkout, taken).await?;
         let parent = run_git(checkout, &["rev-parse", "--verify", "FETCH_HEAD^"]).await?;
         if parent.trim() != source.head {
@@ -218,6 +235,8 @@ impl Drop for WorkspaceTransfer {
 }
 
 const COMMITS_REF: &str = "refs/althar/worker-head";
+/// What stays free on the worker's disk once a checkout is made: its agent and builds need room too.
+const KEPT_FREE: u64 = 256 * 1024 * 1024;
 
 /// A checkpoint, its parts in files of its scratch folder: they go with it once it is sent.
 pub(crate) struct WorkspacePatch {

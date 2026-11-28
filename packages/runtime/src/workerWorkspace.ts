@@ -9,13 +9,40 @@ export { sendSizeWords }
 import { Effect } from 'effect'
 
 import { GitFailed } from './errors'
-import { commitTree, git, gitExactly, gitWithin, gitWithInput, treeOf, untouched } from './git'
+import { commitTree, git, gitExactly, gitWith, gitWithin, gitWithInput, treeOf, untouched } from './git'
 
 const SNAPSHOT_REF = 'refs/althar/worker-snapshot'
 const INDEX_REF = 'refs/althar/worker-index'
 const COMMITS_REF = 'refs/althar/worker-head'
 
 const failed = (cwd: string, args: ReadonlyArray<string>, reason: string) => new GitFailed({ cwd, args, reason, stderr: '' })
+
+/** As many commits the worker holds as a send's commit takes as parents, beside HEAD. */
+const MAX_EXTRA_PARENTS = 16
+/** Who Althar commits a send as, with no date of its own: the same each time. */
+const SNAPSHOT_IDENTITY = {
+  GIT_AUTHOR_NAME: 'Althar',
+  GIT_AUTHOR_EMAIL: 'althar@localhost',
+  GIT_COMMITTER_NAME: 'Althar',
+  GIT_COMMITTER_EMAIL: 'althar@localhost',
+}
+/**
+ * A tree's basis: a commit of it with no parent, author, date or message of its own, so the home and the worker make the
+ * same one (apps/worker/src/agent_history.rs, `basis_of`). The worker keeps one for each send's files.
+ */
+export const BASIS_MESSAGE = 'Althar worker basis'
+const BASIS_DATE = '1700000000 +0000'
+const basisOf = (worktree: string, tree: string) =>
+  gitWith(
+    { ...SNAPSHOT_IDENTITY, GIT_AUTHOR_DATE: BASIS_DATE, GIT_COMMITTER_DATE: BASIS_DATE },
+    worktree,
+    'commit-tree',
+    // Signed by the person's own Git it would be another commit than the worker's.
+    '--no-gpg-sign',
+    tree,
+    '-m',
+    BASIS_MESSAGE,
+  )
 
 /** Long enough to bundle a large project's whole history, as a worker's first send of it does. */
 const BUNDLE_TIMEOUT_MS = 30 * 60_000
@@ -59,11 +86,12 @@ const uncommittedSizes = (worktree: string, head: string, snapshot: string) =>
     const raw = yield* gitExactly(worktree, 'diff-tree', '-r', '-z', '--no-renames', '--diff-filter=AMT', head, snapshot)
     // `:<mode> <mode> <old> <new> <status>` then the path, each ending in NUL.
     const fields = raw.split('\0')
-    const changed: Array<{ readonly path: string; readonly blob: string }> = []
+    const changed: Array<{ readonly path: string; readonly blob: string; readonly tracked: boolean }> = []
     for (let at = 0; at + 1 < fields.length; at += 2) {
-      const blob = fields[at]?.split(' ')[3]
+      const [, , , blob, status] = fields[at]?.split(' ') ?? []
       const path = fields[at + 1]
-      if (blob !== undefined && path !== undefined && /^[0-9a-f]{40,64}$/.test(blob)) changed.push({ path, blob })
+      // A file new since HEAD (`A`), or one HEAD tracks whose contents changed (`M`, `T`).
+      if (blob !== undefined && path !== undefined && /^[0-9a-f]{40,64}$/.test(blob)) changed.push({ path, blob, tracked: status !== 'A' })
     }
     if (changed.length === 0) return { total: 0, largest: undefined }
     const sizes = (yield* gitWithInput(
@@ -75,26 +103,36 @@ const uncommittedSizes = (worktree: string, head: string, snapshot: string) =>
       .split('\n')
       .map(Number)
     let total = 0
-    let largest: { readonly path: string; readonly size: number } | undefined
-    changed.forEach(({ path }, at) => {
+    let largest: UncommittedFile | undefined
+    changed.forEach(({ path, tracked }, at) => {
       const size = sizes[at] ?? 0
       if (!Number.isFinite(size)) return
       total += size
-      if (largest === undefined || size > largest.size) largest = { path, size }
+      if (largest === undefined || size > largest.size) largest = { path, size, tracked }
     })
     return { total, largest }
   }).pipe(Effect.orElseSucceed(() => ({ total: 0, largest: undefined })))
+
+/** The largest file the task changed and hasn't committed: one HEAD tracks, or one new since. */
+interface UncommittedFile {
+  readonly path: string
+  readonly size: number
+  readonly tracked: boolean
+}
 
 /** Why a send is too large for the worker, and what to do: the file that makes it so, an update, or running it on the home. */
 export const tooLargeWords = (
   size: number,
   limits: WorkerSendLimits,
-  uncommitted: { readonly total: number; readonly largest: { readonly path: string; readonly size: number } | undefined },
+  uncommitted: { readonly total: number; readonly largest: UncommittedFile | undefined },
 ): string => {
   const said = `The task’s Git history and changes come to ${sendSizeWords(size)}; the worker takes at most ${sendSizeWords(limits.maxBytes)} in one send.`
   const { largest } = uncommitted
   if (largest !== undefined && uncommitted.total * 2 >= size)
-    return `${said} Most of it is ${largest.path} (${sendSizeWords(largest.size)}), which isn’t committed or ignored: add it to .gitignore, or move it out of the task’s folder.`
+    return largest.tracked
+      ? // Ignoring a file Git tracks changes nothing: the change itself is what goes.
+        `${said} Most of it is an uncommitted change to ${largest.path} (${sendSizeWords(largest.size)}), which Git tracks: undo it with git restore ${largest.path}, commit the file with Git LFS, or run this task on the home.`
+      : `${said} Most of it is ${largest.path} (${sendSizeWords(largest.size)}), which isn’t committed or ignored: add it to .gitignore, or move it out of the task’s folder.`
   if (limits.keeps !== true)
     return `${said} Update the worker: it then keeps the project’s history, takes up to 4 GB the first time, and later sends carry only what’s new.`
   return `${said} Run this task on the home instead.`
@@ -129,7 +167,26 @@ export const prepareWorkerWorkspace = (worktree: string, limits: WorkerSendLimit
     if ((yield* git(worktree, 'rev-parse', '--verify', 'HEAD')) !== head) {
       return yield* failed('The task changed while making its worker checkout. Try again when it settles.')
     }
-    const snapshot = yield* commitTree(worktree, tree, head, 'Althar worker workspace')
+    // What the worker's copy holds goes no further: its commits and all before them, and the files it was sent before.
+    // Git leaves out only what the commit sent reaches through its parents, so those it holds become its parents too,
+    // after HEAD, which stays its first: the worker checks it is.
+    const basis = yield* commitsHere(worktree, limits.known ?? [])
+    const snapshot = yield* gitWith(
+      SNAPSHOT_IDENTITY,
+      worktree,
+      'commit-tree',
+      tree,
+      '-p',
+      head,
+      ...basis
+        .filter((commit) => commit !== head)
+        .slice(0, MAX_EXTRA_PARENTS)
+        .flatMap((commit) => ['-p', commit]),
+      '-m',
+      'Althar worker workspace',
+    )
+    // The files this send carries, as a commit both sides make alike: the worker keeps it, and a later send leaves them out.
+    const sentFiles = yield* basisOf(worktree, tree)
     const objectPath = yield* git(worktree, 'rev-parse', '--path-format=absolute', '--git-path', 'objects')
     if (objectPath.includes('\n') || objectPath.includes('\r')) {
       return yield* failed('Git object storage with a line break in its path cannot be transferred to a worker.')
@@ -146,8 +203,6 @@ export const prepareWorkerWorkspace = (worktree: string, limits: WorkerSendLimit
       const staged = yield* commitTree(worktree, index, head, 'Althar workspace index')
       yield* git(target, 'update-ref', INDEX_REF, staged)
     }
-    // What the worker's copy holds goes no further: its commits and all before them.
-    const basis = yield* commitsHere(worktree, limits.known ?? [])
     yield* gitWithin(
       BUNDLE_TIMEOUT_MS,
       target,
@@ -191,6 +246,8 @@ export const prepareWorkerWorkspace = (worktree: string, limits: WorkerSendLimit
       head,
       tree,
       index,
+      /** The commit of the files it carries, made alike on the worker, which keeps it: a later send leaves them out. */
+      basis: sentFiles,
       /** It leaves out history the worker holds: it carries only what's new to it. */
       thin: basis.length > 0,
       contents: (signal: AbortSignal) => createReadStream(bundle, { signal }),

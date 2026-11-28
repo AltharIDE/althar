@@ -7,7 +7,12 @@
 //! of those, and its next send for the project leaves them and all before them out.
 //!
 //! Git's own housekeeping packs what arrives and, after its grace period, drops what no ref reaches any more, such as
-//! a send's uncommitted files. Checkouts are fetched from the copy, never linked to it: nothing an agent does in its
+//! a send's uncommitted files.
+//!
+//! Each send's files are kept too, as their basis: a commit of the send's tree with no parent, author, date or message
+//! of its own, which the home makes alike (packages/runtime/src/workerWorkspace.ts). The home makes the commits this
+//! copy holds parents of its next send, so Git leaves out their files as well as their history: a large file the task
+//! hasn't committed goes once, not with each start. Bases have no parents, so dropping one lets its files go. Checkouts are fetched from the copy, never linked to it: nothing an agent does in its
 //! checkout can change the copy another run is made from.
 
 use std::{
@@ -34,6 +39,9 @@ const TOLD: usize = 32;
 const PROJECTS: usize = 64;
 /// As many known commits as a copy keeps: more than it tells, so one it told stays while the home builds a send on it.
 const KEPT: usize = 128;
+/// A basis, as the home makes it: the same commit for the same tree, wherever it is made.
+const BASIS_MESSAGE: &str = "Althar worker basis";
+const BASIS_DATE: &str = "1700000000 +0000";
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
@@ -188,45 +196,93 @@ impl History {
         .map(drop)
     }
 
-    /// Done with a send: where its checkout was made, the commit it started from is kept as known, for the next send
-    /// to leave out. The fewest known commits that are oldest go, past as many as it keeps.
+    /// Done with a send: where its checkout was made, the commit it started from and the basis of the files it carried
+    /// are kept as known, for the next send to leave out. The oldest known go, past as many as it keeps.
     pub(crate) async fn settle(&self, taken: Taken, made_from: Option<&str>) {
-        if let Some(head) = made_from.filter(|head| object_id(head))
-            && let Err(error) =
-                run_git(&self.path, &["update-ref", &format!("{KNOWN}{head}"), head]).await
-        {
-            eprintln!("Could not keep the project's history on this worker: {error}");
+        if let Some(head) = made_from.filter(|head| object_id(head)) {
+            let basis = self.basis_of(&taken).await;
+            for commit in [Some(head.to_owned()), basis.ok()].into_iter().flatten() {
+                if let Err(error) = self.keep(&commit).await {
+                    eprintln!("Could not keep the project's history on this worker: {error}");
+                }
+            }
         }
         if let Err(error) = run_git(&self.path, &["update-ref", "-d", &taken.reference]).await {
             eprintln!("Could not let a received send go: {error}");
         }
-        let Ok(known) = run_git(
-            &self.path,
-            &[
-                "for-each-ref",
-                "--sort=-committerdate",
-                "--format=%(refname)",
-                KNOWN,
-            ],
-        )
-        .await
-        else {
-            return;
-        };
-        for reference in known.lines().skip(KEPT) {
-            let _ = run_git(&self.path, &["update-ref", "-d", reference]).await;
+        for (reference, _) in self.known_refs().await.into_iter().skip(KEPT) {
+            let _ = run_git(&self.path, &["update-ref", "-d", &reference]).await;
         }
     }
 
-    /// The newest commits the copy holds with all their history, newest first.
-    async fn commits(&self) -> Vec<String> {
+    /// The basis of a send's files: a commit of its tree alone, as the home made it.
+    async fn basis_of(&self, taken: &Taken) -> io::Result<String> {
+        let tree = run_git(
+            &self.path,
+            &[
+                "rev-parse",
+                "--verify",
+                &format!("{}^{{tree}}", taken.reference),
+            ],
+        )
+        .await?;
+        let made = git_command(&self.path)
+            .env("GIT_AUTHOR_NAME", "Althar")
+            .env("GIT_AUTHOR_EMAIL", "althar@localhost")
+            .env("GIT_COMMITTER_NAME", "Althar")
+            .env("GIT_COMMITTER_EMAIL", "althar@localhost")
+            .env("GIT_AUTHOR_DATE", BASIS_DATE)
+            .env("GIT_COMMITTER_DATE", BASIS_DATE)
+            .args([
+                "commit-tree",
+                "--no-gpg-sign",
+                tree.trim(),
+                "-m",
+                BASIS_MESSAGE,
+            ])
+            .output()
+            .await?;
+        let commit = String::from_utf8(made.stdout)
+            .map_err(io::Error::other)?
+            .trim()
+            .to_owned();
+        if !made.status.success() || !object_id(&commit) {
+            return Err(invalid("Could not keep the files a send carried"));
+        }
+        Ok(commit)
+    }
+
+    /// Keeps `commit` as known, the newest: named by when, as a basis's own date says nothing of it.
+    async fn keep(&self, commit: &str) -> io::Result<()> {
+        let when = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| since.as_millis());
+        // One name per commit: kept again, it moves to the front.
+        for (reference, known) in self.known_refs().await {
+            if known == commit {
+                run_git(&self.path, &["update-ref", "-d", &reference]).await?;
+            }
+        }
+        run_git(
+            &self.path,
+            &[
+                "update-ref",
+                &format!("{KNOWN}{when:016}-{}-{commit}", unique()),
+                commit,
+            ],
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Its known refs and their commits, newest first.
+    async fn known_refs(&self) -> Vec<(String, String)> {
         let listed = run_git(
             &self.path,
             &[
                 "for-each-ref",
-                "--sort=-committerdate",
-                &format!("--count={TOLD}"),
-                "--format=%(objectname)",
+                "--sort=-refname",
+                "--format=%(refname) %(objectname)",
                 KNOWN,
             ],
         )
@@ -234,8 +290,35 @@ impl History {
         .unwrap_or_default();
         listed
             .lines()
-            .filter(|line| object_id(line))
-            .map(str::to_owned)
+            .filter_map(|line| line.split_once(' '))
+            .filter(|(_, commit)| object_id(commit))
+            .map(|(reference, commit)| (reference.to_owned(), commit.to_owned()))
+            .collect()
+    }
+
+    /// What its objects take on disk: about what a checkout made from it holds again, as a pack.
+    pub(crate) fn stored_bytes(&self) -> u64 {
+        fn size(path: &Path) -> u64 {
+            let Ok(metadata) = fs::symlink_metadata(path) else {
+                return 0;
+            };
+            if !metadata.is_dir() {
+                return metadata.len();
+            }
+            fs::read_dir(path).map_or(0, |entries| {
+                entries.flatten().map(|entry| size(&entry.path())).sum()
+            })
+        }
+        size(&self.path.join("objects"))
+    }
+
+    /// The newest commits the copy holds with all they reach, newest first.
+    async fn commits(&self) -> Vec<String> {
+        self.known_refs()
+            .await
+            .into_iter()
+            .map(|(_, commit)| commit)
+            .take(TOLD)
             .collect()
     }
 }
@@ -404,6 +487,28 @@ mod tests {
         run_git(home, &args).await.map(drop)
     }
 
+    /// The basis of the home's last send, as the home makes it.
+    async fn basis(home: &Path) -> io::Result<String> {
+        let tree = run_git(home, &["rev-parse", &format!("{SNAPSHOT_REF}^{{tree}}")]).await?;
+        let made = git_command(home)
+            .env("GIT_AUTHOR_NAME", "Althar")
+            .env("GIT_AUTHOR_EMAIL", "althar@localhost")
+            .env("GIT_COMMITTER_NAME", "Althar")
+            .env("GIT_COMMITTER_EMAIL", "althar@localhost")
+            .env("GIT_AUTHOR_DATE", "1700000000 +0000")
+            .env("GIT_COMMITTER_DATE", "1700000000 +0000")
+            .args([
+                "commit-tree",
+                "--no-gpg-sign",
+                tree.trim(),
+                "-m",
+                "Althar worker basis",
+            ])
+            .output()
+            .await?;
+        Ok(String::from_utf8_lossy(&made.stdout).trim().to_owned())
+    }
+
     async fn checkout(history: &History, taken: &Taken, at: &Path) -> io::Result<String> {
         fs::create_dir(at)?;
         run_git(
@@ -458,7 +563,9 @@ mod tests {
         history.settle(taken, Some(&first)).await;
         let told = known(&root).await;
         assert_eq!(told.len(), 1);
-        assert_eq!(told[0].commits, vec![first.clone()]);
+        // The commit it started from, and the basis of the files it carried, newest first: the same basis the home makes.
+        let first_basis = basis(&home).await?;
+        assert_eq!(told[0].commits, vec![first_basis.clone(), first.clone()]);
 
         // The task's next commit and an uncommitted file: the send leaves out all the copy holds.
         let second = commit(&home, "README.md", b"# Meridian\n", "Next").await?;
@@ -479,9 +586,10 @@ mod tests {
             "Not committed\n"
         );
         history.settle(taken, Some(&second)).await;
+        let second_basis = basis(&home).await?;
         assert_eq!(
             known(&root).await[0].commits,
-            vec![second.clone(), first.clone()]
+            vec![second_basis, second.clone(), first_basis, first.clone()]
         );
         // The send's own ref is gone; only what it was made from stays known.
         let refs = run_git(&history.path, &["for-each-ref", "--format=%(refname)"]).await?;

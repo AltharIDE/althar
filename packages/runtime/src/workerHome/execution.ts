@@ -424,15 +424,16 @@ export const workerExecution = (
             if (limits.keeps !== true && repositories !== undefined && bytes > MAX_WORKER_SET_BYTES)
               return yield* failed(
                 new Error(
-                  `The task’s repositories come to ${sendSizeWords(bytes)} together; the worker takes at most ${sendSizeWords(MAX_WORKER_SET_BYTES)} at once. Update the worker: it then keeps each project’s history, and later sends carry only what’s new.`,
+                  `The task’s repositories come to ${sendSizeWords(bytes)} together; the worker takes at most ${sendSizeWords(MAX_WORKER_SET_BYTES)} at once. Update the worker: it then keeps each project’s history, and later sends carry only what’s new. Or run this task on the home.`,
                 ),
               )
-            // The worker holds the send, its copy of the history and the checkout made from them: about three times the send.
+            // What the home knows it needs there: the send staged, then taken into the worker's copy of the history, or, on an
+            // older worker, into its checkout. The checkout a copy makes the worker checks itself, as it knows its copy's size.
             const free = pool.list(projectId).find((one) => one.workerId === workerId)?.capacity?.freeDiskMib
-            if (free !== undefined && bytes * 3 > free * 1024 ** 2)
+            if (free !== undefined && bytes * 2 > free * 1024 ** 2)
               return yield* failed(
                 new Error(
-                  `The worker has ${sendSizeWords(free * 1024 ** 2)} free; this task’s send of ${sendSizeWords(bytes)} needs about ${sendSizeWords(bytes * 3)} there. Free space on the worker, or run this task on the home.`,
+                  `The worker has ${sendSizeWords(free * 1024 ** 2)} free; this task’s send of ${sendSizeWords(bytes)} needs about ${sendSizeWords(bytes * 2)} there. Free space on the worker, or run this task on the home.`,
                 ),
               )
             const agent = yield* Effect.tryPromise({
@@ -461,6 +462,7 @@ export const workerExecution = (
                 workspaceId: repositories === undefined ? undefined : workspaceId,
                 directory,
                 base: { head: checkout.head, tree: checkout.tree },
+                sent: [checkout.basis, checkout.head],
               })),
             }
           }),
@@ -533,7 +535,7 @@ export const workerExecution = (
             homeToolPort: toolPort,
             // The worker added what it was sent to its copy of the history: a helper's copy needn't carry it again.
             limits:
-              limits.keeps === true ? { ...limits, known: [...(limits.known ?? []), ...entries.map(({ base }) => base.head)] } : limits,
+              limits.keeps === true ? { ...limits, known: [...(limits.known ?? []), ...entries.flatMap(({ sent }) => sent)] } : limits,
           })
         return {
           transport: {
