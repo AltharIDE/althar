@@ -645,53 +645,34 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledTimes(2)
   })
 
-  it('names a lead’s default effort on a worker only where the model it will run there is known', async () => {
-    const bare = 'wrk_' + 'a'.repeat(32)
-    const listed = 'wrk_' + 'b'.repeat(32)
+  it('names no default effort for a lead on a worker, which says its models and never their efforts', async () => {
+    const workerId = 'wrk_' + 'b'.repeat(32)
     const plan = card().plan
     if (plan == null) throw new Error('The task card fixture needs a plan.')
-    const heldOn = (model: string | null) =>
-      card({
-        phase: 'held',
-        plan: {
-          ...plan,
-          startsAt: null,
-          workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false },
-          steps: [
-            { key: 'implement', agentId: 'claude-code', model, skipped: false },
-            { key: 'review', agentId: 'codex', model: 'gpt-5.2-codex', skipped: false },
-          ],
-        },
-      })
-    const opus = { ...CHECKED, models: [{ providerId: 'claude-code', models: [{ id: 'opus', name: 'Opus' }] }] }
-    const on = async (model: string | null) => {
-      const { client } = fakeClient({
-        getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(heldOn(model))] })),
-        listProjectWorkers: vi.fn(async () => [
-          { workerId: bare, providers: ['claude-code'], busy: false, readiness: CHECKED },
-          { workerId: listed, providers: ['claude-code'], busy: false, readiness: opus },
-        ]),
-      })
-      const view = withServices(<Project room={Room.Talk} />, client)
-      // The home: both steps run at a default it knows.
-      await waitFor(() => expect(screen.getAllByText('by default')).toHaveLength(2))
-      return view
-    }
-    const choose = async (from: string, to: string) => {
-      await userEvent.click(await screen.findByRole('button', { name: `Runs on: ${from}` }))
-      await userEvent.click(await screen.findByRole('menuitemradio', { name: new RegExp(to) }))
-    }
-    const named = await on('opus')
-    // A worker that hasn't said what it offers: only the review, on the home, is known.
-    await choose('This Mac', 'Linux worker aaaaaa')
-    expect(screen.getAllByText('by default')).toHaveLength(1)
-    // One that offers the model: the lead's too.
-    await choose('Linux worker aaaaaa', 'Linux worker bbbbbb')
-    expect(screen.getAllByText('by default')).toHaveLength(2)
-    named.unmount()
-    // No model named: it starts on whatever the agent there starts on.
-    await on(null)
-    await choose('This Mac', 'Linux worker bbbbbb')
+    const held = card({
+      phase: 'held',
+      plan: {
+        ...plan,
+        startsAt: null,
+        workerRequirements: { repositoryCount: 1, homeOnly: false, readOnly: false },
+        steps: [
+          { key: 'implement', agentId: 'claude-code', model: 'opus', skipped: false },
+          { key: 'review', agentId: 'codex', model: 'gpt-5.2-codex', skipped: false },
+        ],
+      },
+    })
+    // The worker lists the very model: that says nothing of how hard it starts there.
+    const readiness = { ...CHECKED, models: [{ providerId: 'claude-code', models: [{ id: 'opus', name: 'Opus' }] }] }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false, readiness }]),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    // The home: both steps run at a default it knows.
+    await waitFor(() => expect(screen.getAllByText('by default')).toHaveLength(2))
+    await userEvent.click(await screen.findByRole('button', { name: 'Runs on: This Mac' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Linux worker bbbbbb' }))
+    // Only the review's, which runs on the home.
     expect(screen.getAllByText('by default')).toHaveLength(1)
   })
 

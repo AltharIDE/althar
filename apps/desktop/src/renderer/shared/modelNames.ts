@@ -6,7 +6,7 @@ import type { LaunchStep, ModelInfo } from '@althar/ui'
 import { useModels } from '../data/models'
 import { reads } from '../data/reads'
 import { useServices } from '../data/services'
-import { type PickOn, catalogOf, effortName, infoOf, nameOf, onWorker, startEffortOf, viaOf } from './models'
+import { catalogOf, effortName, infoOf, nameOf, startEffortOf, viaOf } from './models'
 
 /*
  * How every screen names who works (ADR-015): the model, as people know it,
@@ -25,25 +25,12 @@ export type NameEffort = (agentId: string | null, model: string | null, effort: 
 const NOBODY: ModelInfo = { id: 'agent', name: '', short: '', runtime: 'agent', efforts: [] }
 
 /** Every agent's models, switched off or not: a session already on one is still named; by the model alone, the way is on hover. */
-const useNaming = () => {
+const useNamingCatalog = () => {
   const { client } = useServices()
   const known = useModels()
   const agents = useQuery(reads(client).status()).data?.agents
-  return useMemo(() => {
-    const of = (offered: Parameters<typeof catalogOf>[0], by: Parameters<typeof catalogOf>[1]) =>
-      catalogOf(offered, by, { withBlocked: true, apart: false })
-    return {
-      home: of(known ?? [], agents ?? []),
-      /** What a worker offers, by its own check. */
-      on: (worker: PickOn) => {
-        const there = onWorker(known ?? [], agents ?? [], worker)
-        return of(there.known, there.agents)
-      },
-    }
-  }, [known, agents])
+  return useMemo(() => catalogOf(known ?? [], agents ?? [], { withBlocked: true, apart: false }), [known, agents])
 }
-
-const useNamingCatalog = () => useNaming().home
 
 export const useEffortNames = (): NameEffort => {
   const catalog = useNamingCatalog()
@@ -54,32 +41,26 @@ export const useEffortNames = (): NameEffort => {
   )
 }
 
-/** Where a step runs when not on the home: on a worker, or on whichever is free, with none named. */
-export interface Elsewhere {
-  readonly worker?: PickOn | undefined
-}
-
-/** A plan step's efforts by name: the one set for it, and the one it runs at with none set; each null where that can't be known. */
+/**
+ * A plan step's efforts by name: the one set for it, and the one it runs at with none set; each null where that can't be
+ * known. `elsewhere` is a step that runs on a worker: a worker says which models it has, never how hard they think or
+ * start, so no default of it is known.
+ */
 export type NameStepEfforts = (
   agentId: string,
   model: string | null,
   effort: string | null,
-  elsewhere?: Elsewhere,
+  elsewhere?: boolean,
 ) => Pick<LaunchStep, 'effort' | 'defaultEffort'>
 
 export const useStepEfforts = (): NameStepEfforts => {
-  const naming = useNaming()
+  const catalog = useNamingCatalog()
   return useCallback(
-    (agentId, model, effort, elsewhere) => {
-      const there = elsewhere?.worker === undefined ? naming.home : naming.on(elsewhere.worker)
-      const named = (catalog: typeof there) => effortName(catalog, infoOf(catalog, { agentId, model }).id, effort)
-      return {
-        effort: named(there) ?? named(naming.home),
-        // Elsewhere with no model named, it starts on whatever its agent there starts on, which isn't known here.
-        defaultEffort: elsewhere !== undefined && model === null ? null : startEffortOf(there, infoOf(there, { agentId, model })),
-      }
+    (agentId, model, effort, elsewhere = false) => {
+      const info = infoOf(catalog, { agentId, model })
+      return { effort: effortName(catalog, info.id, effort), defaultEffort: elsewhere ? null : startEffortOf(catalog, info) }
     },
-    [naming],
+    [catalog],
   )
 }
 
