@@ -41,7 +41,8 @@ export interface ProjectListText {
   yours: (n: number) => string
   held: (n: number) => string
   /** Tasks waiting for a free agent, and why: every one the machine runs at once is busy. */
-  queued: (n: number) => string
+  /** How many of its tasks wait for a free agent, those tasks by id: the window says what they wait for. */
+  queued: (n: number, ids: ReadonlyArray<string>) => string
   waiting: (n: number) => string
   /** Under a project's name, with nothing off: how many tasks are in progress in it. */
   inProgress: (n: number) => string
@@ -116,7 +117,11 @@ const offOf = (tasks: readonly ProjectListTask[], t: ProjectListText) => {
   const count = (status: TaskStatus) => tasks.filter((task) => task.status === status).length
   return [
     count(TaskStatus.Paused) > 0 && t.held(count(TaskStatus.Paused)),
-    count(TaskStatus.Queued) > 0 && t.queued(count(TaskStatus.Queued)),
+    count(TaskStatus.Queued) > 0 &&
+      t.queued(
+        count(TaskStatus.Queued),
+        tasks.flatMap((task) => (task.status === TaskStatus.Queued ? [task.id] : [])),
+      ),
     count(TaskStatus.Yours) > 0 && t.waiting(count(TaskStatus.Yours)),
   ]
     .filter(Boolean)

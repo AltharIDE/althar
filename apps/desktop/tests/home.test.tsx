@@ -524,6 +524,60 @@ describe('the home', () => {
     expect(screen.getByText('1 task moving in 1 project.')).toBeTruthy()
   })
 
+  it('says under each project what its own waiting tasks wait for: a worker, this computer, or only how many', async () => {
+    const here = { busy: 4, atOnce: 4 }
+    const worker = { busy: 1, atOnce: 1, worker: 'build-box' }
+    const { client } = fakeClient({
+      getHome: vi.fn(async () =>
+        home({
+          tasks: [
+            task({ taskId: 't1', threadId: 'th1', title: 'On the worker', phase: 'running', step: 'implement', queued: worker }),
+            task({ taskId: 't2', threadId: 'th2', title: 'Here', phase: 'running', step: 'implement', projectId: 'p2', queued: here }),
+          ],
+          projects: [project, halyard],
+        }),
+      ),
+    })
+    withServices(<Home />, client)
+    const projects = await screen.findByRole('complementary', { name: 'Projects' })
+    expect(within(projects).getByText('Waiting · for build-box')).toBeTruthy()
+    expect(within(projects).getByText('Waiting · 4 agents busy')).toBeTruthy()
+  })
+
+  it('says only how many wait where a project’s waiting tasks wait for different things', async () => {
+    const { client } = fakeClient({
+      getHome: vi.fn(async () =>
+        home({
+          tasks: [
+            task({ taskId: 't1', threadId: 'th1', title: 'At work', phase: 'running', step: 'implement', projectId: 'p2' }),
+            task({
+              taskId: 't2',
+              threadId: 'th2',
+              title: 'Worker',
+              phase: 'running',
+              step: 'implement',
+              projectId: 'p2',
+              queued: { busy: 1, atOnce: 1, worker: 'build-box' },
+            }),
+            task({
+              taskId: 't3',
+              threadId: 'th3',
+              title: 'Here',
+              phase: 'running',
+              step: 'implement',
+              projectId: 'p2',
+              queued: { busy: 4, atOnce: 4 },
+            }),
+          ],
+          projects: [project, halyard],
+        }),
+      ),
+    })
+    withServices(<Home />, client)
+    const projects = await screen.findByRole('complementary', { name: 'Projects' })
+    expect(within(projects).getByText('2 waiting')).toBeTruthy()
+  })
+
   it('gathers what needs you under its project, says what is off in each, and opens what the loop did', async () => {
     const onTask = vi.fn()
     const onProject = vi.fn()

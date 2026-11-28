@@ -121,6 +121,9 @@ export const holdersWords = ({ holders }: Queued): string | undefined => {
   return names.length ? names.join('\n') : undefined
 }
 
+/** How many of a project's tasks wait, where they wait for different things: 2 waiting. */
+export const queuedCountWords = (n: number) => (n === 1 ? 'Waiting' : `${n} waiting`)
+
 /**
  * The same, short, for a project's tasks on the home, which is this
  * computer's anyway: how many wait, and for what, in the line under the
