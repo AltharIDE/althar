@@ -925,6 +925,9 @@ async fn serve_agent(
     }
 }
 
+/// How a checkpoint part's bytes go to the home: as a patch, a staged patch or commits.
+type PartFrame = fn(AgentRunBytes) -> WorkerMessage;
+
 async fn send_snapshot(
     outgoing: Sender,
     cwd: Option<PathBuf>,
@@ -1022,8 +1025,7 @@ async fn send_snapshot(
     )
     .await?;
     // Each part from its file, a frame at a time: none is read whole into memory.
-    let mut parts: Vec<(&Written, fn(AgentRunBytes) -> WorkerMessage)> =
-        vec![(&checkpoint.patch, WorkerMessage::Patch)];
+    let mut parts: Vec<(&Written, PartFrame)> = vec![(&checkpoint.patch, WorkerMessage::Patch)];
     if let Some((_, staged)) = &checkpoint.index {
         parts.push((staged, WorkerMessage::IndexPatch));
     }

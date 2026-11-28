@@ -641,11 +641,11 @@ mod tests {
         assert!(String::from_utf8_lossy(&patch).contains("+On the worker"));
         assert!(String::from_utf8_lossy(&patch).contains("+Unsaved in Git"));
         assert!(update.commits.size > 0 && !update.commits.bytes()?.is_empty());
-        drop(update);
         assert_eq!(
             update.head,
             run_git(&worker, &["rev-parse", "HEAD"]).await?.trim()
         );
+        drop(update);
         assert_eq!(
             run_git(&worker, &["status", "--porcelain"]).await?.trim(),
             "AM stage.txt\n?? draft.txt"
