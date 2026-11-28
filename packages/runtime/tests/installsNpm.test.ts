@@ -10,6 +10,9 @@ import { Effect, Exit } from 'effect'
 
 import { Installs } from '../src/Installs'
 
+/** These run a `#!/bin/sh` program and keep `current` as a symlink, as on Linux, which Windows can do neither of. */
+const windows = process.platform === 'win32'
+
 /*
  * Claude Code's and Codex's programs as Althar downloads them now that no build ships them
  * (docs/plans/agents-on-first-use.md): the exact npm package the lockfile pins for this platform, checked by its sha512
@@ -26,7 +29,8 @@ const tarball = async (files: Readonly<Record<string, string>>) => {
     writeFileSync(join(root, 'package', path), text, { mode: 0o755 })
   }
   const file = join(root, 'package.tgz')
-  execFileSync('tar', ['-czf', file, '-C', root, 'package'])
+  // By names in its folder, never a path: Git's GNU tar, first on Windows' PATH, takes a drive (D:) for a host.
+  execFileSync('tar', ['-czf', 'package.tgz', 'package'], { cwd: root })
   const bytes = readFileSync(file)
   return { bytes, integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}` }
 }
@@ -69,65 +73,71 @@ const using = <A, E>(root: string, pinned: ReturnType<typeof pinnedTo>, effect: 
   )
 
 describe('a program the lockfile pins, downloaded from npm', () => {
-  it('says its own size and version, is kept whole once its integrity holds, and is Althar’s copy the adapter drives', async () => {
-    const { bytes, integrity } = await tarball({
-      claude: '#!/bin/sh\necho "2.1.331 (Claude Code)"\n',
-      'package.json': '{"name":"@anthropic-ai/claude-agent-sdk-linux-x64","version":"0.3.331"}',
-      'voice/libsound.so': 'never runs',
-    })
-    const root = mkdtempSync(join(tmpdir(), 'althar-agents-'))
-    const pinned = pinnedTo(bytes, integrity)
-    const before = await using(root, pinned, (installs) => installs.state(pinned.agent))
-    assert.isTrue(Exit.isSuccess(before))
-    if (Exit.isSuccess(before))
-      assert.deepInclude(before.value, { located: null, downloadable: true, size: '185 MB', pinned: '0.3.331', installing: false })
-    const installed = await using(root, pinned, (installs) =>
-      Effect.andThen(
-        installs.install(pinned.agent),
-        Effect.sync(() => installs.locate(pinned.agent)),
-      ),
-    )
-    assert.isTrue(Exit.isSuccess(installed), JSON.stringify(installed))
-    // Found by the version pinned, the folder it is kept in, never through `current`.
-    const program = join(root, 'claude-code', '0.3.331', 'claude')
-    if (Exit.isSuccess(installed)) assert.deepStrictEqual(installed.value, { command: program, whose: 'althar' })
-    assert.deepStrictEqual(pinned.asked, [TARBALL])
-    // Kept whole, by the version npm gave it; what never runs, gone; nothing of the download left.
-    assert.isTrue(existsSync(join(root, 'claude-code', '0.3.331', 'package.json')))
-    assert.isFalse(existsSync(join(root, 'claude-code', 'current', 'voice')))
-    assert.deepStrictEqual(readdirSync(join(root, 'claude-code')).toSorted(), ['0.3.331', 'current'])
-  })
+  it.skipIf(windows)(
+    'says its own size and version, is kept whole once its integrity holds, and is Althar’s copy the adapter drives',
+    async () => {
+      const { bytes, integrity } = await tarball({
+        claude: '#!/bin/sh\necho "2.1.331 (Claude Code)"\n',
+        'package.json': '{"name":"@anthropic-ai/claude-agent-sdk-linux-x64","version":"0.3.331"}',
+        'voice/libsound.so': 'never runs',
+      })
+      const root = mkdtempSync(join(tmpdir(), 'althar-agents-'))
+      const pinned = pinnedTo(bytes, integrity)
+      const before = await using(root, pinned, (installs) => installs.state(pinned.agent))
+      assert.isTrue(Exit.isSuccess(before))
+      if (Exit.isSuccess(before))
+        assert.deepInclude(before.value, { located: null, downloadable: true, size: '185 MB', pinned: '0.3.331', installing: false })
+      const installed = await using(root, pinned, (installs) =>
+        Effect.andThen(
+          installs.install(pinned.agent),
+          Effect.sync(() => installs.locate(pinned.agent)),
+        ),
+      )
+      assert.isTrue(Exit.isSuccess(installed), JSON.stringify(installed))
+      // Found by the version pinned, the folder it is kept in, never through `current`.
+      const program = join(root, 'claude-code', '0.3.331', 'claude')
+      if (Exit.isSuccess(installed)) assert.deepStrictEqual(installed.value, { command: program, whose: 'althar' })
+      assert.deepStrictEqual(pinned.asked, [TARBALL])
+      // Kept whole, by the version npm gave it; what never runs, gone; nothing of the download left.
+      assert.isTrue(existsSync(join(root, 'claude-code', '0.3.331', 'package.json')))
+      assert.isFalse(existsSync(join(root, 'claude-code', 'current', 'voice')))
+      assert.deepStrictEqual(readdirSync(join(root, 'claude-code')).toSorted(), ['0.3.331', 'current'])
+    },
+  )
 
-  it('takes no copy of an earlier pin for the one pinned now: none is found, its adapter is told the new one, which replaces it', async () => {
-    const { bytes, integrity } = await tarball({ claude: '#!/bin/sh\necho "2.1.331 (Claude Code)"\n' })
-    const root = mkdtempSync(join(tmpdir(), 'althar-agents-'))
-    // What Althar kept while Claude Code was pinned at 0.3.330, at the same path in its package, and in use.
-    const earlier = join(root, 'claude-code', '0.3.330')
-    mkdirSync(earlier, { recursive: true })
-    writeFileSync(join(earlier, 'claude'), '#!/bin/sh\necho "2.1.330 (Claude Code)"\n', { mode: 0o755 })
-    symlinkSync('0.3.330', join(root, 'claude-code', 'current'))
-    const pinned = pinnedTo(bytes, integrity)
-    const now = join(root, 'claude-code', '0.3.331', 'claude')
-    const before = await using(root, pinned, (installs) =>
-      Effect.map(installs.state(pinned.agent), (state) => ({ state, kept: installs.keptAt(pinned.agent) })),
-    )
-    assert.isTrue(Exit.isSuccess(before))
-    if (Exit.isSuccess(before)) {
-      assert.strictEqual(before.value.state.located, null)
-      assert.strictEqual(before.value.kept, now)
-    }
-    const after = await using(root, pinned, (installs) =>
-      Effect.andThen(
-        installs.install(pinned.agent),
-        Effect.sync(() => installs.locate(pinned.agent)),
-      ),
-    )
-    assert.isTrue(Exit.isSuccess(after), JSON.stringify(after))
-    if (Exit.isSuccess(after)) assert.deepStrictEqual(after.value, { command: now, whose: 'althar' })
-    assert.deepStrictEqual(readdirSync(join(root, 'claude-code')).toSorted(), ['0.3.331', 'current'])
-  })
+  it.skipIf(windows)(
+    'takes no copy of an earlier pin for the one pinned now: none is found, its adapter is told the new one, which replaces it',
+    async () => {
+      const { bytes, integrity } = await tarball({ claude: '#!/bin/sh\necho "2.1.331 (Claude Code)"\n' })
+      const root = mkdtempSync(join(tmpdir(), 'althar-agents-'))
+      // What Althar kept while Claude Code was pinned at 0.3.330, at the same path in its package, and in use.
+      const earlier = join(root, 'claude-code', '0.3.330')
+      mkdirSync(earlier, { recursive: true })
+      writeFileSync(join(earlier, 'claude'), '#!/bin/sh\necho "2.1.330 (Claude Code)"\n', { mode: 0o755 })
+      symlinkSync('0.3.330', join(root, 'claude-code', 'current'))
+      const pinned = pinnedTo(bytes, integrity)
+      const now = join(root, 'claude-code', '0.3.331', 'claude')
+      const before = await using(root, pinned, (installs) =>
+        Effect.map(installs.state(pinned.agent), (state) => ({ state, kept: installs.keptAt(pinned.agent) })),
+      )
+      assert.isTrue(Exit.isSuccess(before))
+      if (Exit.isSuccess(before)) {
+        assert.strictEqual(before.value.state.located, null)
+        assert.strictEqual(before.value.kept, now)
+      }
+      const after = await using(root, pinned, (installs) =>
+        Effect.andThen(
+          installs.install(pinned.agent),
+          Effect.sync(() => installs.locate(pinned.agent)),
+        ),
+      )
+      assert.isTrue(Exit.isSuccess(after), JSON.stringify(after))
+      if (Exit.isSuccess(after)) assert.deepStrictEqual(after.value, { command: now, whose: 'althar' })
+      assert.deepStrictEqual(readdirSync(join(root, 'claude-code')).toSorted(), ['0.3.331', 'current'])
+    },
+  )
 
-  it('keeps nothing that isn’t exactly the package pinned, or holds no program, or whose program won’t run', async () => {
+  it.skipIf(windows)('keeps nothing that isn’t exactly the package pinned, or holds no program, or whose program won’t run', async () => {
     const refused = async (bytes: Uint8Array, integrity: string, says: string) => {
       const root = mkdtempSync(join(tmpdir(), 'althar-agents-'))
       const exit = await using(root, pinnedTo(bytes, integrity), (installs) => installs.install(pinnedTo(bytes, integrity).agent))
@@ -147,7 +157,7 @@ describe('a program the lockfile pins, downloaded from npm', () => {
     await refused(broken.bytes, broken.integrity, "wouldn't run on this computer")
   })
 
-  it('fails the install, and keeps nothing, where the disk won’t take the download', async () => {
+  it.skipIf(windows)('fails the install, and keeps nothing, where the disk won’t take the download', async () => {
     const { bytes, integrity } = await tarball({ claude: '#!/bin/sh\necho 2.1.331\n' })
     const root = mkdtempSync(join(tmpdir(), 'althar-agents-'))
     const pinned = pinnedTo(bytes, integrity)
