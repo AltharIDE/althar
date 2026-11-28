@@ -6,9 +6,11 @@
 
 /** When each release was published on GitHub, UTC. The mission's clock starts at 0.1.0's. */
 export const PUBLISHED: Record<string, string> = {
+  '0.10.0': '2026-11-28T09:21:42Z',
   '0.9.0': '2026-11-15T14:36:39Z',
   '0.8.0': '2026-11-13T23:31:00Z',
   '0.7.0': '2026-11-04T20:56:43Z',
+  '0.6.1': '2026-10-31T09:17:08Z',
   '0.6.0': '2026-10-30T23:31:15Z',
   '0.5.0': '2026-10-20T18:18:17Z',
   '0.4.1': '2026-10-18T19:50:59Z',
