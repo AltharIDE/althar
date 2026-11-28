@@ -542,6 +542,12 @@ export interface AgentCli {
    * (`usingLocated`). Codex's adapter reads `CODEX_PATH`.
    */
   readonly drivenBy?: string
+  /**
+   * Its `drivenBy` may name a copy out on the device, as well as one here: what the adapter drives is a bridge that runs
+   * the copy named out there (a Flatpak's Codex, apps/desktop/flatpak/codex-host.sh). Without it, a copy out there is
+   * reached its own way and the variable is left alone.
+   */
+  readonly drivesOutThere?: true
   /** Where Althar can download it. */
   readonly download?: AgentDownload
   /**
@@ -1283,8 +1289,11 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
       args: [bundled('@agentclientprotocol/codex-acp', 'dist/index.js')],
       inheritEnv: ['CODEX_HOME', ...(process.env.FLATPAK_ID === undefined ? [] : ['CODEX_PATH', 'DBUS_SESSION_BUS_ADDRESS'])],
     }),
-    // Where `CODEX_PATH` names the person's own Codex, its adapter drives that, and Althar's own program isn't asked for.
+    // Where its launch names the Codex to drive (`cli.drivenBy`), its adapter drives that, and Althar's own program isn't
+    // asked for. In a Flatpak `CODEX_PATH` is always the bridge, which runs only the copy it is told: told none, there is none.
     program: (env) => {
+      if (process.env.FLATPAK_ID !== undefined)
+        return env.ALTHAR_CODEX_PROGRAM !== undefined ? undefined : "Codex's own program for this computer is missing."
       const own = codexProgram(process.platform, process.arch)
       return env.CODEX_PATH !== undefined || own === undefined ? undefined : bundledProblem(own, import.meta.url)
     },
@@ -1379,8 +1388,11 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
       name: 'codex',
       // The person's own Codex, where its adapter can drive it (codex-acp's range), is what sessions drive; else the
       // package the lockfile pins, downloaded. In a Flatpak its adapter drives the bridge out to the computer
-      // (`CODEX_PATH`, apps/desktop/flatpak/codex-host.sh), which is told the copy Althar downloaded instead.
-      drivenBy: process.env.FLATPAK_ID === undefined ? 'CODEX_PATH' : 'ALTHAR_DOWNLOADED_CODEX',
+      // (`CODEX_PATH`, apps/desktop/flatpak/codex-host.sh), which is told the copy to run there: the one Althar found and
+      // checked, the person's own on the computer or Althar's in its data folder, never one of its own finding.
+      ...(process.env.FLATPAK_ID === undefined
+        ? { drivenBy: 'CODEX_PATH' }
+        : { drivenBy: 'ALTHAR_CODEX_PROGRAM', drivesOutThere: true as const }),
       download: { npm: true, ...PINNED_PROGRAMS.codex },
       fits: codexFits,
       // In a Flatpak sessions use the host's Codex bridge too; reporting the

@@ -153,6 +153,14 @@ describe('finding an agent’s command', () => {
     // Out on the device (a Flatpak's host), it is reached its own way.
     found = { command: '/device/codex', whose: 'theirs', out: (spec) => () => spec }
     expect(codex.launch('node').env?.CODEX_PATH).toBeUndefined()
+    // Unless what the adapter drives is a bridge that runs it out there, as a Flatpak's Codex is: told the copy found.
+    const bridged = usingLocated(
+      { ...agents.codex, cli: { name: 'codex', drivenBy: 'ALTHAR_CODEX_PROGRAM', drivesOutThere: true } },
+      () => found,
+    )
+    expect(bridged.launch('node').env?.ALTHAR_CODEX_PROGRAM).toBe('/device/codex')
+    found = null
+    expect(bridged.launch('node').env?.ALTHAR_CODEX_PROGRAM).toBeUndefined()
     // An agent without such a variable is launched as it was.
     expect(usingLocated(agents.grok, () => ({ command: '/x/grok', whose: 'theirs' })).launch('node').env?.CODEX_PATH).toBeUndefined()
   })

@@ -2,7 +2,7 @@ import { accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, dirname, isAbsolute, posix, win32 } from 'node:path'
 
-import type { AgentDefinition, LaunchSpec, OutOnDevice } from './registry'
+import type { AgentCli, AgentDefinition, LaunchSpec, OutOnDevice } from './registry'
 
 /*
  * Finding an agent's command, on a Mac, Windows or Linux (ADR-012's "the
@@ -155,12 +155,15 @@ const inATerminal = (found: Located, flatpakId: string | undefined): string =>
  * its variable (`AgentCli.drivenBy`) which copy to drive: the person's own
  * where they have one here that fits, else the one Althar downloaded, by its
  * full path. A copy out on the device (a Flatpak's host) is reached its own
- * way; where the copy is the one beside the adapter, it drives that, as before.
+ * way, unless what the adapter drives is a bridge that runs it there
+ * (`AgentCli.drivesOutThere`), which is told it; where the copy is the one
+ * beside the adapter, it drives that, as before.
  */
-const drivingTheirs = (spec: LaunchSpec, variable: string | undefined, find: () => Located | null): LaunchSpec => {
+const drivingTheirs = (spec: LaunchSpec, cli: AgentCli, find: () => Located | null): LaunchSpec => {
+  const variable = cli.drivenBy
   if (variable === undefined) return spec
   const found = find()
-  if (found === null || found.whose === 'bundled' || found.out !== undefined) return spec
+  if (found === null || found.whose === 'bundled' || (found.out !== undefined && cli.drivesOutThere !== true)) return spec
   return { ...spec, env: { ...spec.env, [variable]: found.command } }
 }
 
@@ -183,7 +186,7 @@ export const usingLocated = (
     <A extends ReadonlyArray<unknown>>(make: (...args: A) => LaunchSpec) =>
     (...args: A): LaunchSpec => {
       const spec = make(...args)
-      if (spec.command !== cli.name) return drivingTheirs(spec, cli.drivenBy, find)
+      if (spec.command !== cli.name) return drivingTheirs(spec, cli, find)
       const found = find()
       if (found === null) return spec
       // An npm-installed Node script found off the PATH finds the Node beside it, as it would in the terminal that installed it.
