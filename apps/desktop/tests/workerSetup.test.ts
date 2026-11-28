@@ -450,3 +450,22 @@ it('gives an agent’s own sign-in as the line that runs it on the worker over i
   )
   expect(terminalLine('me@10.0.0.9:2222', "copilot login --host 'x'")).toBe(`ssh -t -p 2222 me@10.0.0.9 'copilot login --host '\\''x'\\'''`)
 })
+
+it('checks a worker’s sign-ins by its whole check, so one signed in in a terminal is started, and its models said, first', async () => {
+  const event = (step: string, state: string, more: Record<string, unknown> = {}) => JSON.stringify({ protocol: 1, step, state, ...more })
+  const agents = [
+    // Junie can't say whether it is signed in: its check started it, so it is.
+    { id: 'junie', name: 'Junie', signedIn: true, started: true, models: 3 },
+    { id: 'qwen-code', name: 'Qwen Code', signedIn: false, started: false, message: 'It didn’t start.', models: 0 },
+  ]
+  const { system, asked, log } = machine({
+    'worker-check': { stdout: [event('check', 'started'), event('check', 'done', { sandbox: { starts: true }, agents })].join('\n') },
+  })
+  const setups = workerSetups(system, vi.fn(), vi.fn(), vi.fn(), { log, release: vi.fn() })
+  expect(await setups.agents('build@box')).toEqual([
+    { id: 'junie', name: 'Junie', signedIn: true },
+    { id: 'qwen-code', name: 'Qwen Code', signedIn: false },
+  ])
+  expect(asked).toContain('worker-check')
+  expect(asked).not.toContain('worker-agents')
+})

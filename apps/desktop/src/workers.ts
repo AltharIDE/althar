@@ -117,7 +117,7 @@ export interface WorkersHost {
   readonly signIn: (ssh: string, agent: string, way: 'browser' | 'device') => Promise<void>
   readonly signInAct: (action: { readonly paste: string } | { readonly cancel: true }) => Promise<void>
   readonly onSignIn: (listener: (event: WorkerSignInEvent) => void) => () => void
-  /** The worker's agents and their sign-ins, checked now over SSH. */
+  /** The worker's agents and their sign-ins, by its whole check now over SSH: each signed in started once, as a task would. */
   readonly agents: (ssh: string) => Promise<ReadonlyArray<WorkerAgent>>
 }
 

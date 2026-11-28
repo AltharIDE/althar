@@ -610,14 +610,21 @@ export const workerSetups = (
           changed(null)
       }
     },
-    /** The worker's agents and their sign-ins, checked over SSH. */
+    /**
+     * The worker's agents and their sign-ins, by its whole check over SSH: each signed in started once, as a task would
+     * start it, which also says its models to the home. One that can't say whether it is signed in (Junie, Qwen Code, Mistral
+     * Vibe, signed in in a terminal) is signed in only once it starts.
+     */
     agents: async (ssh: string) => {
       const controller = new AbortController()
-      const ran = await bootstrap(sshTargetOf(ssh), 'worker-agents', [], controller.signal, { timeout: 60_000 }).catch((error: unknown) => {
-        log.warn('A worker’s agents couldn’t be checked', { target: ssh, code: error instanceof Stopped ? error.code : String(error) })
-        throw error
-      })
-      return agentsOf(ran.events.find((one) => one.step === 'agents' && one.state === 'done')?.agents)
+      const ran = await bootstrap(sshTargetOf(ssh), 'worker-check', [], controller.signal, { timeout: 5 * 60_000 }).catch(
+        (error: unknown) => {
+          log.warn('A worker’s agents couldn’t be checked', { target: ssh, code: error instanceof Stopped ? error.code : String(error) })
+          throw error
+        },
+      )
+      const check = checkOf(ran.events.findLast((one) => one.step === 'check' && one.state === 'done'))
+      return (check?.agents ?? []).map(({ id, name, signedIn }) => ({ id, name, signedIn }))
     },
     signIn: (ssh: string, agent: string, way: 'browser' | 'device') => {
       signingIn?.controller.abort()
