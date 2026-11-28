@@ -480,7 +480,9 @@ first acting tool on it is the merge, below.
 
 `merge_pull_request` (`MergeLine.ts`) merges any of the project's pull
 requests, in any of its repositories, at the head the coordinator read and
-in a way the repository allows. Every merge is an errand kept from the
+in a way the repository allows. A task's lead calls it too, on the person's
+word in its own thread, for its task's pull request where it names none or
+any other they ask for: the same errand and line. Every merge is an errand kept from the
 person's message, with one step, `merge`, so "merge it once it's green" and
 "merge it" are the same call:
 
@@ -513,9 +515,10 @@ person's message, with one step, `merge`, so "merge it once it's green" and
   or the host's own update refused,
   the step steps out of line and it is said, once, to the lead too; a host
   that didn't answer is tried again after a few minutes, and only said). For each step that can't be undone, a merge or a
-  queue, or settling one that landed, closed or moved, it wakes the
-  coordinator with news naming the errand and step, and the coordinator's
-  turn takes it through `Errands.execute`, which reads again before it acts.
+  queue, or settling one that landed, closed or moved, it wakes the thread
+  that kept the errand with news naming the errand and step: the
+  coordinator's, or a lead's, which is started again where it has no session.
+  That turn takes it through `Errands.execute`, which reads again before it acts.
 - **Who moved a head:** the very head Althar's update made, as read back
   after it, or one the task's lead pushed, carries the errand on; anyone
   else's push ends it, even one on top of Althar's update, as the person

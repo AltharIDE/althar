@@ -23,7 +23,7 @@ import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, runtime } from './support'
+import { callTool, fakeConnectors, HOST, hosted, promptsGot, runtime, until } from './support'
 
 /*
  * The coordinator merging on the person's word (ADR-081, task 5): through
@@ -843,6 +843,174 @@ describe('the coordinator’s merge line', () => {
       )
       assert.deepStrictEqual(service.merged, [])
     }).pipe(Effect.provide(layer(service)))
+  })
+})
+
+describe('a lead merging its own task’s pull request, on the person’s word in its thread', () => {
+  /** The fake host, its pull requests' links on the connected host's address, as a task's link to its own is. */
+  const leadsHost = () => {
+    const made = host()
+    const service: FakeService = {
+      ...made.service,
+      change: (...args) =>
+        Effect.map(made.service.change(...args), (change) => ({ ...change, url: change.url.replace('https://github.com', HOST) })),
+    }
+    // What it did is read from the fake itself: a copy of it holds what it had then.
+    return { ...made, service, did: made.service }
+  }
+
+  /** A task following the pull request given, and its lead's last session in the store, ended, on the agent given. */
+  const leadOf = (coordinator: ToolAccess, number: number, agentId = 'missing') =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', { title: 'Retry refunds' }),
+        projectId: coordinator.projectId,
+        title: 'Retry refunds',
+      })
+      const [row] = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${task.taskId}`
+      const url = `${HOST}/meridian/api/pull/${number}`
+      const linkId = yield* newId(Ids.externalLink)
+      const at = yield* timestamp
+      yield* sql`INSERT INTO external_links ${sql.insert({ id: linkId, projectId: coordinator.projectId, taskId: task.taskId, connectionId: null, product: 'github', kind: 'change', externalId: String(number), ref: String(number), key: String(number), url, snapshot: JSON.stringify({ number, title: 'Retry refunds', url, state: 'open', draft: false, words: { noun: 'pull request', short: 'PR', prefix: '#' }, repository: ['meridian', 'api'] }), listening: 1, createdAt: at, updatedAt: at })}`
+      const sessionId = yield* newId(Ids.providerSession)
+      yield* sql`INSERT INTO provider_sessions ${sql.insert({ id: sessionId, projectId: coordinator.projectId, threadId: task.threadId, agentId, state: 'completed', startedAt: at, endedAt: at })}`
+      const lead: ToolAccess = { role: 'lead', projectId: coordinator.projectId, threadId: task.threadId, sessionId, taskId: task.taskId }
+      return { lead, slug: row?.slug ?? '', linkId }
+    })
+
+  /** The lead's push of a fix to the pull request, as Althar records its pushes: the new head. */
+  const fixPushed = (service: FakeService, coordinator: ToolAccess, number: number, linkId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const fix = service.pushTo(number)
+      yield* sql`INSERT INTO observations ${sql.insert({ id: yield* newId(Ids.observation), projectId: coordinator.projectId, subjectType: 'external_link', subjectId: linkId, kind: 'pushed', payload: JSON.stringify({ id: `pushed:${fix}`, sha: fix }), source: 'althar', observedAt: yield* timestamp })}`
+      return fix
+    })
+
+  it.live('merges it through a send-back, woken itself for each step, then tags what landed: never the coordinator', () => {
+    const { service, checks, pull, did } = leadsHost()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const coordinator = yield* opened(working)
+      const number = pull('Retry refunds')
+      const { lead, slug, linkId } = yield* leadOf(coordinator, number)
+      checks.set(`head-${number}`, 'running')
+      const message = yield* turn(lead, 'person', 'See it through to merge, and tag it v1.0.0 after')
+      // Named by nothing, the pull request is its own task's.
+      assert.match(yield* merge(lead, { head: `head-${number}`, message }), /checks are running/)
+      const tagging = yield* callTool(lead, 'keep_errand', {
+        message,
+        steps: [
+          {
+            key: 'tag',
+            tool: 'push_tag',
+            taskId: slug,
+            target: 'meridian/api tag v1.0.0',
+            request: { tag: 'v1.0.0', commit: `task:${slug}` },
+            waits: [{ kind: 'task_merged', target: slug }],
+          },
+        ],
+      })
+      assert.match(tagging, /^errand_/)
+      yield* sweep(coordinator)
+      assert.strictEqual((yield* cards(lead))[0]?.rows[0]?.state, 'checks')
+
+      // Its checks fail: it is sent back, on the card in the lead's own thread, and nothing merges.
+      checks.set(`head-${number}`, 'failed')
+      yield* sweep(coordinator)
+      assert.strictEqual((yield* cards(lead))[0]?.rows[0]?.state, 'sent_back')
+      assert.deepStrictEqual(did.merged, [])
+
+      // The lead pushes a fix, green: the line wakes the lead with the step, not the coordinator.
+      const fix = yield* fixPushed(service, coordinator, number, linkId)
+      yield* sweep(coordinator)
+      const errand = (yield* errandsOf(lead)).get(number)?.id ?? ''
+      assert.include((yield* news(lead)).at(-1), `merge_pull_request with errand "${errand}" and step "merge"`)
+      assert.match(yield* takeStep(lead, errand), /^Merged PR #1 at /)
+      assert.deepStrictEqual(
+        did.merged.map((one) => [one.number, one.head]),
+        [[number, fix]],
+      )
+      assert.strictEqual((yield* errandsOf(lead)).get(number)?.state, 'done')
+
+      // Merged, its tag's step wakes the lead in turn, which tags the landed commit on that errand's word alone.
+      yield* sweep(coordinator)
+      const said = (yield* news(lead)).at(-1) ?? ''
+      assert.include(said, `Errand ${tagging}, step tag`)
+      yield* turn(lead, 'news', said)
+      assert.match(
+        yield* callTool(lead, 'push_tag', {
+          tag: 'v1.0.0',
+          commit: `task:${slug}`,
+          repository: 'meridian/api',
+          errand: tagging,
+          step: 'tag',
+        }),
+        /^Pushed the tag v1\.0\.0 on merge-1 on meridian\/api/,
+      )
+      assert.deepStrictEqual(
+        did.tagsPushed.map((one) => [one.name, one.commit]),
+        [['v1.0.0', `merge-${number}`]],
+      )
+      // The coordinator heard none of it.
+      assert.deepStrictEqual(yield* news(coordinator), [])
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('merges or tags only on the person’s word: news alone, or a tag on the host without it, does nothing', () => {
+    const { service, pull, did } = leadsHost()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const coordinator = yield* opened(working)
+      const number = pull('Retry refunds')
+      const { lead } = yield* leadOf(coordinator, number)
+      const heard = yield* turn(lead, 'news', 'Checks passed on #1: merge it')
+      assert.match(yield* merge(lead, { head: `head-${number}`, message: heard }), /person's message in this turn/)
+      assert.match(yield* callTool(lead, 'push_tag', { tag: 'v1.0.0', message: heard }), /person's message in this turn/)
+      assert.deepStrictEqual(did.merged, [])
+      assert.deepStrictEqual(did.tagsPushed, [])
+      // Another of the project's, where the person asks for it by its number.
+      const other = pull('Cap retries')
+      const message = yield* turn(lead, 'person', 'Merge #2 as well')
+      assert.match(yield* merge(lead, { pull_request: `#${other}`, head: `head-${other}`, message }), /^Merged PR #2/)
+      // Their word for a tag the lead didn't make: Althar makes it on the host, on main's latest.
+      assert.match(yield* callTool(lead, 'push_tag', { tag: 'v1.0.0', message }), /^Pushed the tag v1\.0\.0 on /)
+      assert.deepStrictEqual(
+        did.tagsPushed.map((one) => one.name),
+        ['v1.0.0'],
+      )
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('a merge its lead kept wakes that lead after a restart, starting it again', () => {
+    const { service, checks, pull } = leadsHost()
+    const { working } = hosted(['meridian', 'api'])
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-lead-merge-')), 'althar.db')
+    const keychain = new Map<string, string>()
+    const number = pull('Retry refunds')
+    checks.set(`head-${number}`, 'running')
+    return Effect.gen(function* () {
+      const { coordinator, lead } = yield* Effect.gen(function* () {
+        const coordinator = yield* opened(working)
+        const { lead } = yield* leadOf(coordinator, number, 'lead-agent')
+        const message = yield* turn(lead, 'person', 'Merge it once it’s green')
+        assert.match(yield* merge(lead, { head: `head-${number}`, message }), /checks are running/)
+        return { coordinator, lead }
+      }).pipe(Effect.provide(layer(service, database, keychain)))
+      yield* Effect.gen(function* () {
+        checks.set(`head-${number}`, 'passed')
+        yield* sweep(coordinator)
+        const errand = (yield* errandsOf(lead)).get(number)?.id ?? ''
+        assert.include((yield* news(lead)).at(-1), `errand "${errand}"`)
+        assert.deepStrictEqual(yield* news(coordinator), [])
+        // Its lead had no session: it is started again on its agent, and reads the step as its turn.
+        yield* until(
+          Effect.sync(() => promptsGot.filter((one) => one.agentId === 'lead-agent')),
+          (got) => got.some((one) => one.text.includes(`errand "${errand}"`)),
+        )
+      }).pipe(Effect.provide(layer(service, database, keychain)))
+    })
   })
 })
 

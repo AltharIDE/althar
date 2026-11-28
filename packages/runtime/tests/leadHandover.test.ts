@@ -12,6 +12,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { LEAD_MERGES } from '../src/sessionState'
 import { notices, onTestClock, repository, runtime, until } from './support'
 
 const withQueries = (...args: Parameters<typeof runtime>) => Queries.layer.pipe(Layer.provideMerge(runtime(...args)))
@@ -151,6 +152,8 @@ describe('compacting a full lead', () => {
           assert.include(next, "When you have done the task, call Althar's finish_step tool")
           assert.include(next, 'Ship on Thursdays.')
           assert.include(next, 'Open errands concerning this task')
+          // It merges and tags on the person's word in its thread, as the coordinator does.
+          assert.include(next, LEAD_MERGES)
           assert.notInclude(next, 'The thread so far')
           assert.match(next, /What next\?$/)
           assert.lengthOf(yield* sessionsOn(task.threadId), 1)

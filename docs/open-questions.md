@@ -63,8 +63,8 @@ was decided. These are what they leave open.
 - [ ] **Deleting a branch as a tool.** `delete_branch` on the person's word,
   and declining on Bitbucket Cloud. `post_review` is built, bound to the
   commit actually read and refusing self-approval.
-- [ ] **A lead's tags.** Should a lead's `push_tag` go ahead on the person's
-  word in its thread, rather than asking every time?
+- [x] **A lead's tags.** Built on 28 November: a lead's `push_tag` goes
+  ahead on the person's word in its thread, and a lead merges on it too.
 - [x] **A contributor's fork.** Attaching a fork's pull request, and pushing
   to it where its author lets maintainers edit (DEV-170).
 - [ ] **The coordinator on the web.** Should it read the web under the
