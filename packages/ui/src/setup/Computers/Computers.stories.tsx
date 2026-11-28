@@ -273,6 +273,32 @@ export const WorkerAgentDownloading: Story = {
   },
 }
 
+/** Signing OpenCode in on a worker: its sign-in is its own command, run on the worker from a terminal here, then Check. */
+export const WorkerAgentSignsInInATerminal: Story = {
+  args: {
+    opened: ADDED.id,
+    workers: { enabled: true, list: [{ ...ADDED, projects: ['meridian'], projectIds: ['proj_meridian'] }] },
+    allProjects: PROJECTS,
+    onProjects: fn(),
+    onSignIn: fn(),
+    onCheckSignIn: fn(),
+    onCancelSignIn: fn(),
+    onOpenLink: fn(),
+    signingIn: {
+      workerId: ADDED.id,
+      agent: 'codex',
+      step: { kind: 'terminal', command: "ssh -t althar@build-box 'opencode auth login --standalone'", notYet: true },
+    },
+  },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText("ssh -t althar@build-box 'opencode auth login --standalone'")).toBeInTheDocument()
+    await expect(c.getByText('Not signed in yet')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Check' }))
+    await expect(args.onCheckSignIn).toHaveBeenCalled()
+  },
+}
+
 /** A worker added with a code whose check found newer Ubuntu keeps its sandbox from starting: what to run there, to copy. */
 export const WorkerNotReady: Story = {
   args: {

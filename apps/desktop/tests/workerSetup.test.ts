@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest'
 
 import { findRelease, findWorkerRelease, workerRelease } from '../src/main/homes/release'
 import { runProgram, type Ran, type RunOptions, type SetupSystem } from '../src/main/homes/setup'
-import { forTheLog, transferTime, workerSetups, type WorkerLog } from '../src/main/homes/workerSetup'
+import { forTheLog, terminalLine, transferTime, workerSetups, type WorkerLog } from '../src/main/homes/workerSetup'
 import type { WorkerSetup } from '../src/workers'
 
 const now = Date.parse('2026-01-20T00:00:00.000Z')
@@ -442,4 +442,11 @@ it('says a program it ran was stopped at its deadline, whatever it exited with t
   const done = await node('process.exit(3)', 20_000)
   expect(done.code).toBe(3)
   expect(done.timedOut).toBeUndefined()
+})
+
+it('gives an agent’s own sign-in as the line that runs it on the worker over its SSH address, its port where it has one', () => {
+  expect(terminalLine('althar@build-box', 'opencode auth login --standalone')).toBe(
+    "ssh -t althar@build-box 'opencode auth login --standalone'",
+  )
+  expect(terminalLine('me@10.0.0.9:2222', "copilot login --host 'x'")).toBe(`ssh -t -p 2222 me@10.0.0.9 'copilot login --host '\\''x'\\'''`)
 })

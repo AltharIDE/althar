@@ -146,15 +146,26 @@ const writeAgents = async (folder: string, current: string) => {
 
 /** Which shipped agents are signed in, kept where the worker reads it at each hello; says each. */
 const checkAgents = async (folder: string) => {
+  // An agent that can't say whether it is signed in counts as signed in once the worker's check started it and it
+  // offered its models (`check`), until a check finds it doesn't start.
+  const started = new Set(((await readPrivate(join(folder, 'started'), 4096))?.toString('utf8') ?? '').split('\n'))
   const checked = await Promise.all(
-    system.agents().map(async (agent) => ({
-      id: agent.id,
-      name: agent.definition.name,
+    system.agents().map(async (agent) => {
       // One whose program isn't here yet comes with its sign-in, and runs nothing till then.
-      installed: agent.installed !== false,
-      downloadable: agent.downloadable === true,
-      signedIn: agent.installed !== false && (await system.signedIn(agent.definition)),
-    })),
+      const status = agent.installed === false ? false : await system.signedIn(agent.definition)
+      return {
+        id: agent.id,
+        name: agent.definition.name,
+        installed: agent.installed !== false,
+        downloadable: agent.downloadable === true,
+        signedIn: status === true || (status === 'unknown' && started.has(agent.id)),
+        unknown: status === 'unknown',
+        // Its own sign-in where it has none inside Althar: the command to run on the worker, as it would be typed there.
+        ...(agent.definition.signIn.inApp === undefined && agent.definition.signIn.login !== ''
+          ? { login: agent.definition.signIn.login }
+          : {}),
+      }
+    }),
   )
   const signedIn = checked.flatMap((agent) => (agent.signedIn ? [agent.id] : []))
   const was = (await readPrivate(join(folder, 'signed-in'), 4096))?.toString('utf8') ?? null
@@ -180,7 +191,8 @@ const systemctl = (...args: string[]) => system.systemctl(args)
 export interface WorkerSystem {
   /** `systemctl --user` with these arguments: what it printed. */
   readonly systemctl: (args: ReadonlyArray<string>) => Promise<string>
-  readonly signedIn: (agent: AgentDefinition) => Promise<boolean>
+  /** Whether the agent is signed in; `unknown` where it can't say (its own status command reads nothing). */
+  readonly signedIn: (agent: AgentDefinition) => Promise<boolean | 'unknown'>
   /** The agents a release has, the one this runs from unless said. */
   readonly agents: (release?: string) => ReadonlyArray<ShippedAgent>
   /** What its check runs on (workerCheck.ts). */
@@ -199,7 +211,10 @@ export interface WorkerSystem {
 }
 let system: WorkerSystem = {
   systemctl: async (args) => (await run('systemctl', ['--user', ...args], { timeout: 30_000 })).stdout,
-  signedIn: async (agent) => (await Effect.runPromise(signInCheck(agent, process.execPath))).status === 'signed_in',
+  signedIn: async (agent) => {
+    const { status } = await Effect.runPromise(signInCheck(agent, process.execPath))
+    return status === 'signed_in' ? true : status === 'unknown' ? 'unknown' : false
+  },
   agents: shipped,
   check: checkHere,
   sudo: async (script) => (await checkHere.run('sudo', ['-n', 'sh', '-c', script], { timeout: 30_000 })).ok,
@@ -405,7 +420,10 @@ export const check = async (out: (text: string) => void) => {
   say(out, { step: 'check', state: 'started' })
   // An agent signed in here whose program went missing comes back first, as an update would have brought it.
   await prepareAgents(running(), () => undefined).catch(() => 0)
-  const signedIn = new Set((await checkAgents(folder)).agents.flatMap((agent) => (agent.signedIn ? [agent.id] : [])))
+  const listed = (await checkAgents(folder)).agents
+  const signedIn = new Set(listed.flatMap((agent) => (agent.signedIn ? [agent.id] : [])))
+  // One that can't say is tried: started, it is signed in; not, it isn't.
+  const unknown = new Set<string>(listed.flatMap((agent) => (agent.unknown && agent.installed ? [agent.id] : [])))
   const found = await checkWorker(
     {
       folder,
@@ -415,11 +433,14 @@ export const check = async (out: (text: string) => void) => {
         id: agent.id,
         name: agent.definition.name,
         definition: agent.definition,
-        signedIn: signedIn.has(agent.id),
+        signedIn: signedIn.has(agent.id) || unknown.has(agent.id),
       })),
     },
     system.check,
   )
+  const proven = found.agents.flatMap((agent) => (unknown.has(agent.id) && agent.started === true ? [agent.id] : []))
+  await writePrivate(join(folder, 'started'), proven.map((id) => `${id}\n`).join(''), true)
+  await checkAgents(folder)
   say(out, {
     step: 'check',
     state: 'done',
@@ -430,7 +451,8 @@ export const check = async (out: (text: string) => void) => {
     agents: found.agents.map(({ id, name, signedIn: signed, started, message, models }) => ({
       id,
       name,
-      signedIn: signed,
+      // Tried because it couldn't say: signed in only where it started.
+      signedIn: signed && (!unknown.has(id) || started === true),
       ...(started === undefined ? {} : { started }),
       ...(message === undefined ? {} : { message }),
       models: models.length,
@@ -616,7 +638,11 @@ export const signIn = async (id: string, way: SignInWay, out: (text: string) => 
       { way, node: process.execPath, openUrl: (url) => say(out, { step: 'sign-in', kind: 'open', url }) },
     )
     if (handle === null) {
-      say(out, { step: 'sign-in', kind: 'failed', message: 'This agent doesn’t sign in that way here.' })
+      // Its sign-in is its own command, in a terminal on the worker: what to run there, as it would be typed. The window
+      // gives it with the SSH address it reaches the worker by, and checks again once it is run.
+      if (agent.definition.signIn.inApp === undefined && agent.definition.signIn.login !== '')
+        say(out, { step: 'sign-in', kind: 'terminal', command: agent.definition.signIn.login })
+      else say(out, { step: 'sign-in', kind: 'failed', message: 'This agent doesn’t sign in that way on a worker.' })
       lines.close()
       return resolve()
     }

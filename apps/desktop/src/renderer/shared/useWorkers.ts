@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { type HomeWorker, type HomeWorkers, type WorkerCapacity, workerName } from '@althar/contracts'
 import type { ComputerWorker, LoadWorker, WorkerSignInView, WorkerState } from '@althar/ui'
@@ -220,6 +220,8 @@ export interface WorkerSignInModel {
   readonly confirmed: (workers: ReadonlyArray<HomeWorker>) => void
   readonly start: (worker: HomeWorker, agent: string) => void
   readonly paste: (code: string) => void
+  /** Reads who is signed in on the worker again, for a sign-in run in a terminal there. */
+  readonly check: () => void
   readonly cancel: () => void
 }
 
@@ -231,6 +233,10 @@ export const useWorkerSignIn = (): WorkerSignInModel => {
   const { host } = useServices()
   const bridge = host.workers
   const [signingIn, setSigningIn] = useState<WorkerSignInView | null>(null)
+  // The worker a sign-in is under way on, by its SSH address, for Check; and the sign-in as it stands, for its answer.
+  const address = useRef<string | undefined>(undefined)
+  const signingInRef = useRef<WorkerSignInView | null>(null)
+  signingInRef.current = signingIn
   const [held, setHeld] = useState<ReadonlyMap<string, ReadonlyArray<string>>>(new Map())
   useEffect(
     () =>
@@ -243,9 +249,14 @@ export const useWorkerSignIn = (): WorkerSignInModel => {
                 ...was,
                 step: {
                   kind: 'getting',
-                  percent: event.totalBytes > 0 ? Math.min(100, Math.floor((event.bytes / event.totalBytes) * 100)) : 0,
+                  percent:
+                    event.totalBytes !== undefined && event.totalBytes > 0
+                      ? Math.min(100, Math.floor((event.bytes / event.totalBytes) * 100))
+                      : 0,
                 },
               }
+            case 'terminal':
+              return { ...was, step: { kind: 'terminal', command: event.command } }
             case 'device':
               return { ...was, step: { kind: 'code', code: event.code, page: event.page } }
             case 'browser':
@@ -259,7 +270,8 @@ export const useWorkerSignIn = (): WorkerSignInModel => {
               // next heartbeats), so an older read never takes it back.
               const signedIn = event.agents.filter((agent) => agent.signedIn).map((agent) => agent.id)
               setHeld((before) => new Map(before).set(was.workerId, signedIn))
-              return null
+              // A sign-in run in a terminal stays, its line and Check, until it is done there.
+              return was.step.kind === 'terminal' && !signedIn.includes(was.agent) ? was : null
             }
             default:
               return was
@@ -287,6 +299,7 @@ export const useWorkerSignIn = (): WorkerSignInModel => {
     confirmed,
     start: (worker, agent) => {
       if (bridge === undefined || worker.ssh === undefined) return
+      address.current = worker.ssh
       setSigningIn({ workerId: worker.workerId, agent, step: { kind: 'starting' } })
       // Codex signs in with a one-time code on another device; Claude Code's page shows a code to paste back.
       bridge.signIn(worker.ssh, agent, agent === 'codex' ? 'device' : 'browser').catch((error: unknown) =>
@@ -299,6 +312,30 @@ export const useWorkerSignIn = (): WorkerSignInModel => {
     },
     paste: (code) => {
       void bridge?.signInAct({ paste: code })
+    },
+    check: () => {
+      const ssh = address.current
+      const at = signingInRef.current
+      if (bridge === undefined || ssh === undefined || at === null) return
+      setSigningIn((was) => (was?.step.kind === 'terminal' ? { ...was, step: { ...was.step, checking: true, notYet: false } } : was))
+      // Its answer, for the sign-in it was asked for, as long as that is still the one under way.
+      const settle = (signedIn: boolean | undefined, ids: ReadonlyArray<string>) => {
+        if (signedIn === true) setHeld((before) => new Map(before).set(at.workerId, ids))
+        setSigningIn((was) =>
+          was === null || was.workerId !== at.workerId || was.agent !== at.agent || was.step.kind !== 'terminal'
+            ? was
+            : signedIn === true
+              ? null
+              : { ...was, step: { ...was.step, checking: false, notYet: signedIn === false } },
+        )
+      }
+      bridge.agents(ssh).then(
+        (agents) => {
+          const ids = agents.filter((one) => one.signedIn).map((one) => one.id)
+          settle(ids.includes(at.agent), ids)
+        },
+        () => settle(undefined, []),
+      )
     },
     cancel: () => {
       setSigningIn(null)

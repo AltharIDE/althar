@@ -149,6 +149,15 @@ export const workerSshArgs = (target: SshHomeTarget, verbose = false) => {
 
 /** A worker's SSH address as the home keeps it, `user@host` or `user@host:port`, and back. */
 export const sshAddressOf = (target: SshHomeTarget) => (target.port === undefined ? target.target : `${target.target}:${target.port}`)
+/**
+ * The line a person runs in a terminal here to run `command` on the worker at this SSH address, with a terminal of its
+ * own there (`-t`), as an agent's own sign-in needs: by its address, its port where it has one.
+ */
+export const terminalLine = (address: string, command: string) => {
+  const target = sshTargetOf(address)
+  return ['ssh', '-t', ...(target.port === undefined ? [] : ['-p', String(target.port)]), target.target, quote(command)].join(' ')
+}
+
 export const sshTargetOf = (address: string): SshHomeTarget => {
   const match = /^(.*?)(?::(\d{1,5}))?$/u.exec(address)
   const port = match?.[2] === undefined ? undefined : Number(match[2])
@@ -633,7 +642,10 @@ export const workerSetups = (
             // words go in, cut as every line is.
             if (one.kind === 'failed') log.warn('Worker sign-in failed', { target: ssh, agent, message: forTheLog(textOf(one.message), 3) })
             else log.info('Worker sign-in', { target: ssh, agent, kind: one.kind })
-            said(one as unknown as WorkerSignInEvent)
+            // Its own command, to run on the worker: given as the line that reaches it over this SSH address.
+            if (one.kind === 'terminal' && typeof one.command === 'string')
+              said({ kind: 'terminal', command: terminalLine(ssh, one.command) })
+            else said(one as unknown as WorkerSignInEvent)
           } else if (one.step === 'agents' && one.state === 'done') said({ kind: 'agents', agents: agentsOf(one.agents) })
           else if (one.step === 'check' && one.state === 'done') {
             const check = checkOf(one)

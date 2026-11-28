@@ -161,6 +161,7 @@ export function ComputersSection({
               },
               signingIn: signing.signingIn,
               onPaste: signing.paste,
+              onCheckSignIn: signing.check,
               onCancelSignIn: signing.cancel,
               onOpenLink: (url: string) => window.open(url, '_blank', 'noopener'),
             })}

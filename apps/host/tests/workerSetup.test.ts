@@ -571,7 +571,7 @@ describe('its command line, at its edges', () => {
     await expect(enroll({ ...grant, serverName: 'Not A Name' }, out)).rejects.toMatchObject({ code: 'InvalidRequest' })
   })
 
-  it('says an agent doesn’t sign in that way here, then what it has', async () => {
+  it('gives an agent’s own sign-in command to run on the worker, says one with none can’t, then what it has', async () => {
     restore()
     const { inApp: _none, ...rest } = agents.codex.signIn
     const plain: AgentDefinition = { ...agents.codex, signIn: rest }
@@ -584,10 +584,20 @@ describe('its command line, at its edges', () => {
       shipped: () => ({}),
     })
     await install(release(), out)
+    // Its sign-in is its own command: what to run on the worker.
     await signIn('codex', 'device', out)
     expect(said).toEqual(
+      expect.arrayContaining([expect.objectContaining({ step: 'sign-in', kind: 'terminal', command: agents.codex.signIn.login })]),
+    )
+    // Without one either, it says it can't.
+    const none: AgentDefinition = { ...plain, signIn: { ...rest, login: '' } }
+    const back = withWorkerSystem({ agents: () => [{ id: 'codex', definition: none, program: '/opt/codex' }] })
+    said = []
+    await signIn('codex', 'device', out)
+    back()
+    expect(said).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ step: 'sign-in', kind: 'failed', message: 'This agent doesn’t sign in that way here.' }),
+        expect.objectContaining({ step: 'sign-in', kind: 'failed', message: 'This agent doesn’t sign in that way on a worker.' }),
       ]),
     )
     expect(said.findLast((one) => one.step === 'agents')).toMatchObject({ step: 'agents', state: 'done' })
@@ -987,6 +997,36 @@ describe('its agents, every one Althar runs', () => {
           { id: 'claude-code', installed: true, downloadable: true },
         ],
       })
+    } finally {
+      back()
+    }
+  })
+
+  it('counts one that can’t say whether it’s signed in as signed in once its check started it, and not once it doesn’t', async () => {
+    let starts = true
+    const back = withWorkerSystem({
+      agents: () => [{ id: 'copilot' as const, definition: agents.copilot, program: '/opt/copilot', installed: true, downloadable: true }],
+      signedIn: async () => 'unknown',
+      check: {
+        ...checking,
+        startAgent: async () => (starts ? [{ id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol' }] : Promise.reject(new Error('Not signed in'))),
+      },
+    })
+    try {
+      await install(release(), out)
+      await listAgents(out)
+      expect(said.at(-1)).toMatchObject({ agents: [{ id: 'copilot', signedIn: false }] })
+      // Its sign-in is its own command, which the window gives to run on the worker.
+      expect(said.at(-1)).toMatchObject({ agents: [{ login: agents.copilot.signIn.login }] })
+      expect(await workerMain(['check'], out)).toBe(0)
+      expect(said.at(-1)).toMatchObject({ step: 'check', agents: [{ id: 'copilot', signedIn: true, started: true, models: 1 }] })
+      expect(readFileSync(join(data, 'althar-worker', 'signed-in'), 'utf8')).toBe('copilot\n')
+      await listAgents(out)
+      expect(said.at(-1)).toMatchObject({ agents: [{ id: 'copilot', signedIn: true }] })
+      starts = false
+      await workerMain(['check'], out)
+      expect(said.at(-1)).toMatchObject({ step: 'check', agents: [{ id: 'copilot', signedIn: false, started: false }] })
+      expect(readFileSync(join(data, 'althar-worker', 'signed-in'), 'utf8')).toBe('')
     } finally {
       back()
     }
