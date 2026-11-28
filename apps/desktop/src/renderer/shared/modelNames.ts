@@ -1,12 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useMemo } from 'react'
 
-import type { ModelInfo } from '@althar/ui'
+import type { LaunchStep, ModelInfo } from '@althar/ui'
 
 import { useModels } from '../data/models'
 import { reads } from '../data/reads'
 import { useServices } from '../data/services'
-import { catalogOf, effortName, infoOf, nameOf, viaOf } from './models'
+import { catalogOf, effortName, infoOf, nameOf, startEffortOf, viaOf } from './models'
 
 /*
  * How every screen names who works (ADR-015): the model, as people know it,
@@ -37,6 +37,29 @@ export const useEffortNames = (): NameEffort => {
   return useCallback(
     (agentId, model, effort) =>
       agentId === null || effort === null ? null : effortName(catalog, infoOf(catalog, { agentId, model }).id, effort),
+    [catalog],
+  )
+}
+
+/**
+ * A plan step's efforts by name: the one set for it, and the one it runs at with none set; each null where that can't be
+ * known. `elsewhere` is a step that runs on a worker: a worker says which models it has, never how hard they think or
+ * start, so no default of it is known.
+ */
+export type NameStepEfforts = (
+  agentId: string,
+  model: string | null,
+  effort: string | null,
+  elsewhere?: boolean,
+) => Pick<LaunchStep, 'effort' | 'defaultEffort'>
+
+export const useStepEfforts = (): NameStepEfforts => {
+  const catalog = useNamingCatalog()
+  return useCallback(
+    (agentId, model, effort, elsewhere = false) => {
+      const info = infoOf(catalog, { agentId, model })
+      return { effort: effortName(catalog, info.id, effort), defaultEffort: elsewhere ? null : startEffortOf(catalog, info) }
+    },
     [catalog],
   )
 }
