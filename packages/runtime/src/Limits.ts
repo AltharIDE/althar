@@ -389,6 +389,8 @@ export class Limits extends Context.Service<
       readonly reviewing?: ModelChoice
       /** The agent stopped listing the model: it goes elsewhere as one turned off there does. */
       readonly gone?: boolean
+      /** Other agents it doesn't go to, as ones that stopped listing it too. */
+      readonly besides?: ReadonlyArray<string>
     }): Effect.Effect<
       { readonly kind: 'here' } | { readonly kind: 'elsewhere'; readonly to: Takeover } | { readonly kind: 'none' },
       Failure
@@ -1059,7 +1061,7 @@ export class Limits extends Context.Service<
             const same = (yield* ranked({
               projectId: input.projectId,
               from: { agentId: input.agentId, model: input.model },
-              besides: [input.agentId],
+              besides: [input.agentId, ...(input.besides ?? [])],
               ...(input.reviewing === undefined ? {} : { other: input.reviewing, reviewing: true }),
             })).find((one) => one.sameModel)
             if (same === undefined) return { kind: 'none' as const }

@@ -1,6 +1,6 @@
 import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Fiber, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Models } from '../src/Models'
@@ -9,7 +9,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { notices, repository, runtime, task, until, withWork } from './support'
+import { launches, notices, repository, runtime, task, until, withWork } from './support'
 
 /*
  * An agent's list of models can come back short for a while: Codex's, fetched from OpenAI, once left out GPT-6.2 Sol and
@@ -100,6 +100,13 @@ const openCalls = (taskId: string) =>
     (sql) => sql<{ id: string }>`SELECT id FROM attention_requests WHERE task_id = ${taskId} AND kind = 'stuck' AND state = 'open'`,
   )
 
+/** How many sessions of the agent have been launched so far: its models probes left out. */
+const sessionLaunches = (agentId: string) => launches.filter((one) => one.agentId === agentId && one.env.ALTHAR_WORKER !== undefined).length
+
+/** The models the catalog says the agent offers, once none is being asked. */
+const offeredBy = (agentId: string) =>
+  Effect.map(catalogRead, (all) => all.find((agent) => agent.agentId === agentId)?.models.map((model) => model.id) ?? [])
+
 const titles = (threadId: string) => Effect.map(notices(threadId), (all) => all.map((notice) => notice.title ?? ''))
 
 describe('a step on a model its agent stops listing', () => {
@@ -124,6 +131,15 @@ describe('a step on a model its agent stops listing', () => {
           "Fake codex doesn't list GPT-6.2 Sol just now. Asking it again for up to 30 seconds before the work goes to another agent.",
         ),
       )
+      // Asked again, Codex's own list, all Althar knew Sol from, comes back short too, and several more starts find it missing:
+      // the wait goes on, on what it saw first.
+      const before = sessionLaunches('codex')
+      yield* until(offeredBy('codex'), (ids) => !ids.includes(SOL.id))
+      yield* until(
+        Effect.sync(() => sessionLaunches('codex')),
+        (count) => count >= before + 4,
+      )
+      assert.deepStrictEqual(yield* openCalls(task.taskId), [])
       each['codex@usual'] = { models: [SOL, LUNA] }
       assert.deepStrictEqual(yield* reviewerOn(task.taskId), { agentId: 'codex', model: SOL.id })
       assert.deepStrictEqual(yield* openCalls(task.taskId), [])
@@ -133,14 +149,15 @@ describe('a step on a model its agent stops listing', () => {
   it.live('goes to the same model on another agent once asking again has not brought it back', () => {
     const each = offering()
     return Effect.gen(function* () {
-      each['opencode@usual'] = { models: [SOL, SMALL] }
+      // Claude Code offers Sol too, beside the model its lead is on.
+      each['claude-code@usual'] = { models: [SMALL, SOL] }
       yield* catalogRead
       each['codex@usual'] = { models: [LUNA] }
       const task = yield* reviewedOnSol
       const thread = yield* reviewThread(task.taskId)
-      // The same model, through OpenCode: never another model unasked, and nothing asks the person.
-      assert.deepStrictEqual(yield* reviewerOn(task.taskId), { agentId: 'opencode', model: SOL.id })
-      assert.include(yield* titles(thread), 'Fake codex stopped listing GPT-6.2 Sol: it carries on through Fake opencode.')
+      // The same model, through Claude Code: never another model unasked, and nothing asks the person.
+      assert.deepStrictEqual(yield* reviewerOn(task.taskId), { agentId: 'claude-code', model: SOL.id })
+      assert.include(yield* titles(thread), 'Fake codex stopped listing GPT-6.2 Sol: it carries on through Fake claude-code.')
       assert.deepStrictEqual(yield* openCalls(task.taskId), [])
     }).pipe(Effect.provide(withQueries(':memory:', {}, { each })))
   })
@@ -168,6 +185,53 @@ describe('a step on a model its agent stops listing', () => {
         WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
       assert.deepStrictEqual(started, [{ agentId: 'codex' }])
     }).pipe(Effect.provide(withQueries(':memory:', {}, { each, modelWait: { every: Duration.millis(100), within: Duration.seconds(1) } })))
+  })
+
+  it.live('goes on past another agent that stopped listing it too, and says so where none is left', () => {
+    const each = offering()
+    return Effect.gen(function* () {
+      // Claude Code listed Sol too, and OpenCode offers it turned off; then neither Codex nor Claude Code lists it.
+      each['claude-code@usual'] = { models: [SMALL, SOL] }
+      each['opencode@usual'] = { models: [SOL, SMALL] }
+      yield* catalogRead
+      yield* (yield* Models).setModelBlocked({ agentId: 'opencode', model: SOL.id, blocked: true })
+      each['codex@usual'] = { models: [LUNA] }
+      each['claude-code@usual'] = { models: [SMALL] }
+      const task = yield* reviewedOnSol
+      assert.deepInclude(yield* stuckCall(task.taskId), {
+        step: 'review',
+        why: 'failed_to_start',
+        agentId: 'codex',
+        detail:
+          "It stopped listing GPT-6.2 Sol, and still didn't after a second of asking again. Fake claude-code stopped listing it too, and no other agent with room offers it.",
+      })
+      const sql = yield* SqlClient.SqlClient
+      const started = yield* sql<{ agentId: string }>`
+        SELECT DISTINCT s.agent_id FROM threads t JOIN provider_sessions s ON s.thread_id = t.id
+        WHERE t.task_id = ${task.taskId} AND t.kind = 'step' ORDER BY s.agent_id`
+      assert.deepStrictEqual(started, [{ agentId: 'claude-code' }, { agentId: 'codex' }])
+    }).pipe(Effect.provide(withQueries(':memory:', {}, { each, modelWait: { every: Duration.millis(100), within: Duration.seconds(1) } })))
+  })
+
+  it.live('stops waiting at once where its thread is stopped, starting nothing more here or elsewhere', () => {
+    const each = offering()
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      each['claude-code@usual'] = { models: [SMALL, SOL] }
+      yield* catalogRead
+      each['codex@usual'] = { models: [LUNA] }
+      const { task: made } = yield* task()
+      const starting = yield* Effect.forkChild(Effect.flip(sessions.start({ threadId: made.threadId, agentId: 'codex', model: SOL.id })))
+      yield* until(titles(made.threadId), (said) => said.some((title) => title.includes('just now')))
+      // Stop answers within the wait, though the start holds the thread.
+      yield* sessions.stop(made.threadId).pipe(Effect.timeout(Duration.seconds(5)))
+      const failed = yield* Fiber.join(starting)
+      assert.strictEqual('summary' in failed ? failed.summary : '', 'Stopped while it waited for its agent to list its model again.')
+      const after = { codex: sessionLaunches('codex'), claude: sessionLaunches('claude-code') }
+      yield* Effect.sleep(Duration.millis(500))
+      assert.deepStrictEqual({ codex: sessionLaunches('codex'), claude: sessionLaunches('claude-code') }, after)
+      assert.isTrue(Option.isNone(yield* sessions.running(made.threadId)))
+    }).pipe(Effect.provide(withQueries(':memory:', {}, { each, modelWait: { every: Duration.millis(100), within: Duration.seconds(30) } })))
   })
 
   it.live('says at once a model its agent never listed, without asking again', () =>

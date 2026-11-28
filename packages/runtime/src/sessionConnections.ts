@@ -211,6 +211,9 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     wakeFor,
   } = dependencies
 
+  /** Starts waiting for their agent to list their model again, by thread: a stop calls each off (`callOffWaits`). */
+  const modelWaits = new Map<string, Set<Deferred.Deferred<void>>>()
+
   /**
    * Whether a start failed because the agent doesn't offer the step's model while its account's usage reads as needing its
    * sign-in again: a signed-out Codex lists fewer models, and its `login status` may still say it is signed in, so the model
@@ -374,10 +377,11 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     effort: string | undefined,
     first: boolean,
     /**
-     * Where its model may go missing: undefined while it may still be asked again (`ModelMissing`), or how long it was asked
-     * again for, at its last try, which says so.
+     * Where it is asked again for a model its agent listed lately (`modelReturns`): the model's name as it was listed, which
+     * the start keeps for the whole wait, whatever the agent's list says meanwhile; and at its last try, how long it was asked
+     * again for, which a model still missing says.
      */
-    askedFor?: Duration.Duration,
+    again?: { readonly name: string; readonly last?: Duration.Duration },
   ) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -911,8 +915,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           existsSync(folder) &&
           !signInEnded &&
           modelRefused(started.cause, entry.definition) &&
-          (askedFor !== undefined || (yield* listedLately(definition.id, model)))
-        if (missing && askedFor === undefined) {
+          (again !== undefined || (yield* listedLately(definition.id, model)))
+        if (missing && again?.last === undefined) {
           if (processId !== undefined) yield* change('processes', processId, { state: 'unknown', endedAt: yield* timestamp })
           return yield* new ModelMissing()
         }
@@ -921,13 +925,13 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           if (processId !== undefined) yield* change('processes', processId, { state: 'unknown', endedAt: yield* timestamp })
           return yield* new StartAgain()
         }
-        const gone = missing && askedFor !== undefined ? (yield* limits.named(definition.id, model ?? null)).model : null
-        if (gone !== null && model !== undefined) yield* modelGone(account.id, model)
+        const gone = missing && again?.last !== undefined ? again : undefined
+        if (gone !== undefined && model !== undefined) yield* modelGone(account.id, model)
         const summary = existsSync(folder)
           ? signInEnded
             ? signInEndedWords
-            : gone !== null && askedFor !== undefined
-              ? modelGoneWords(gone, whileWords(askedFor))
+            : gone?.last !== undefined
+              ? modelGoneWords(gone.name, whileWords(gone.last))
               : // Whose copy to put right: Althar's, unless this launch drives the person's own (Codex's `CODEX_PATH`).
                 summarize(started.cause, { bundled: definition.source === 'bundled' && !ownCopy })
           : folderGoneWords(folder)
@@ -951,7 +955,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           agentId: definition.id,
           reason,
           summary,
-          ...(gone !== null && model !== undefined ? { modelGone: model } : {}),
+          ...(gone !== undefined && model !== undefined ? { modelGone: model } : {}),
         })
       }
       const { connection, agent, unavailableMcp } = started.value
@@ -1098,20 +1102,28 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
     effort: string | undefined,
   ) =>
     Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
       const { every, within } = runtimeConfig.modelWait ?? MODEL_WAIT
+      // Its name as listed now, while what Althar holds of the agent still has it: the agent's next list may not.
       const named = yield* limits.named(entry.definition.id, model ?? null)
+      const name = named.model ?? model ?? 'its model'
       yield* Effect.logInfo('The agent doesn’t list its model just now; asking it again').pipe(
         Effect.annotateLogs({ agent: entry.definition.id, session: sessionId, thread: thread.threadId, model: model ?? '' }),
       )
       yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
         source: 'runtime',
         severity: 'info',
-        title: modelMissingWords(named.agent, named.model ?? model ?? 'its model', whileWords(within)),
+        title: modelMissingWords(named.agent, name, whileWords(within)),
       })
+      // A stop calls the wait off at once, without the thread's lock its start holds (`callOffWaits`).
+      const calledOff = yield* Deferred.make<void>()
+      const waits = modelWaits.get(thread.threadId) ?? new Set()
+      waits.add(calledOff)
+      modelWaits.set(thread.threadId, waits)
       const tries = Math.max(1, Math.ceil(Duration.toMillis(within) / Math.max(1, Duration.toMillis(every))))
       // Its last try says how long it was asked again for, and can't find it missing again: it fails, as any start does.
       const once = (last: boolean) =>
-        connectOnce(thread, sessionId, entry, account, model, effort, false, last ? within : undefined).pipe(
+        connectOnce(thread, sessionId, entry, account, model, effort, false, last ? { name, last: within } : { name }).pipe(
           Effect.map(Option.some),
           Effect.catchTags({
             StartAgain: (one) => Effect.die(one),
@@ -1119,12 +1131,40 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
             ModelMissing: (one) => (last ? Effect.die(one) : Effect.succeed(Option.none())),
           }),
         )
-      for (let tried = 1; ; tried++) {
-        yield* refreshAgent(entry.definition.id)
-        yield* Effect.sleep(every)
-        const started = yield* once(tried >= tries)
-        if (Option.isSome(started)) return started.value
-      }
+      return yield* Effect.gen(function* () {
+        for (let tried = 1; ; tried++) {
+          yield* refreshAgent(entry.definition.id)
+          yield* Effect.raceFirst(Effect.sleep(every), Deferred.await(calledOff))
+          // Stopped as it waited: no agent starts again, here or elsewhere, and its session ends as one that didn't start.
+          if (yield* Deferred.isDone(calledOff)) {
+            const stopped = 'Stopped while it waited for its agent to list its model again.'
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* moveSession(sessionId, 'failed', { endedAt: yield* timestamp })
+                yield* sessionFact(thread, sessionId, revision, 'provider_session.failed', { reason: stopped, stopped: true })
+              }),
+            )
+            return yield* new SessionFailed({ agentId: entry.definition.id, reason: stopped, summary: stopped })
+          }
+          const started = yield* once(tried >= tries)
+          if (Option.isSome(started)) return started.value
+        }
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            waits.delete(calledOff)
+            if (waits.size === 0 && modelWaits.get(thread.threadId) === waits) modelWaits.delete(thread.threadId)
+          }),
+        ),
+      )
+    })
+
+  /** Calls off every start on the thread waiting for its agent to list its model again; whether there was one. */
+  const callOffWaits = (threadId: string) =>
+    Effect.gen(function* () {
+      const waits = [...(modelWaits.get(threadId) ?? [])]
+      for (const one of waits) yield* Deferred.succeed(one, undefined)
+      return waits.length > 0
     })
 
   type Connected = Effect.Success<ReturnType<typeof connectSession>>
@@ -1417,7 +1457,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       )
     })
 
-  return { activate, beforeTakingOver, busyNow, connectSession, stopRunning }
+  return { activate, beforeTakingOver, busyNow, callOffWaits, connectSession, stopRunning }
 }
 
 /**
