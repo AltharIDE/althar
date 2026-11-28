@@ -195,14 +195,26 @@ const emptyDestination = async (destination: string) => {
   return dist
 }
 
+/**
+ * A home's release: its runtime and the adapters, and none of the agents' own programs, which come on first use
+ * (docs/plans/agents-on-first-use.md). Where it carries the worker too, for workers installed from a home's release,
+ * it carries the sandbox's bubblewrap and ripgrep in its own `tools/bin`, from Codex's package, before that goes.
+ */
 export const assembleBundle = async (source: BundleSource, destination: string) => {
   const dist = await emptyDestination(destination)
   await fs.copyFile(source.entry, join(dist, 'althar-host.js'), constants.COPYFILE_EXCL)
   await copyHostAssets(source.entry, dist)
   await copyNotices(source.entry, destination)
   await copyNode(source, destination, '@althar/host-release')
-  await copyDependencies(source.entry, destination, [...AGENT_ADAPTERS, 'sharp'])
+  const placed = await copyDependencies(source.entry, destination, [...AGENT_ADAPTERS, 'sharp'])
   await copyWorker(source, destination)
+  const programs = agentPrograms()
+  for (const one of placed) {
+    const agent = programs.get(one.name)
+    if (agent === undefined) continue
+    if (agent === 'codex' && source.worker !== undefined) await sandboxFromCodex(join(destination, one.path), destination)
+    await fs.rm(join(destination, one.path), { recursive: true, force: true })
+  }
 }
 
 /**
@@ -230,6 +242,7 @@ const pruneCodex = async (folder: string) => {
  * `tools/bin`, beside socat, so its sandbox starts whichever agents it has, Codex or not.
  */
 const sandboxFromCodex = async (folder: string, destination: string) => {
+  await fs.mkdir(join(destination, 'tools', 'bin'), { recursive: true, mode: 0o700 })
   const vendor = join(folder, 'vendor')
   for (const target of await fs.readdir(vendor).catch(() => [] as string[]))
     for (const [from, name] of [

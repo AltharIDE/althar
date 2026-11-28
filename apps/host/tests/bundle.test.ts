@@ -111,6 +111,49 @@ describe('locked host dependency bundles', () => {
       assembleBundle({ entry, node, version: '1.2.3', license: join(root, 'missing-license') }, join(temporary(), 'release')),
     ).rejects.toThrow()
   })
+  it('assembles a home’s release with no agent’s own program, and the sandbox’s tools where it carries the worker', async () => {
+    const root = temporary()
+    const entry = join(root, 'entry.js')
+    const node = join(root, 'node/bin/node')
+    mkdirSync(join(root, 'node/bin'), { recursive: true })
+    writeFileSync(entry, 'host code')
+    writeFileSync(join(root, 'LICENSE'), 'Host license')
+    writeFileSync(join(root, 'THIRD_PARTY_NOTICES.txt'), 'Bundled notices')
+    writeFileSync(node, 'node binary')
+    writeFileSync(join(root, 'node/LICENSE'), 'Node license')
+    const system = `${process.platform}-${process.arch}`
+    pkg(root, '@agentclientprotocol/claude-agent-acp', { '@anthropic-ai/claude-agent-sdk': '1' })
+    pkg(root, '@agentclientprotocol/codex-acp', { '@openai/codex': '1' })
+    pkg(root, '@anthropic-ai/claude-agent-sdk', { [`@anthropic-ai/claude-agent-sdk-${system}`]: '1' })
+    pkg(root, '@openai/codex', { [`@openai/codex-${system}`]: '1' })
+    writeFileSync(join(pkg(root, `@anthropic-ai/claude-agent-sdk-${system}`), 'claude'), 'Claude Code')
+    const codex = join(pkg(root, `@openai/codex-${system}`), 'vendor', 'target')
+    for (const folder of ['bin', 'codex-path', 'codex-resources']) mkdirSync(join(codex, folder), { recursive: true })
+    writeFileSync(join(codex, 'bin', 'codex'), 'Codex')
+    writeFileSync(join(codex, 'codex-resources', 'bwrap'), 'bubblewrap')
+    writeFileSync(join(codex, 'codex-path', 'rg'), 'ripgrep')
+    pkg(root, 'sharp')
+    writeFileSync(join(root, 'althar-worker'), 'worker binary')
+    for (const part of ['bin', 'licenses']) mkdirSync(join(root, 'tools', part), { recursive: true })
+    writeFileSync(join(root, 'tools/bin/socat'), 'socat')
+    const home = join(temporary(), 'release')
+    await assembleBundle({ entry, node, version: '1.2.3' }, home)
+    // The adapters and their SDKs, and no program of an agent's own: each comes on first use.
+    for (const kept of ['@agentclientprotocol/claude-agent-acp', '@anthropic-ai/claude-agent-sdk', '@openai/codex', 'sharp'])
+      expect(existsSync(join(home, 'node_modules', kept)), kept).toBe(true)
+    for (const gone of [`@anthropic-ai/claude-agent-sdk-${system}`, `@openai/codex-${system}`])
+      expect(existsSync(join(home, 'node_modules', gone)), gone).toBe(false)
+    expect(existsSync(join(home, 'tools'))).toBe(false)
+    // Carrying the worker, its sandbox's bubblewrap and ripgrep are the release's own.
+    const withWorker = join(temporary(), 'release')
+    await assembleBundle(
+      { entry, node, version: '1.2.3', worker: join(root, 'althar-worker'), workerTools: join(root, 'tools') },
+      withWorker,
+    )
+    expect(readFileSync(join(withWorker, 'tools/bin/bwrap'), 'utf8')).toBe('bubblewrap')
+    expect(readFileSync(join(withWorker, 'tools/bin/rg'), 'utf8')).toBe('ripgrep')
+    expect(existsSync(join(withWorker, 'node_modules', `@openai/codex-${system}`))).toBe(false)
+  })
   it('assembles a worker’s own release with its native program, its commands, its agents and its tools, and none of the home', async () => {
     const root = temporary()
     const entry = join(root, 'entry.js')
