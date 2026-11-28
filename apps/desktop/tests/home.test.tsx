@@ -329,7 +329,7 @@ describe('the home', () => {
     expect(client.mergeWhenGreen).toHaveBeenCalledWith('r25', 'https://github.com/meridian/api/pull/12', 'abc123', expect.any(String))
     expect(await line('Checks still running').findByText('Merges after checks')).toBeTruthy()
     await userEvent.click(line('Checks still running').getByRole('button', { name: 'Don’t merge' }))
-    expect(client.leaveMergeLine).toHaveBeenCalledWith('r25', 'https://github.com/meridian/api/pull/12')
+    expect(client.leaveMergeLine).toHaveBeenCalledWith('r25', 'https://github.com/meridian/api/pull/12', expect.any(String))
     expect(await line('Checks still running').findByRole('button', { name: 'Merge when checks pass: #25' })).toBeTruthy()
     // Waiting when its checks turn green: still waiting, with Don't merge, not Merge in its place.
     expect(line('Waiting, now green').getByText('Merges after checks')).toBeTruthy()

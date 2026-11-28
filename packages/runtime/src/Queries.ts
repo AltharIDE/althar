@@ -2188,11 +2188,16 @@ export class Queries extends Context.Service<
           const last =
             said === undefined ? undefined : (JSON.parse(said.payload) as { press?: string | null; state?: string; reason?: string })
           const press = last?.press == null ? {} : { press: last.press }
+          // Waiting, said to the person's latest press of it, which may have joined an errand kept before (its own or an agent's).
           if (open !== undefined)
             return {
               state: 'waiting' as const,
               ...(open.head === null ? {} : { head: open.head }),
-              ...(open.messageId.startsWith(PRESSED) ? { press: open.messageId.slice(PRESSED.length) } : {}),
+              ...(last?.state === 'asked' && last.press != null
+                ? { press: last.press }
+                : open.messageId.startsWith(PRESSED)
+                  ? { press: open.messageId.slice(PRESSED.length) }
+                  : {}),
             }
           // A press on its way to the line, kept only so long: one a restart cut short is no longer said to wait.
           if (last?.state === 'asked' && (yield* Clock.currentTimeMillis) - Date.parse(said?.observedAt ?? '') < PRESS_ON_ITS_WAY)

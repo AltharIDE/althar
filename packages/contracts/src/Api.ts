@@ -6875,7 +6875,16 @@ const WorkApi = RpcGroup.make(
     Schema.Void,
   ),
   /** Don't merge: takes the pull request at `url` out of the merge line, and out of its host's queue, train or auto-merge. */
-  command('LeaveMergeLine', { taskId: Schema.String, url: Schema.String }, Schema.Void),
+  command(
+    'LeaveMergeLine',
+    {
+      taskId: Schema.String,
+      url: Schema.String,
+      /** Its own id, which `whenGreen.press` names where the host didn't let go of it. */
+      press: Schema.String,
+    },
+    Schema.Void,
+  ),
   /**
    * Merges a task without a pull request into each of its repositories'
    * default branches on this Mac, up to the commit the person saw in each:

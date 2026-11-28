@@ -799,7 +799,7 @@ export interface Client {
   /** Merge when checks pass: the pull request at `url`, at the head the person saw, merges once its checks pass. */
   readonly mergeWhenGreen: (taskId: string, url: string, head: string, press: string) => Promise<void>
   /** Don't merge: takes one waiting to merge when its checks pass out again. */
-  readonly leaveMergeLine: (taskId: string, url: string) => Promise<void>
+  readonly leaveMergeLine: (taskId: string, url: string, press: string) => Promise<void>
   /** Merges a task without a pull request into its repositories' default branches on this Mac, up to the commit the person saw in each. */
   readonly mergeHere: (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) => Promise<void>
   /** Pushes the default branches the task merged into here to their remotes, with the person's own git sign-in. */
@@ -1474,7 +1474,7 @@ export const connect = async (
         }),
       ),
     mergeWhenGreen: (taskId, url, head, press) => command((commandId) => api.MergeWhenGreen({ commandId, taskId, url, head, press })),
-    leaveMergeLine: (taskId, url) => command((commandId) => api.LeaveMergeLine({ commandId, taskId, url })),
+    leaveMergeLine: (taskId, url, press) => command((commandId) => api.LeaveMergeLine({ commandId, taskId, url, press })),
     mergeHere: (taskId, heads) => command((commandId) => api.MergeHere({ commandId, taskId, heads })),
     pushHere: (taskId) => command((commandId) => api.PushHere({ commandId, taskId })),
     pushBranch: (taskId, heads) => command((commandId) => api.PushBranch({ commandId, taskId, heads })),

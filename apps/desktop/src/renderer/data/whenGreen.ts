@@ -75,7 +75,7 @@ export const useWhenGreen = (): WhenGreen => {
     mutationKey: KEY,
     mutationFn: (asked: Asked) =>
       asked.head === undefined
-        ? client.leaveMergeLine(asked.taskId, asked.url)
+        ? client.leaveMergeLine(asked.taskId, asked.url, asked.press ?? '')
         : client.mergeWhenGreen(asked.taskId, asked.url, asked.head, asked.press ?? ''),
   })
   const presses = useMutationState({ filters: { mutationKey: KEY }, select: pressedOf })
@@ -100,7 +100,7 @@ export const useWhenGreen = (): WhenGreen => {
       if (one.status === 'error') return read(change)
       // Gone through: as pressed until a read answers it (this very press, waiting or sent back already; for Don't merge, no
       // longer waiting), or a while has gone by. An older read, of before the press, never takes it back.
-      if (one.leave ? !read(change) : one.press !== undefined && change.whenGreen?.press === one.press) agreed.add(keyOf(one))
+      if ((one.leave && !read(change)) || (one.press !== undefined && change.whenGreen?.press === one.press)) agreed.add(keyOf(one))
       if (agreed.has(keyOf(one)) || one.at + HOLDS_FOR <= now) return read(change)
       return !one.leave
     },
@@ -111,15 +111,18 @@ export const useWhenGreen = (): WhenGreen => {
       if (change == null || change.state !== 'open' || waiting(change)) return null
       const one = last.get(change.url)
       if (one?.status === 'error') return messageOf(one.error)
-      if (one?.status === 'pending' || (one?.status === 'success' && one.leave)) return null
-      return change.whenGreen?.state === 'sent_back' ? (change.whenGreen.reason ?? null) : null
+      if (one?.status === 'pending') return null
+      const said = change.whenGreen?.state === 'sent_back' ? (change.whenGreen.reason ?? null) : null
+      // After Don't merge, only what is said to it: the host didn't let go, and it may still merge. An older reason is past.
+      if (one?.status === 'success' && one.leave) return one.press !== undefined && change.whenGreen?.press === one.press ? said : null
+      return said
     },
     [last, waiting],
   )
   return useMemo(
     () => ({
       press: (taskId, url, head) => mutate({ taskId, url, head, press: crypto.randomUUID() }),
-      leave: (taskId, url) => mutate({ taskId, url }),
+      leave: (taskId, url) => mutate({ taskId, url, press: crypto.randomUUID() }),
       waiting,
       back,
     }),

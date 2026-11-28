@@ -2771,7 +2771,7 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      LeaveMergeLine: ({ commandId, taskId, url }) =>
+      LeaveMergeLine: ({ commandId, taskId, url, press }) =>
         once(
           commandId,
           api(
@@ -2779,7 +2779,7 @@ export const handlers = apiLayer(
               const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
               if (task === undefined) return
               yield* mergeLine
-                .unpress({ projectId: task.projectId, taskId, url })
+                .unpress({ projectId: task.projectId, taskId, url, pressId: press })
                 .pipe(Effect.mapError((refusal) => new ChangeRefused({ message: refusal.message })))
             }),
           ),
