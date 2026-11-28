@@ -1,15 +1,16 @@
 # Pinned merge line lab
 
-The merge line ("Merging #1232 ✓ #1168 ●") held above the composer, so it stays in view while the thread scrolls on. Built from the kit's real TaskFace, Thread, Composer, Behind, Goal, MergingLine and MergeLine; nothing behind it.
+The merge line ("Merging ✓ #1232 ● #1168 ○ #1270") held above the composer as a pill, beside what else floats there, so it stays in view while the thread scrolls on. Opened, it grows into a card of its pull requests. Built from the kit's real TaskFace, Thread, Composer, Behind, Goal, MergingLine and MergeLine; nothing behind it.
 
 Run it from Althar's Run list ("Pinned merge line lab"), or from `apps/desktop`:
 `../../node_modules/.bin/vp dev --config lab/pinned-merge/vite.config.ts`, then open http://localhost:6143/.
 
-- **0 Today**: the line at the thread's foot, scrolled away with it.
-- **A A chip on the edge**: a chip beside the run chip; opened, it grows into the line's card; what came back says why on the composer's notice line.
-- **B A bar on the edge**: the line itself in a bar the composer's width, opening in place like the goal bar.
-- **C The line sticks**: the line stays at the thread's foot and sticks above the composer once the thread scrolls away.
+- **Pill** (A): the pill on the composer's edge. Pressed, it morphs into a card the composer's width: its surface reshapes from the pill into the card, each pull request's mark and number travel up into their row, and the titles, where each stands and why one came back fade in once they've landed. Its head, or Escape, folds it back the same way; a press mid-way turns it back from where it is (morph.ts). What came back says why on the composer's notice line while it's folded.
+- **Pill, first pass** (F): the chip as first shown, swapped for the line's card when opened.
+- **Today** (0): the line at the thread's foot, scrolled away with it.
 
-Keys: A/B/C/0 direction, 1–4 moment (one, several, sent back, all merged), T coordinator/task, O opened, U scrolled up, N narrow, D dark, R replays how it leaves. The address keeps what is chosen.
+The bar and sticky-line directions of the first round are in this folder's history.
 
-`node shoot.mjs` (with `SHOTS` as JSON `[[name, query, width?, height?, waitMs?]]`) takes shots into `shots/`, git-ignored.
+Keys: A/F/0 what's shown, 1–4 the moment (one, several, sent back, all merged), T coordinator/task, O opened, U scrolled up, N narrow, D dark, R replays how it leaves. The address keeps what is chosen.
+
+`node shoot.mjs` (with `SHOTS` as JSON `[[name, query, width?, height?, waitMs?]]`) takes shots into `shots/`, git-ignored; `node record.mjs <name> <query>` records the pill opening, folding and turning back mid-way as a video there.

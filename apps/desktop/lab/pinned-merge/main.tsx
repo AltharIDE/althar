@@ -3,7 +3,7 @@ import '@fontsource-variable/jetbrains-mono'
 import '@althar/ui/styles.css'
 import '../../src/renderer/app.css'
 
-import { type ReactNode, StrictMode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Component, createRef, type ReactNode, StrictMode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import {
@@ -15,6 +15,8 @@ import {
   Markdown,
   MergeLine,
   MergingLine,
+  mergingLineText,
+  MOTION,
   type MergingRow,
   type ModelInfo,
   type RunningProcess,
@@ -29,20 +31,20 @@ import {
 import { coordinatorSigned } from '../../src/renderer/shared/signed'
 import { foldedOf, type Moment, rowsOf, type Where } from './data'
 import s from './lab.module.css'
+import { play, type Shot, shoot } from './morph'
 
 /*
- * The pinned merge lab (README.md): the merge line held above the composer, so
- * it stays in view while the thread scrolls on, in three directions. The bar
- * along the bottom, or its keys, swaps them in place; the address keeps what
- * is chosen, for shots.
+ * The pinned merge lab (README.md): the merge line held above the composer as
+ * a pill, so it stays in view while the thread scrolls on, opening into a card
+ * of its pull requests. The bar along the bottom, or its keys, swaps what is
+ * shown in place; the address keeps what is chosen, for shots.
  */
 
-type Direction = 'now' | 'a' | 'b' | 'c'
+type Direction = 'now' | 'first' | 'pill'
 const DIRECTIONS: ReadonlyArray<{ value: Direction; label: string; kbd: string }> = [
   { value: 'now', label: 'Today', kbd: '0' },
-  { value: 'a', label: 'A · A chip on the edge', kbd: 'A' },
-  { value: 'b', label: 'B · A bar on the edge', kbd: 'B' },
-  { value: 'c', label: 'C · The line sticks', kbd: 'C' },
+  { value: 'first', label: 'Pill, first pass', kbd: 'F' },
+  { value: 'pill', label: 'Pill', kbd: 'A' },
 ]
 const MOMENTS: ReadonlyArray<{ value: Moment; label: string; kbd: string }> = [
   { value: 'one', label: 'One', kbd: '1' },
@@ -69,7 +71,7 @@ const params = new URLSearchParams(location.search)
 const pick = <T extends string>(value: string | null, from: ReadonlyArray<{ value: T }>, fallback: T): T =>
   from.some((one) => one.value === value) ? (value as T) : fallback
 const first: Chosen = {
-  d: pick(params.get('d'), DIRECTIONS, 'a'),
+  d: pick(params.get('d'), DIRECTIONS, 'pill'),
   m: pick(params.get('m'), MOMENTS, 'several'),
   w: pick(params.get('w'), WHERES, 'coordinator'),
   open: params.get('open') === '1',
@@ -171,10 +173,18 @@ function TaskThread({ moment, folded, foot }: { moment: Moment; folded: boolean;
   )
 }
 
-/* ——— A: a chip beside what floats there, opening to the line's rows ——— */
+/* ——— The pill's marks: a check for what merged, a live dot while it runs, a ring for what waits, a cross for what came back ——— */
 
 const tone = (row: MergingRow) =>
-  row.state === 'merged' ? s.merged : row.state === 'sent_back' || row.state === 'conflict' ? s.back : undefined
+  row.state === 'merged'
+    ? s.merged
+    : row.state === 'sent_back' || row.state === 'conflict'
+      ? s.back
+      : row.state === 'checks' || row.state === 'merging'
+        ? s.live
+        : undefined
+const later = (row: MergingRow) => row.url === null || row.once !== undefined
+const said = (row: MergingRow) => (later(row) && row.state === 'waiting' ? mergingLineText.later : mergingLineText.state[row.state])
 
 function Mark({ row }: { row: MergingRow }) {
   switch (row.state) {
@@ -187,15 +197,17 @@ function Mark({ row }: { row: MergingRow }) {
     case 'conflict':
       return <Icon name="close" size={11} />
     default:
-      return <span className={row.url === null ? s.ringFaint : s.ring} aria-hidden="true" />
+      return <span className={later(row) ? s.ringFaint : s.ring} aria-hidden="true" />
   }
 }
 
-function MergeChip({ rows, open, onOpen }: { rows: MergingRow[]; open: boolean; onOpen: (open: boolean) => void }) {
+/* ——— First pass: the chip as first shown, swapped for the line's card when opened ——— */
+
+function FirstChip({ rows, open, onOpen }: { rows: MergingRow[]; open: boolean; onOpen: (open: boolean) => void }) {
   if (open)
     return (
       <div
-        className={s.card}
+        className={s.firstCard}
         // Its head folds it back to the chip.
         onClickCapture={(event) => {
           if ((event.target as HTMLElement).closest('button[aria-controls]') !== null) {
@@ -211,7 +223,7 @@ function MergeChip({ rows, open, onOpen }: { rows: MergingRow[]; open: boolean; 
     <button type="button" className={s.chip} aria-expanded={false} onClick={() => onOpen(true)}>
       <span className={s.chipName}>Merging</span>
       {rows.map((row) => (
-        <span key={row.key} className={[s.token, tone(row), row.url === null ? s.later : ''].join(' ')} title={row.label}>
+        <span key={row.key} className={[s.token, tone(row), later(row) ? s.later : ''].join(' ')} title={row.label}>
           <span className={s.mark}>
             <Mark row={row} />
           </span>
@@ -222,54 +234,179 @@ function MergeChip({ rows, open, onOpen }: { rows: MergingRow[]; open: boolean; 
   )
 }
 
-/** For A: what came back says why on the composer's edge, nearest the field. */
+/* ——— The pill: one line on the composer's edge, beside what else floats there; opened, it grows into a card of its pull requests ——— */
+
+/**
+ * Reads where everything on the composer's edge stands just before `step`
+ * changes, and glides it from there once it has (morph.ts). A class, as only a
+ * class hears of a change before the page is: getSnapshotBeforeUpdate.
+ */
+class Morph extends Component<{ step: string; children: ReactNode }> {
+  private ref = createRef<HTMLDivElement>()
+  private scope = () => this.ref.current?.closest<HTMLElement>('[class*="Composer-module__floats"]') ?? null
+  override getSnapshotBeforeUpdate(was: Readonly<{ step: string }>): Shot | null {
+    return was.step === this.props.step ? null : shoot(this.scope())
+  }
+  override componentDidUpdate(_was: unknown, _state: unknown, shot: Shot | null) {
+    if (shot !== null) play(shot, this.scope())
+  }
+  override render() {
+    return (
+      <div ref={this.ref} className={s.contents}>
+        {this.props.children}
+      </div>
+    )
+  }
+}
+
+function Pill({ rows, open, onOpen, leaving }: { rows: MergingRow[]; open: boolean; onOpen: (open: boolean) => void; leaving: boolean }) {
+  const pill = useRef<HTMLButtonElement>(null)
+  const head = useRef<HTMLButtonElement>(null)
+  const card = useRef<HTMLDivElement>(null)
+  // Focus follows what was pressed into what it became.
+  const handed = useRef(false)
+  const toggle = (next: boolean) => {
+    handed.current = true
+    onOpen(next)
+  }
+  useEffect(() => {
+    if (!handed.current) return
+    handed.current = false
+    ;(open ? head : pill).current?.focus({ preventScroll: true })
+  }, [open])
+  // Escape folds it back, from anywhere but a field.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      if (event.target instanceof HTMLElement && event.target.closest('textarea, input, [contenteditable]')) return
+      event.preventDefault()
+      toggle(false)
+    }
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  })
+  // It arrives from --scale-pop with a fade, as an overlay grows from what opened it; it goes the same way, quicker.
+  useLayoutEffect(() => {
+    const el = open ? card.current : pill.current
+    el?.animate(
+      [
+        { opacity: 0, transform: 'scale(0.96)' },
+        { opacity: 1, transform: 'none' },
+      ],
+      MOTION.enter,
+    )
+    // Only as it first shows.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  if (!open)
+    return (
+      <button
+        ref={pill}
+        type="button"
+        className={[s.pill, leaving ? s.going : ''].join(' ')}
+        aria-expanded={false}
+        aria-label={`Merging: ${rows.map((row) => `${row.label} ${said(row).toLowerCase()}`).join(', ')}`}
+        onClick={() => toggle(true)}
+        data-m-ghost=""
+      >
+        <span className={s.surface} data-m-box="merge" />
+        <span className={s.pillName} data-m="name">
+          Merging
+        </span>
+        {rows.map((row) => (
+          <span key={row.key} className={[s.token, tone(row), later(row) ? s.later : ''].join(' ')}>
+            <span className={s.mark} data-m={`mark-${row.key}`} data-m-at="center">
+              <Mark row={row} />
+            </span>
+            <span className={s.tokenLabel} data-m={`label-${row.key}`}>
+              {row.label}
+            </span>
+          </span>
+        ))}
+      </button>
+    )
+
+  return (
+    <section ref={card} className={[s.card, leaving ? s.going : ''].join(' ')} aria-label="Merging" data-m-ghost="">
+      <span className={s.surface} data-m-box="merge" />
+      <button ref={head} type="button" className={s.head} aria-expanded onClick={() => toggle(false)}>
+        <span className={s.headName} data-m="name">
+          Merging
+        </span>
+        <span className={s.fold} data-m-in="">
+          <Icon name="chevronD" size={12} />
+        </span>
+      </button>
+      <ol className={s.rows}>
+        {rows.map((row) => {
+          const note = row.state === 'sent_back' || row.state === 'conflict' ? row.reason : row.once
+          const words = (
+            <>
+              <span className={s.rowMark} data-m={`mark-${row.key}`} data-m-at="center">
+                <Mark row={row} />
+              </span>
+              <span className={s.rowName}>
+                <span className={[s.number, later(row) ? s.unnumbered : ''].join(' ')} data-m={`label-${row.key}`}>
+                  {row.label}
+                </span>
+                {row.title !== '' && (
+                  <span className={s.title} data-m-in="">
+                    {row.title}
+                  </span>
+                )}
+              </span>
+              <span className={s.state} data-m-in="">
+                {said(row)}
+              </span>
+              {note !== undefined && note !== '' && (
+                <span className={s.note} data-m-in="">
+                  {`${note.charAt(0).toUpperCase()}${note.slice(1)}`}
+                </span>
+              )}
+            </>
+          )
+          return (
+            <li key={row.key} className={tone(row)}>
+              {row.url === null ? (
+                <div className={s.row}>{words}</div>
+              ) : (
+                <a
+                  className={[s.row, s.rowLink].join(' ')}
+                  href={row.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={`${row.label} ${row.title}`}
+                >
+                  {words}
+                </a>
+              )}
+            </li>
+          )
+        })}
+      </ol>
+    </section>
+  )
+}
+
+/** What came back says why on the composer's edge, nearest the field, while the pill is folded. */
 const backNotice = (rows: MergingRow[]) => {
   const back = rows.find((row) => row.state === 'sent_back' && row.reason !== undefined)
   if (back === undefined) return null
   return (
-    <div className={s.backNotice}>
+    <div className={s.backNotice} data-m-in="" data-m-ghost="parent">
       <strong>{back.label} sent back.</strong> {back.reason}
     </div>
   )
 }
 
-/* ——— B: a bar the composer's width, opening in place ——— */
-
-function MergeBar({ rows, open }: { rows: MergingRow[]; open: boolean }) {
-  return (
-    <div className={s.bar}>
-      <MergingLine key={String(open)} rows={rows} open={open} />
-    </div>
-  )
-}
-
-/* ——— C: the line stays at the thread's foot, and sticks above the composer once the thread scrolls away ——— */
-
-function StickyLine({ rows, open }: { rows: MergingRow[]; open: boolean }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [stuck, setStuck] = useState(false)
-  useEffect(() => {
-    const el = ref.current
-    const scroller = el?.closest<HTMLElement>('[data-floats-host]')?.querySelector<HTMLElement>('[class*="TaskFace-module__scroll__"]')
-    if (el == null || scroller == null) return
-    const check = () => setStuck(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 60)
-    check()
-    scroller.addEventListener('scroll', check, { passive: true })
-    return () => scroller.removeEventListener('scroll', check)
-  }, [])
-  return (
-    <div ref={ref} className={[s.sticky, stuck ? s.stuck : ''].join(' ')}>
-      <MergingLine key={String(open)} rows={rows} open={open} />
-    </div>
-  )
-}
-
-/* ——— Leaving: once all are in, the pinned line shows them merged for a moment, then goes; the thread keeps the folded line where it was asked ——— */
+/* ——— Leaving: once all are in, the pill shows them merged for a moment, then goes; the thread keeps the folded line where it was asked ——— */
 
 function useLeaving(moment: Moment, replay: number) {
   const [phase, setPhase] = useState<'here' | 'leaving' | 'gone'>('here')
+  // The face is drawn afresh for each moment and replay, so it starts here.
   useEffect(() => {
-    setPhase('here')
     if (moment !== 'merged') return
     const leave = setTimeout(() => setPhase('leaving'), 1800)
     const gone = setTimeout(() => setPhase('gone'), 1800 + 200)
@@ -288,17 +425,10 @@ function Face({ c, replay, setOpen }: { c: Chosen; replay: number; setOpen: (ope
   const rows = rowsOf(c.w, c.m).slice(0, c.m === 'one' ? 1 : undefined)
   const phase = useLeaving(c.m, replay)
   const shown = phase !== 'gone'
-  const leaving = phase === 'leaving' ? s.leaving : ''
   const folded = c.m === 'merged' && (c.d === 'now' || !shown)
-  const pinned = (node: ReactNode) => shown && <div className={[s.pin, leaving].join(' ')}>{node}</div>
 
   // Today: the line at the thread's foot, scrolled away with it; gone once all are in.
-  const foot =
-    c.d === 'now'
-      ? c.m !== 'merged' && <MergingLine key={String(c.open)} rows={rows} open={c.open} />
-      : c.d === 'c'
-        ? pinned(<StickyLine key={`${c.m}-${replay}`} rows={rows} open={c.open} />)
-        : null
+  const foot = c.d === 'now' && c.m !== 'merged' && <MergingLine key={String(c.open)} rows={rows} open={c.open} />
 
   const goal =
     c.w === 'task' ? (
@@ -321,27 +451,23 @@ function Face({ c, replay, setOpen }: { c: Chosen; replay: number; setOpen: (ope
         onClear={noop}
       />
     ) : null
-  const behind = <Behind processes={[SITE_RUN]} onStop={noop} onOpenUrl={noop} />
-  const above =
-    c.d === 'a' ? (
-      <>
-        {goal}
-        {behind}
-        {pinned(<MergeChip rows={rows} open={c.open} onOpen={setOpen} />)}
-      </>
-    ) : c.d === 'b' ? (
-      <>
-        {behind}
-        {goal}
-        {pinned(<MergeBar rows={rows} open={c.open} />)}
-      </>
+  // The run chip glides too, where what opens or folds moves it.
+  const behind = (
+    <div className={s.behind} data-m="behind">
+      <Behind processes={[SITE_RUN]} onStop={noop} onOpenUrl={noop} />
+    </div>
+  )
+  const pinned =
+    !shown || c.d === 'now' ? null : c.d === 'first' ? (
+      <div className={[s.firstPin, phase === 'leaving' ? s.firstGoing : ''].join(' ')}>
+        <FirstChip rows={rows} open={c.open} onOpen={setOpen} />
+      </div>
     ) : (
-      <>
-        {goal}
-        {behind}
-      </>
+      <Morph step={String(c.open)}>
+        <Pill rows={rows} open={c.open} onOpen={setOpen} leaving={phase === 'leaving'} />
+      </Morph>
     )
-  const notice = c.d === 'a' && shown && !c.open ? backNotice(rows) : null
+  const notice = c.d !== 'now' && shown && !c.open ? backNotice(rows) : null
 
   return (
     <TaskFace
@@ -352,7 +478,13 @@ function Face({ c, replay, setOpen }: { c: Chosen; replay: number; setOpen: (ope
           onChange={setValue}
           onSubmit={() => setValue('')}
           placeholder={c.w === 'task' ? 'Tell the lead' : 'Ask the coordinator'}
-          above={above}
+          above={
+            <>
+              {goal}
+              {behind}
+              {pinned}
+            </>
+          }
           notice={notice}
         />
       }

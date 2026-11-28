@@ -66,26 +66,243 @@
   color: var(--t-4);
 }
 
-/* ——— what is pinned, and how it leaves ——— */
-.pin {
+/* ——— the pill and its card ——— */
+.contents {
   display: contents;
 }
-.pin > * {
+.behind {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* what is drawn behind the pill and the card: one surface, which reshapes from the one into the other (morph.ts) */
+.surface {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  transform-origin: 0 0;
+  background: var(--paper);
+  pointer-events: none;
+}
+
+/* folded: a pill as the run chip beside it */
+.pill {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 11px 0 10px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--t-2);
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.pill > .surface {
+  border-radius: 13px;
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  transition: box-shadow var(--fast) var(--ease);
+}
+.pill:hover > .surface {
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    var(--lift-card);
+}
+.pill:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: 2px;
+  border-radius: 13px;
+}
+.pillName {
+  font-weight: 550;
+  color: var(--t-2);
+}
+.pill > *,
+.token > * {
+  flex: none;
+}
+
+/* opened: a card the composer's width, a row for each */
+.card {
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0 4px 4px;
+  font-size: 12.5px;
+  pointer-events: auto;
+}
+.card > .surface {
+  border-radius: 12px;
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-pop);
+}
+.head {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 34px;
+  padding: 0 8px 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--t-2);
+  cursor: pointer;
+}
+.head:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: -2px;
+}
+.headName {
+  font-weight: 550;
+}
+.fold {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border-radius: var(--r);
+  color: var(--t-4);
+  transition:
+    color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+.head:hover .fold {
+  background: var(--line);
+  color: var(--t-2);
+}
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* a row: its mark, its number and title, where it stands in a fixed measure; why, under it, where it came back or waits */
+.row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  column-gap: 10px;
+  align-items: center;
+  min-height: 30px;
+  box-sizing: border-box;
+  padding: 5px 8px 5px 8px;
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+.rowLink {
+  transition: background var(--fast) var(--ease);
+}
+.rowLink:hover {
+  background: var(--hover-paper);
+}
+.rowLink:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: -2px;
+}
+.rowMark {
+  display: grid;
+  place-items: center;
+  height: 18px;
+  color: var(--t-3);
+}
+.rowName {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+.number {
+  flex: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-1);
+}
+.number.unnumbered {
+  font-weight: 550;
+  color: var(--t-2);
+}
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-2);
+}
+.state {
+  min-width: 84px;
+  font-size: 11.5px;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--t-3);
+}
+.note {
+  grid-column: 2 / -1;
+  margin-top: 1px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+.merged :is(.number, .title) {
+  color: var(--t-3);
+}
+.merged :is(.rowMark, .state) {
+  color: var(--ok-ink);
+}
+.live .state {
+  color: var(--live);
+}
+.back :is(.rowMark, .state, .note) {
+  color: var(--danger);
+}
+
+/* how it goes, once all are in: back to --scale-pop as it fades, quicker than it came */
+.going {
+  opacity: 0;
+  scale: 0.96;
+  transition:
+    opacity var(--exit) var(--ease-out),
+    scale var(--exit) var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .going {
+    scale: none;
+  }
+}
+
+/* ——— first pass: the chip as first shown ——— */
+.firstPin {
+  display: contents;
+}
+.firstPin > * {
   transition:
     opacity var(--exit) var(--ease-out),
     translate var(--exit) var(--ease-out);
 }
-.leaving > * {
+.firstGoing > * {
   opacity: 0;
   translate: 0 6px;
 }
-@media (prefers-reduced-motion: reduce) {
-  .leaving > * {
-    translate: none;
-  }
-}
-
-/* ——— A: a chip, as the run chip beside it ——— */
 .chip {
   display: inline-flex;
   align-items: center;
@@ -107,18 +324,24 @@
   white-space: nowrap;
   cursor: pointer;
   pointer-events: auto;
-  transition: box-shadow var(--fast) var(--ease);
-}
-.chip:hover {
-  box-shadow:
-    inset 0 0 0 1px var(--line-3),
-    var(--lift-card);
-  color: var(--t-1);
 }
 .chipName {
   font-weight: 550;
   color: var(--t-2);
 }
+.firstCard {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 3px 12px 5px;
+  border-radius: var(--r);
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  pointer-events: auto;
+}
+
+/* ——— the pill's tokens and marks, shared ——— */
 .token {
   display: inline-flex;
   align-items: center;
@@ -136,12 +359,13 @@
   display: grid;
   place-items: center;
   width: 11px;
+  height: 14px;
   color: var(--t-3);
 }
-.merged .mark {
+.token.merged .mark {
   color: var(--ok-ink);
 }
-.back .mark {
+.token.back .mark {
   color: var(--danger);
 }
 .ring,
@@ -161,41 +385,7 @@
   font-weight: 600;
 }
 
-/* A, opened, and B: the line in a card the composer's width, as the goal bar */
-.card,
-.bar {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 3px 12px 5px;
-  border-radius: var(--r);
-  background: var(--paper);
-  box-shadow:
-    inset 0 0 0 1px var(--line-2),
-    var(--lift-card);
-  pointer-events: auto;
-}
-
-/* ——— C: the line at the thread's foot, held above the composer's floats once the thread scrolls away ——— */
-.sticky {
-  position: sticky;
-  /* over the jump pill, which rests 12px over the floats and is 28px tall */
-  bottom: calc(var(--composer-floats, 0px) + 48px);
-  z-index: 1;
-  margin: 0 -12px;
-  padding: 3px 12px 5px;
-  border-radius: var(--r);
-  transition:
-    background var(--fast) var(--ease),
-    box-shadow var(--fast) var(--ease);
-}
-.stuck {
-  background: var(--paper);
-  box-shadow:
-    inset 0 0 0 1px var(--line-2),
-    var(--lift-card);
-}
-
-/* A, narrow: what is in, and what isn't in line yet, keep only their marks */
+/* narrow: what is in, and what isn't in line yet, keep only their marks */
 @container composer-edge (max-width: 480px) {
   .token:is(.merged, .later) .tokenLabel {
     display: none;
