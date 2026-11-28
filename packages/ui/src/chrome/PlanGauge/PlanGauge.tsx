@@ -38,8 +38,8 @@ export type PlanGaugeProps = RootProps<
     open?: boolean
     defaultOpen?: boolean
     onOpenChange?: (open: boolean) => void
-    /** Puts right the sign-in that stops an agent, by its id (`PlanPeek`). */
-    onSignIn?: (agentId: string) => void
+    /** Puts right a sign-in: the one that stops an agent, by its id, or one account's, by the agent's and the account's (`PlanPeek`). */
+    onSignIn?: (agentId: string, accountId?: string) => void
     text?: Partial<PlanGaugeText>
   }
 >
