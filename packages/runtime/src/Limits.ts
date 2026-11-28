@@ -248,6 +248,15 @@ export const routeWords = (input: {
   return `${off}, and no other agent with room offers it, so ${whoWords(input.to)}, a different model, takes the work over.`
 }
 
+/**
+ * What a thread says where the agent the work was given stopped listing its model, and still didn't when asked again a
+ * while: it carries on with the same model through another agent.
+ */
+export const goneWords = (input: {
+  readonly from: { readonly agent: string; readonly model: string | null }
+  readonly to: { readonly agent: string }
+}): string => `${input.from.agent} stopped listing ${input.from.model ?? 'its model'}: it carries on through ${input.to.agent}.`
+
 /** Words that open a sentence. */
 export const capitalized = (words: string) => `${words.charAt(0).toUpperCase()}${words.slice(1)}`
 
@@ -378,6 +387,10 @@ export class Limits extends Context.Service<
       readonly projectId: string
       /** The other step's, where the work is a review of it: the review never goes to it (`standing`'s `reviewing`). */
       readonly reviewing?: ModelChoice
+      /** The agent stopped listing the model: it goes elsewhere as one turned off there does. */
+      readonly gone?: boolean
+      /** Other agents it doesn't go to, as ones that stopped listing it too. */
+      readonly besides?: ReadonlyArray<string>
     }): Effect.Effect<
       { readonly kind: 'here' } | { readonly kind: 'elsewhere'; readonly to: Takeover } | { readonly kind: 'none' },
       Failure
@@ -1036,15 +1049,19 @@ export class Limits extends Context.Service<
           Effect.gen(function* () {
             if (input.model === null) return { kind: 'here' as const }
             // Read as it is kept, not from the agent's models: asking the agent isn't started for it, and a list a moment
-            // stale (as Codex's can be) never moves a lead that is fine where it is.
-            const [off] = yield* sql<{ model: string }>`
-              SELECT model FROM model_blocks WHERE agent_id = ${input.agentId} AND model = ${input.model}`
+            // stale (as Codex's can be) never moves a lead that is fine where it is. One its agent stopped listing, asked
+            // again a while, goes as one turned off does.
+            const [off] =
+              input.gone === true
+                ? [{ model: input.model }]
+                : yield* sql<{ model: string }>`
+                    SELECT model FROM model_blocks WHERE agent_id = ${input.agentId} AND model = ${input.model}`
             if (off === undefined) return { kind: 'here' as const }
             // Turned off there: the same model through another agent with room, never another model unasked.
             const same = (yield* ranked({
               projectId: input.projectId,
               from: { agentId: input.agentId, model: input.model },
-              besides: [input.agentId],
+              besides: [input.agentId, ...(input.besides ?? [])],
               ...(input.reviewing === undefined ? {} : { other: input.reviewing, reviewing: true }),
             })).find((one) => one.sameModel)
             if (same === undefined) return { kind: 'none' as const }

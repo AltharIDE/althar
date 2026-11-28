@@ -152,6 +152,10 @@ export class SessionFailed extends Schema.TaggedError<SessionFailed>()('SessionF
   reason: Schema.String,
   /** What went wrong, in a sentence a person reads. */
   summary: Schema.String,
+  /** The model it was asked for, where the agent stopped listing it and still didn't after being asked again a while. */
+  modelGone: Schema.optional(Schema.String),
+  /** The model it was asked for, where the agent refused it: listed lately or not, the agent doesn't offer it now. */
+  modelRefused: Schema.optional(Schema.String),
 }) {}
 
 /** The agent didn't take the effort it was asked for, or offers none; it carries on as it was. */
