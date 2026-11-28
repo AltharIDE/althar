@@ -277,6 +277,15 @@ describe('the home', () => {
             ready(23, 'In conflict', { conflicts: true, target: 'main' }),
             ready(24, 'A check failed', { checks: change().checks }),
             ready(25, 'Checks still running', { checks: { ...passed, outcome: 'running', passed: 3, running: 2 } }),
+            ready(27, 'Waiting, now green', {
+              url: 'https://github.com/meridian/api/pull/27',
+              whenGreen: { state: 'waiting', head: 'abc123', press: 'p27' },
+            }),
+            ready(28, 'Sent back', {
+              url: 'https://github.com/meridian/api/pull/28',
+              checks: change().checks,
+              whenGreen: { state: 'sent_back', reason: 'Not merged: its checks failed.', press: 'p28' },
+            }),
             ready(26, 'A check cancelled', {
               checks: {
                 ...passed,
@@ -315,9 +324,20 @@ describe('the home', () => {
     await userEvent.click(line('A check failed').getByRole('button', { name: 'Ask the lead to fix it' }))
     expect(onTask).toHaveBeenLastCalledWith('thr24')
     expect(client.send).not.toHaveBeenCalled()
-    // While checks run there's nothing to do but wait: its button opens it.
-    await userEvent.click(line('Checks still running').getByRole('button', { name: 'Review' }))
-    expect(onTask).toHaveBeenLastCalledWith('thr25')
+    // While checks run, Merge when checks pass, at the head seen: it says at once that it waits, and Don't merge undoes it.
+    await userEvent.click(line('Checks still running').getByRole('button', { name: 'Merge when checks pass: #25' }))
+    expect(client.mergeWhenGreen).toHaveBeenCalledWith('r25', 'https://github.com/meridian/api/pull/12', 'abc123', expect.any(String))
+    expect(await line('Checks still running').findByText('Merges after checks')).toBeTruthy()
+    await userEvent.click(line('Checks still running').getByRole('button', { name: 'Don’t merge' }))
+    expect(client.leaveMergeLine).toHaveBeenCalledWith('r25', 'https://github.com/meridian/api/pull/12', expect.any(String))
+    expect(await line('Checks still running').findByRole('button', { name: 'Merge when checks pass: #25' })).toBeTruthy()
+    // Waiting when its checks turn green: still waiting, with Don't merge, not Merge in its place.
+    expect(line('Waiting, now green').getByText('Merges after checks')).toBeTruthy()
+    expect(line('Waiting, now green').getByRole('button', { name: 'Don’t merge' })).toBeTruthy()
+    expect(line('Waiting, now green').queryByRole('button', { name: /Accept and merge/ })).toBeNull()
+    // Sent back by a failed check: why, beside what it offers now.
+    expect(line('Sent back').getByText('Not merged: its checks failed.')).toBeTruthy()
+    expect(line('Sent back').getByRole('button', { name: 'Ask the lead to fix it' })).toBeTruthy()
     // A cancelled check is in the way, not a pass, and it is run again on the host: its button opens it.
     expect(line('A check cancelled').getByText('api #26 · e2e cancelled · +12 −3')).toBeTruthy()
     await userEvent.click(line('A check cancelled').getByRole('button', { name: 'Review' }))

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { type HomeCall, type HomeTask, issuesWordOf } from '@althar/contracts'
-import { Button, type EdgeWork, Fact, LinkButton, MergeButton, NeedLine, type ProjectRef } from '@althar/ui'
+import { Button, type EdgeWork, Fact, LinkButton, MergeButton, mergeButtonText, NeedLine, type ProjectRef } from '@althar/ui'
 
 import { abandonedBlocker, blockerText } from '../../shared/blockers'
 import { commandOf, titleOf } from '../../shared/callCommand'
@@ -13,6 +13,7 @@ import {
   doneHere,
   factsOf,
   labelWords,
+  mergesWhenGreen,
   type DoneHere,
   type Next,
   nextWords,
@@ -25,6 +26,7 @@ import {
 } from '../../shared/standing'
 import { text as stuckText } from '../task/StuckCall'
 import type { ActionFailure } from '../board/useWorkActions'
+import type { WhenGreen } from '../../data/whenGreen'
 
 /*
  * What waits on the person across every project, as the home and the edge
@@ -91,6 +93,11 @@ export interface Need {
   readonly signIn?: string
   /** A ready change: the task, and the one next thing its pull request needs, done from its line where the place offers it. */
   readonly ready?: { readonly task: HomeTask; readonly next: Next }
+  /**
+   * A change with an open pull request: whether it waits to merge when its checks pass, or came back, is said on its line
+   * whatever its next thing is; `offers`, where only its checks, still running, stand in the way, Merge when checks pass.
+   */
+  readonly green?: { readonly task: HomeTask; readonly offers: boolean }
   /** Answered here: which way, what was said, and where it was kept or what to do instead. */
   readonly answer?: { readonly kind: string; readonly said: string; readonly note: string; readonly denied: boolean }
 }
@@ -316,10 +323,21 @@ export const needsOf = ({
         title: task.title,
         ...(brief === undefined ? {} : { brief }),
         ...(next === null ? {} : { ready: { task, next } }),
+        ...(task.kind === 'change' && task.change?.state === 'open' ? { green: { task, offers: next === null && greenOf(task) } } : {}),
       },
     ]
   }),
 ]
+
+/** Whether a ready change's line offers Merge when checks pass: only its checks, still running, stand in its way. */
+const greenOf = (task: HomeTask): boolean =>
+  task.kind === 'change' &&
+  task.held === undefined &&
+  task.handedBack == null &&
+  task.checksBack == null &&
+  task.change !== null &&
+  task.change.unpushed === 0 &&
+  mergesWhenGreen(task.change)
 
 /** The words of a change whose pull request, or branch, stands to be looked over and accepted. */
 const TO_ACCEPT: ReadonlySet<string> = new Set([kindWords.ready, readyText.blocked, readyText.readyOnPush, readyText.checksRunning])
@@ -352,6 +370,7 @@ export function needLineOf(
     doing,
     failed,
     onSignIn,
+    whenGreen,
   }: {
     onOpen: (threadId: string) => void
     onAnswer: (call: HomeCall, project: ProjectRef, decision: 'allow' | 'reject') => void
@@ -365,6 +384,8 @@ export function needLineOf(
     failed?: (taskId: string) => ActionFailure | undefined
     /** Opens Settings at an agent's sign-in, started: a stuck step's line whose agent is signed out offers it. */
     onSignIn?: (agentId: string) => void
+    /** Merge when checks pass and Don't merge, for a change whose checks still run; without it, its line opens the task. */
+    whenGreen?: WhenGreen
   },
 ): ReactNode {
   const open = () => onOpen(need.threadId)
@@ -373,6 +394,15 @@ export function needLineOf(
   const here = ready !== undefined && onNext !== undefined && doneHere(ready.next) ? ready.next : null
   const failure = ready === undefined ? undefined : failed?.(ready.task.taskId)
   const why = here !== null && failure !== undefined && failure.action === here.kind ? failure.message : null
+  // Its checks still running: Merge when checks pass on its line, and once pressed, where it stands with Don't merge beside it.
+  const green =
+    need.green?.task.change != null && whenGreen !== undefined
+      ? { task: need.green.task, change: need.green.task.change, offers: need.green.offers, ...whenGreen }
+      : null
+  // Waiting, it stays waiting with Don't merge, whatever else its pull request comes to offer meanwhile (green, queued); come
+  // back, why stays on its line beside what it offers now (Fix it).
+  const waits = green !== null && green.waiting(green.change)
+  const back = green === null ? null : green.back(green.change)
   // Answered here: where it was, as high as it was, quiet; focus comes to it from the button pressed.
   if (answer !== undefined)
     return (
@@ -396,23 +426,48 @@ export function needLineOf(
       project={need.project}
       title={need.title}
       {...(need.command === undefined ? {} : { command: need.command })}
-      {...(why !== null && here !== null
+      {...(back !== null
         ? {
             brief: (
               <>
                 <Fact icon="close" tone="danger" role="alert">
-                  {standingText.nextFailed[here.kind](why)}
+                  {back}
                 </Fact>
                 {need.brief !== undefined && <> · {need.brief}</>}
               </>
             ),
           }
-        : need.brief === undefined
-          ? {}
-          : { brief: need.brief })}
+        : why !== null && here !== null
+          ? {
+              brief: (
+                <>
+                  <Fact icon="close" tone="danger" role="alert">
+                    {standingText.nextFailed[here.kind](why)}
+                  </Fact>
+                  {need.brief !== undefined && <> · {need.brief}</>}
+                </>
+              ),
+            }
+          : need.brief === undefined
+            ? {}
+            : { brief: need.brief })}
       onOpen={open}
       actions={
-        ready !== undefined && onNext !== undefined ? (
+        green !== null && waits ? (
+          <MergeButton
+            size="small"
+            whenGreen
+            standing={green.change.queued === true ? 'queued' : 'waiting'}
+            onLeave={() => green.leave(green.task.taskId, green.change.url)}
+          />
+        ) : green !== null && green.offers ? (
+          <MergeButton
+            size="small"
+            whenGreen
+            aria-label={`${mergeButtonText.whenGreen}: ${green.change.prefix}${green.change.number}`}
+            onMerge={() => green.press(green.task.taskId, green.change.url, green.change.head ?? '')}
+          />
+        ) : ready !== undefined && onNext !== undefined ? (
           here === null ? (
             // Asking the lead to resolve or fix takes the lead: a link into the task, where it is told.
             <LinkButton onClick={open}>{nextWords(ready.next)}</LinkButton>

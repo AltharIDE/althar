@@ -19,6 +19,12 @@ export interface MergeButtonText {
   merging: string
   queued: string
   merged: string
+  /** While its checks still run: merged by Althar's merge line once they pass. */
+  whenGreen: string
+  /** Pressed, waiting for its checks. */
+  waiting: string
+  /** Takes it out again, before it merges. */
+  leave: string
 }
 
 export const mergeButtonText: MergeButtonText = {
@@ -30,10 +36,16 @@ export const mergeButtonText: MergeButtonText = {
   merging: 'Merging',
   queued: 'In the queue',
   merged: 'Merged',
+  whenGreen: 'Merge when checks pass',
+  waiting: 'Merges after checks',
+  leave: 'Don’t merge',
 }
 
-/** Where a merge stands once pressed: shown in the button's place, so it can't be pressed again. */
-export type MergeStanding = 'merging' | 'queued' | 'merged'
+/**
+ * Where a merge stands once pressed: shown in the button's place, so it can't be pressed again. `waiting`: Merge when checks
+ * pass was pressed, and it merges once they do.
+ */
+export type MergeStanding = 'merging' | 'queued' | 'merged' | 'waiting'
 
 export interface MergeButtonProps extends Omit<ButtonProps, 'onClick' | 'variant' | 'children'> {
   children?: ReactNode
@@ -48,6 +60,13 @@ export interface MergeButtonProps extends Omit<ButtonProps, 'onClick' | 'variant
   standing?: MergeStanding | null
   /** A board card's action strip, with the same menu and keyboard behavior. */
   strip?: boolean
+  /**
+   * Its checks still run: it reads Merge when checks pass, and pressed, Althar merges it once they pass. Quiet by default,
+   * as nothing is ready to merge yet.
+   */
+  whenGreen?: boolean
+  /** Takes a merge that waits for its checks, or its queue, out again: Don't merge beside where it stands. */
+  onLeave?: () => void
   variant?: 'default' | 'signal' | 'quiet'
   text?: Partial<MergeButtonText>
 }
@@ -59,12 +78,14 @@ export function MergeButton({
   queued = false,
   standing = null,
   strip = false,
-  variant = 'signal',
+  whenGreen = false,
+  onLeave,
+  variant = whenGreen ? 'default' : 'signal',
   text,
   ...button
 }: MergeButtonProps) {
   const t = { ...mergeButtonText, ...text }
-  const children = button.children ?? t.merge
+  const children = button.children ?? (whenGreen ? t.whenGreen : t.merge)
   // Pressed here: how wide it was, so Merging keeps its room, and when, so the press is answered once, here.
   const [pressed, setPressed] = useState<{ readonly width: number; readonly at: number } | null>(null)
   const answer = useRef<HTMLSpanElement>(null)
@@ -122,6 +143,12 @@ export function MergeButton({
         <span ref={ring} className={s.ring} aria-hidden="true" />
       </span>
     )
+  const leave =
+    onLeave === undefined || (standing !== 'waiting' && standing !== 'queued') ? null : (
+      <Button size={button.size} variant="quiet" onClick={onLeave} disabled={button.disabled}>
+        {t.leave}
+      </Button>
+    )
   if (standing !== null && !strip) {
     const said = (
       <span
@@ -131,12 +158,20 @@ export function MergeButton({
         data-standing={standing}
       >
         {standing === 'merged' ? <Icon name="check" size={11} /> : <span className={s.dot} aria-hidden="true" />}
-        <span>{standing === 'queued' ? t.queued : t.merged}</span>
+        <span>{standing === 'queued' ? t.queued : standing === 'waiting' ? t.waiting : t.merged}</span>
       </span>
     )
-    if (standing !== 'queued' || onBypassQueue === undefined) return said
+    if ((standing !== 'queued' || onBypassQueue === undefined) && leave === null) return said
+    if (standing !== 'queued' || onBypassQueue === undefined)
+      return (
+        <span className={s.pair}>
+          {leave}
+          {said}
+        </span>
+      )
     return (
       <span className={s.pair}>
+        {leave}
         {said}
         {menu(
           <Button size={button.size} variant="quiet" aria-label={t.more} trailingIcon="chevronD" disabled={button.disabled}>
@@ -146,12 +181,26 @@ export function MergeButton({
       </span>
     )
   }
-  if (standing !== null && strip)
-    return (
-      <NextStep busy doing={standing === 'merging' ? t.merging : standing === 'queued' ? t.queued : t.merged} onPress={() => {}}>
+  if (standing !== null && strip) {
+    const said = (
+      <NextStep
+        busy
+        doing={standing === 'merging' ? t.merging : standing === 'queued' ? t.queued : standing === 'waiting' ? t.waiting : t.merged}
+        onPress={() => {}}
+      >
         {children}
       </NextStep>
     )
+    if (onLeave === undefined || (standing !== 'waiting' && standing !== 'queued')) return said
+    return (
+      <>
+        <NextStep onPress={onLeave} disabled={button.disabled}>
+          {t.leave}
+        </NextStep>
+        {said}
+      </>
+    )
+  }
   if (queued)
     return onBypassQueue === undefined
       ? null

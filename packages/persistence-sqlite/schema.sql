@@ -1326,27 +1326,6 @@ CREATE TABLE one_press_settles (
 
 CREATE INDEX one_press_settles_by_time ON one_press_settles (pressed_at);
 
-CREATE TABLE errands (
-    id TEXT PRIMARY KEY NOT NULL,
-    project_id TEXT NOT NULL REFERENCES projects(id),
-    thread_id TEXT NOT NULL,
-    message_id TEXT NOT NULL,
-    words TEXT NOT NULL,
-    resume_message_id TEXT,
-    resume_words TEXT,
-    paused_after_sequence INTEGER,
-    state TEXT NOT NULL CHECK (state IN ('open', 'paused', 'done', 'cancelled')),
-    reason TEXT,
-    created_at TEXT NOT NULL,
-    news_at TEXT NOT NULL,
-    reminded_at TEXT,
-    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
-    FOREIGN KEY (thread_id, project_id) REFERENCES threads(id, project_id),
-    FOREIGN KEY (message_id, project_id) REFERENCES user_inputs(id, project_id),
-    FOREIGN KEY (resume_message_id, project_id) REFERENCES user_inputs(id, project_id),
-    UNIQUE(id, project_id)
-  ) STRICT;
-
 CREATE TABLE errand_steps (
     errand_id TEXT NOT NULL,
     project_id TEXT NOT NULL,
@@ -1365,8 +1344,6 @@ CREATE TABLE errand_steps (
     PRIMARY KEY (errand_id, step_key),
     UNIQUE (errand_id, position)
   ) STRICT;
-
-CREATE INDEX errands_open ON errands(project_id, state);
 
 CREATE INDEX errand_steps_task ON errand_steps(task_id);
 
@@ -1944,3 +1921,25 @@ CREATE TABLE canvas_saves (
   ) STRICT;
 
 CREATE INDEX tasks_by_artifact ON tasks (artifact_canvas_id) WHERE artifact_canvas_id IS NOT NULL;
+
+CREATE TABLE "errands" (
+    id TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    thread_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    words TEXT NOT NULL,
+    resume_message_id TEXT,
+    resume_words TEXT,
+    paused_after_sequence INTEGER,
+    state TEXT NOT NULL CHECK (state IN ('open', 'paused', 'done', 'cancelled')),
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    news_at TEXT NOT NULL,
+    reminded_at TEXT,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+    FOREIGN KEY (thread_id, project_id) REFERENCES threads(id, project_id),
+    FOREIGN KEY (resume_message_id, project_id) REFERENCES user_inputs(id, project_id),
+    UNIQUE(id, project_id)
+  ) STRICT;
+
+CREATE INDEX errands_open ON errands(project_id, state);

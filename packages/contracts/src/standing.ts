@@ -199,3 +199,16 @@ export const isBlocked = (standing: ChangeStanding): boolean =>
       ? !pushResolves(standing)
       : one.kind !== 'unpushed' && one.kind !== 'going' && one.kind !== 'shipping' && one.kind !== 'running',
   )
+
+/**
+ * Whether only its checks, still running, stand between an open pull request and merging: what it offers then is Merge when
+ * checks pass, which Althar's merge line merges once they do, through its host's queue, train or auto-merge where it has one.
+ */
+export const mergesWhenGreen = (change: ChangeSummary, standing: ChangeStanding = standingOf(change)): boolean =>
+  change.state === 'open' &&
+  // Bitbucket Cloud's merge can't be held to a head, so a merge scheduled there could take a push nobody saw.
+  change.product !== 'bitbucket_cloud' &&
+  !change.draft &&
+  change.queued !== true &&
+  standing.blockers.length === 1 &&
+  standing.blockers[0]?.kind === 'running'

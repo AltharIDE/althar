@@ -58,6 +58,7 @@ import { Artifacts } from './Artifacts'
 import { pictureType } from './artifactFiles'
 import { Automations } from './Automations'
 import { Changes } from './Changes'
+import { MergeLine } from './MergeLine'
 import {
   approve,
   checkUpdates,
@@ -455,6 +456,7 @@ export const handlers = apiLayer(
     const connections = yield* Connections
     const issues = yield* Issues
     const pullRequests = yield* Changes
+    const mergeLine = yield* MergeLine
     const screenshots = yield* PullRequestScreenshots
     const busy = yield* Busy
     const automations = yield* Automations
@@ -2753,6 +2755,32 @@ export const handlers = apiLayer(
         ),
       ClosePullRequest: ({ commandId, taskId, url, deleteBranch }) =>
         once(commandId, api(Effect.map(pullRequests.close(taskId, url, { deleteBranch }), ({ branch }) => ({ branch })))),
+      MergeWhenGreen: ({ commandId, taskId, url, head, press }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
+              if (task === undefined) return yield* new ChangeRefused({ message: 'That task is gone.' })
+              yield* mergeLine
+                .press({ projectId: task.projectId, taskId, url, head, pressId: press })
+                .pipe(Effect.mapError((refusal) => new ChangeRefused({ message: refusal.message })))
+            }),
+          ),
+        ),
+      LeaveMergeLine: ({ commandId, taskId, url, press }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
+              if (task === undefined) return
+              yield* mergeLine
+                .unpress({ projectId: task.projectId, taskId, url, pressId: press })
+                .pipe(Effect.mapError((refusal) => new ChangeRefused({ message: refusal.message })))
+            }),
+          ),
+        ),
       MergeHere: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.mergeHere(taskId, heads)))),
       Push: ({ commandId, taskId, head, url }) => once(commandId, api(Effect.asVoid(pullRequests.push(taskId, head, url)))),
       ReplacePullRequest: ({ commandId, taskId, head, replaces, url }) =>

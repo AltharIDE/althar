@@ -1185,6 +1185,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     seeTask: vi.fn(async () => {}),
     settledWithOnePress: vi.fn(async () => {}),
     merge: vi.fn(async () => {}),
+    mergeWhenGreen: vi.fn(async () => {}),
+    leaveMergeLine: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
     ship: vi.fn(async () => {}),
     routeShip: vi.fn(async () => {}),

@@ -15,6 +15,7 @@ import {
   Menu,
   MenuItem,
   MergeButton,
+  mergeButtonText,
   type PullRequest,
   SplitButton,
   type TrackStanding,
@@ -32,7 +33,7 @@ import { hasOutcome, outcomeOf } from '../../shared/outcome'
 import { mergeHereLabel } from '../../shared/mergeHere'
 import { type MergeStanding, shownQueued } from '../../data/merges'
 import { productBrand, productName } from '../../shared/products'
-import { personPushes } from '../../shared/standing'
+import { mergesWhenGreen, personPushes } from '../../shared/standing'
 import { commitsToShip } from '../../shared/shipping'
 import s from './Task.module.css'
 import { device } from '../../shared/device'
@@ -216,6 +217,7 @@ export function Outputs({
   mergeRefused = null,
   mergeStanding,
   mergeAwaits,
+  whenGreen,
   onPostScreenshots,
   onOpenFile,
   conflict = null,
@@ -274,6 +276,17 @@ export function Outputs({
   mergeStanding?: (url: string) => MergeStanding | null
   /** Whether it merges later in a press under way, wherever pressed, once the one before it lands: waiting, nothing to press. */
   mergeAwaits?: (url: string) => boolean
+  /**
+   * Merge when checks pass, for its one pull request while only its checks, still running, stand in the way: pressed, it
+   * waits, and merges once they pass; Don't merge takes it out again. Without it, nothing is offered for it.
+   */
+  whenGreen?: {
+    readonly waiting: (change: ChangeSummary) => boolean
+    /** Why it came back without merging, or why the press was refused. */
+    readonly back: (change: ChangeSummary) => string | null
+    readonly onPress: (url: string, head: string) => void
+    readonly onLeave: (url: string) => void
+  }
   onMergeHere: () => void
   onOpenChange: () => void
   onPush: (head: string, url: string) => void
@@ -401,6 +414,11 @@ export function Outputs({
           const accepting = (ready || task.mergeable === true) && state === ChangeState.Ready && pushes.length === 0 && held === undefined
           const firstStanding = mergeStanding?.(first.url) ?? null
           if (open.length > 1) return track(accepting)
+          // Its checks still running, all that stands in the way: Merge when checks pass in Merge's place, and once pressed,
+          // where it stands, with Don't merge beside it (its queue's word, once in it, is the card's own).
+          const waitsGreen = whenGreen?.waiting(first) === true
+          const offersGreen = whenGreen !== undefined && !waitsGreen && accepting && firstStanding === null && mergesWhenGreen(first)
+          const sentBack = whenGreen?.back(first) ?? null
           const actions: ReactNode[] = [
             ...(shipAction === null ? [] : [shipAction]),
             // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072); held for Ship, none.
@@ -416,26 +434,41 @@ export function Outputs({
                   {several ? text.pushTo(one.unpushed, nameOf(one.repository)) : text.push(one.unpushed)}
                 </Button>
               )),
-            ...(accepting && firstStanding === 'merging'
-              ? [<MergeButton key="accept" variant="signal" standing="merging" />]
-              : accepting
-                ? [
-                    <MergeButton
-                      key="accept"
-                      variant="signal"
-                      {...pressed(doing.accept)}
-                      // In order, each at the head shown, so one that moved on since isn't merged unseen; the rest wait on a refusal.
-                      onMerge={() =>
-                        onAccept(open.flatMap((one) => (one.state === 'open' ? [{ head: one.head ?? '', url: one.url }] : [])))
-                      }
-                      {...(first.canBypassQueue === true
-                        ? { onBypassQueue: () => onAccept([{ head: first.head ?? '', url: first.url, bypassQueue: true }]) }
-                        : {})}
-                    >
-                      {text.accept(open.filter((one) => one.state === 'open').length)}
-                    </MergeButton>,
-                  ]
+            ...(waitsGreen && whenGreen !== undefined
+              ? [
+                  first.queued === true ? (
+                    <Button key="green" variant="quiet" onClick={() => whenGreen.onLeave(first.url)}>
+                      {mergeButtonText.leave}
+                    </Button>
+                  ) : (
+                    <MergeButton key="green" whenGreen standing="waiting" onLeave={() => whenGreen.onLeave(first.url)} />
+                  ),
+                ]
+              : offersGreen
+                ? [<MergeButton key="green" whenGreen onMerge={() => whenGreen.onPress(first.url, first.head ?? '')} />]
                 : []),
+            ...(waitsGreen || offersGreen
+              ? []
+              : accepting && firstStanding === 'merging'
+                ? [<MergeButton key="accept" variant="signal" standing="merging" />]
+                : accepting
+                  ? [
+                      <MergeButton
+                        key="accept"
+                        variant="signal"
+                        {...pressed(doing.accept)}
+                        // In order, each at the head shown, so one that moved on since isn't merged unseen; the rest wait on a refusal.
+                        onMerge={() =>
+                          onAccept(open.flatMap((one) => (one.state === 'open' ? [{ head: one.head ?? '', url: one.url }] : [])))
+                        }
+                        {...(first.canBypassQueue === true
+                          ? { onBypassQueue: () => onAccept([{ head: first.head ?? '', url: first.url, bypassQueue: true }]) }
+                          : {})}
+                      >
+                        {text.accept(open.filter((one) => one.state === 'open').length)}
+                      </MergeButton>,
+                    ]
+                  : []),
             ...(first.queued === true && first.canBypassQueue === true && first.unpushed === 0 && held === undefined
               ? // Its bypass under way, wherever pressed: Merging in its place, not the bypass again.
                 firstStanding === 'merging'
@@ -471,7 +504,7 @@ export function Outputs({
               {...(review === undefined ? {} : { review })}
               {...(actions.length === 0 ? {} : { actions })}
               {...files}
-              {...failure()}
+              {...(error === null && sentBack !== null ? { error: sentBack } : failure())}
               text={{
                 ...label,
                 pr: (n) => `${first.short} ${first.prefix}${n}`,
@@ -491,10 +524,12 @@ export function Outputs({
     const left = open.filter((one) => one.state === 'open')
     const at = merging === null ? -1 : open.findIndex((one) => one.url === merging)
     const refusedAt = error === null ? null : mergeRefused
+    // Merge when checks pass that came back: why, on its own stop, until it is pressed again.
+    const backOf = (one: ChangeSummary) => (one.state === 'open' ? (whenGreen?.back(one) ?? null) : null)
     const standingOf = (one: ChangeSummary, i: number): TrackStanding =>
       one.state === 'merged'
         ? 'merged'
-        : refusedAt === one.url
+        : refusedAt === one.url || backOf(one) !== null
           ? 'refused'
           : // Going into its queue, it is in it once Merge has answered the press, not when the host has.
             mergeStanding?.(one.url) === 'queued'
@@ -521,7 +556,12 @@ export function Outputs({
         ...(one.target === undefined ? {} : { target: one.target }),
         ...(one.checks == null ? {} : { checks: one.checks.list.map(checkOf) }),
         ...(one.conflicts === true ? { conflicts: true } : {}),
-        ...(refusedAt === one.url && error !== null ? { refused: error } : {}),
+        ...(refusedAt === one.url && error !== null
+          ? { refused: error }
+          : backOf(one) !== null
+            ? // The track says Not merged itself.
+              { refused: (backOf(one) ?? '').replace(/^Not merged: /, '') }
+            : {}),
         files: filesIn(task.files, folder, true).map((file) => ({ ...file, path: file.path.slice(folder.length + 1) })),
         folder,
       }
@@ -529,9 +569,30 @@ export function Outputs({
     const [next] = left
     const merge = (changes: ReadonlyArray<ChangeSummary>) => onAccept(changes.map((one) => ({ head: one.head ?? '', url: one.url })))
     const bypass = () => (next === undefined ? undefined : onAccept([{ head: next.head ?? '', url: next.url, bypassQueue: true }]))
+    // The next to merge, its checks still running, is the one Merge when checks pass schedules, so they still merge in order;
+    // pressed, wherever, it waits there with Don't merge beside it, and the rest after it.
+    const green =
+      next === undefined || whenGreen === undefined ? null : whenGreen.waiting(next) ? (
+        next.queued === true ? (
+          <Button key="green" variant="quiet" onClick={() => whenGreen.onLeave(next.url)}>
+            {mergeButtonText.leave}
+          </Button>
+        ) : (
+          <MergeButton key="green" whenGreen standing="waiting" onLeave={() => whenGreen.onLeave(next.url)} />
+        )
+      ) : accepting && mergeStanding?.(next.url) == null && mergesWhenGreen(next) ? (
+        <MergeButton
+          key="green"
+          whenGreen
+          aria-label={`${mergeButtonText.whenGreen}: ${labelOf(next)}`}
+          onMerge={() => whenGreen.onPress(next.url, next.head ?? '')}
+        />
+      ) : null
     // The next to merge still in its merge queue holds the rest: nothing to press until it has landed.
     const accept =
-      accepting && next !== undefined && next.queued !== true && mergeStanding?.(next.url) == null ? (
+      green !== null ? (
+        green
+      ) : accepting && next !== undefined && next.queued !== true && mergeStanding?.(next.url) == null ? (
         left.length === 1 ? (
           <MergeButton
             key="accept"

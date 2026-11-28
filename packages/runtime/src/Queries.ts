@@ -2,6 +2,7 @@ import { readGoal } from './threadGoals'
 import { standInOf } from './standIn'
 import { Limits } from './Limits'
 import { errandRecords } from './Errands'
+import { whenGreenOf } from './whenGreen'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
 import { placingOf } from './taskPlaces'
@@ -2145,10 +2146,12 @@ export class Queries extends Context.Service<
                       LIMIT 1`
                         const held = pushing?.get(change.url)
                         const pictures = screenshots.get(change.url)
+                        const green = yield* whenGreenOf(change.url)
                         const shown = {
                           ...change,
                           ...(held === undefined ? {} : { pushing: held }),
                           ...(pictures === undefined ? {} : { screenshots: pictures }),
+                          ...(green === undefined ? {} : { whenGreen: green }),
                         }
                         if (here === undefined || !(yield* there(here.path))) return withPushed(shown)
                         return withPushed({ ...shown, ...(yield* againstPullRequest(here, change.head, here.headCommit, here.base)) })

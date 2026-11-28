@@ -17,6 +17,7 @@ export {
   checkFailuresOf,
   goingUp,
   isBlocked,
+  mergesWhenGreen,
   personPushes,
   pushResolves,
   ranChecks,

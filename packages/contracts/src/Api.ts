@@ -1922,6 +1922,20 @@ export const ChangeSummary = Schema.Struct({
   needs: Schema.optional(Schema.Array(MergeNeed)),
   /** The host explicitly allows this viewer to merge without its queue; the action rechecks it. */
   canBypassQueue: Schema.optional(Schema.Boolean),
+  /**
+   * Merge when checks pass, for an open one: `waiting` while Althar's merge line has it, to merge at `head` once its checks
+   * pass (through its host's queue, train or auto-merge where it has one), however it was asked for, or while a press of it
+   * is on its way there; `sent_back` where the last press came back without merging, with why, until it is pressed again.
+   * `press` names the press it answers (`MergeWhenGreen`'s `press`), where a press asked for it. Absent where neither.
+   */
+  whenGreen: Schema.optional(
+    Schema.Struct({
+      state: Schema.Literals(['waiting', 'sent_back']),
+      head: Schema.optional(Schema.String),
+      reason: Schema.optional(Schema.String),
+      press: Schema.optional(Schema.String),
+    }),
+  ),
 })
 export type ChangeSummary = typeof ChangeSummary.Type
 
@@ -6875,6 +6889,33 @@ const WorkApi = RpcGroup.make(
       how: Schema.optional(Schema.Literals(['review', 'now'])),
       /** Explicitly merge without the host's queue, using the viewer's bypass permission. */
       bypassQueue: Schema.optional(Schema.Boolean),
+    },
+    Schema.Void,
+  ),
+  /**
+   * Merge when checks pass: puts the task's pull request at `url` in Althar's merge line at the head the person saw, to merge
+   * once its checks pass, through its host's merge queue, merge train or auto-merge where it has one. A failed check, a push
+   * or a conflict sends it back, saying why (`whenGreen`). Refused where it moved on since `head`.
+   */
+  command(
+    'MergeWhenGreen',
+    {
+      taskId: Schema.String,
+      url: Schema.String,
+      head: Schema.String,
+      /** The press's own id, which the pull request's `whenGreen.press` names once it answers it. */
+      press: Schema.String,
+    },
+    Schema.Void,
+  ),
+  /** Don't merge: takes the pull request at `url` out of the merge line, and out of its host's queue, train or auto-merge. */
+  command(
+    'LeaveMergeLine',
+    {
+      taskId: Schema.String,
+      url: Schema.String,
+      /** Its own id, which `whenGreen.press` names where the host didn't let go of it. */
+      press: Schema.String,
     },
     Schema.Void,
   ),

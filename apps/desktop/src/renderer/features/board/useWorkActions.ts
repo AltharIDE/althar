@@ -5,6 +5,7 @@ import { ApiError, type AlwaysScope, type BoardTask } from '@althar/contracts'
 import { messageOf, type OnePress, type StuckAnswer } from '../../data/client'
 import { useMerge, useMerging } from '../../data/merges'
 import { useServices } from '../../data/services'
+import { useWhenGreen, type WhenGreen } from '../../data/whenGreen'
 import { unmovedWhy } from '../../shared/calls'
 import { headsOf } from '../../shared/mergeHere'
 import { planIt } from '../../shared/planIt'
@@ -65,6 +66,8 @@ export interface WorkActions {
   readonly keep: (taskId: string) => Promise<boolean>
   /** Merges a ready task's pull request at the head the person saw; whether it went through. */
   readonly merge: (taskId: string, head: string, url?: string, bypassQueue?: boolean) => Promise<boolean>
+  /** Merge when checks pass and Don't merge, and where each pull request stands with them, wherever pressed. */
+  readonly whenGreen?: WhenGreen
   /** Merges a ready task's repositories without a pull request into their default branches here, up to the heads the dock showed; whether it went through. */
   readonly mergeHere: (task: BoardTask) => Promise<boolean>
   /** Pushes a task's branch to its pull request, up to the commit the person saw; whether it went through. */
@@ -112,6 +115,7 @@ export const useWorkActions = (
   readAgain: () => Promise<ReadonlyArray<BoardTask> | undefined> = READ_NOTHING,
 ): WorkActions => {
   const { client } = useServices()
+  const whenGreen = useWhenGreen()
   // The cards moved by Done or Keep for later, by task, until a read of each says so.
   const [moved, setMoved] = useState<ReadonlyMap<string, Moved>>(new Map())
   const agreed =
@@ -227,6 +231,7 @@ export const useWorkActions = (
   )
 
   return {
+    whenGreen,
     over,
     error,
     failed: failures,
