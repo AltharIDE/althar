@@ -149,7 +149,7 @@ const freeBytes = (folder: string): number | undefined => {
 
 /** A copy of a folder that costs nothing on the same disk: each file hard-linked, or copied where it can't be; no links. */
 const lendInto = (from: string, to: string): void => {
-  mkdirSync(to, { recursive: true })
+  mkdirSync(to, { recursive: true, mode: 0o700 })
   for (const entry of readdirSync(from, { withFileTypes: true })) {
     const source = join(from, entry.name)
     const target = join(to, entry.name)
@@ -505,11 +505,23 @@ export class Installs extends Context.Service<
               Effect.tryPromise({
                 try: async (signal) => {
                   const response = await fetch(release.url, { headers: { 'User-Agent': 'Althar' }, signal })
-                  if (!response.ok) throw fail(definition.id, `${definition.name} couldn't be downloaded.`, response.status)
-                  const body = await response.arrayBuffer().catch((error: unknown) => {
+                  if (!response.ok || response.body === null)
+                    throw fail(definition.id, `${definition.name} couldn't be downloaded.`, response.status)
+                  // Read as it comes, so whoever asked hears how far it has got, out of what its server says it is.
+                  const said = Number(response.headers.get('content-length'))
+                  const total = Number.isSafeInteger(said) && said > 0 ? said : undefined
+                  const chunks: Uint8Array[] = []
+                  let received = 0
+                  try {
+                    for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+                      chunks.push(chunk)
+                      received += chunk.length
+                      progress?.(received, total)
+                    }
+                  } catch (error) {
                     throw fail(definition.id, `${definition.name}'s download stopped part-way.`, error)
-                  })
-                  return Buffer.from(body)
+                  }
+                  return Buffer.concat(chunks)
                 },
                 catch: (error) =>
                   error instanceof InstallFailed ? error : fail(definition.id, `${definition.name} couldn't be downloaded.`, error),

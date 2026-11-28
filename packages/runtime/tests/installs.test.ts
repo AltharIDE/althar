@@ -126,8 +126,10 @@ describe('downloading an agent', () => {
           assert.isNotNull(signal)
           if (signal == null) throw new Error('No abort signal')
           if (stage.endsWith('headers')) return hang(signal)
+          // An archive is read as it comes: its body never sends a byte.
+          if (!release) return new Response(new ReadableStream<Uint8Array>({ pull: () => hang(signal) }))
           const response = new Response()
-          Object.defineProperty(response, release ? 'json' : 'arrayBuffer', { value: () => hang(signal) })
+          Object.defineProperty(response, 'json', { value: () => hang(signal) })
           return response
         }
         const { root } = using({})
