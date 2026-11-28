@@ -243,7 +243,9 @@ const writeUnits = async (folder: string, program: string) => {
   for (const [name, text] of Object.entries(renderUnits(folder, program, commands))) await writePrivate(join(units, name), text, true)
 }
 
-const failed = (code: string, message: string) => Object.assign(new Error(message), { code })
+/** A failure in its own words, by its code; said at `step` where that isn't the command's own. */
+const failed = (code: string, message: string, step?: string) =>
+  Object.assign(new Error(message), { code, ...(step === undefined ? {} : { step }) })
 
 /** Points `current` at a release, atomically: a link made beside it and renamed over it. */
 const pointAt = async (program: string, release: string) => {
@@ -650,10 +652,15 @@ const completeInstalled = async (release: string, out: (text: string) => void, f
       },
     })
   } catch (error) {
-    // Where it can't download them, the window sends the whole release from its own computer instead.
-    if (error instanceof HostError && error.code === 'UpdateUnavailable') throw failed('CannotDownload', error.message)
-    // As the bootstrap says it of the base.
-    if (error instanceof NoRoom) throw failed('NotEnoughDisk', error.message)
+    // What it unpacked goes, so the space is there again for the whole release the window then sends, or for another
+    // try; never the release the worker runs.
+    const real = (path: string) => fs.realpath(path).catch(() => path)
+    if ((await real(join(dirname(release), 'current'))) !== (await real(release))) await fs.rm(release, { recursive: true, force: true })
+    // Said at the download, as the bootstrap says the base's. Where it can't download them, the window sends the whole
+    // release from its own computer instead.
+    if (error instanceof HostError && error.code === 'UpdateUnavailable') throw failed('CannotDownload', error.message, 'get')
+    if (error instanceof NoRoom) throw failed('NotEnoughDisk', error.message, 'get')
+    if (error instanceof HostError) throw failed(error.code, error.message, 'get')
     throw error
   } finally {
     await fs.rm(scratch, { recursive: true, force: true })
@@ -741,8 +748,9 @@ export const workerMain = async (args: ReadonlyArray<string>, out: (text: string
     }
   } catch (error) {
     const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'Failed'
+    const step = error instanceof Error && 'step' in error && typeof error.step === 'string' ? error.step : command
     const message = error instanceof Error ? error.message : 'The worker couldn’t be set up.'
-    say(out, { step: command ?? 'worker', state: 'failed', code, message })
+    say(out, { step: step ?? 'worker', state: 'failed', code, message })
     return 1
   }
 }

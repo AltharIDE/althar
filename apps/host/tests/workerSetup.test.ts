@@ -1,5 +1,16 @@
 import { createHash, generateKeyPairSync, sign, X509Certificate } from 'node:crypto'
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { createServer } from 'node:https'
 import { join } from 'node:path'
 
@@ -1023,24 +1034,46 @@ describe('a release in parts', () => {
   })
 
   it('refuses a part that doesn’t hold what it should, and says it can’t download one it can’t reach', async () => {
+    /** A release the bootstrap unpacked from its base, its manifest and key beside it. */
+    const unpacked = (from: Awaited<ReturnType<typeof published>>) => {
+      const folder = release(`bundle-${from.base.sha256}`)
+      writeFileSync(join(folder, '.manifest'), from.envelope, { mode: 0o600 })
+      writeFileSync(join(folder, '.release-key'), from.publicKey, { mode: 0o600 })
+      return folder
+    }
     const tampered = await published(undefined, true)
-    const folder = release(`bundle-${tampered.base.sha256}`)
-    writeFileSync(join(folder, '.manifest'), tampered.envelope, { mode: 0o600 })
-    writeFileSync(join(folder, '.release-key'), tampered.publicKey, { mode: 0o600 })
-    await expect(install(folder, out, tampered.fetcher)).rejects.toMatchObject({ code: 'ReleaseRejected' })
-    expect(existsSync(join(folder, codex))).toBe(false)
+    const folder = unpacked(tampered)
+    await expect(install(folder, out, tampered.fetcher)).rejects.toMatchObject({ code: 'ReleaseRejected', step: 'get' })
+    // What it unpacked goes with it, so its space is free again.
+    expect(existsSync(folder)).toBe(false)
+    // Claude Code's part comes, Codex's can't be reached: the window sends the whole release from its own computer then,
+    // into the space the base and the first part took.
     const unreachable = await published()
     unreachable.served.delete('https://updates.example/codex-test.tar.zst')
-    const other = release(`bundle-${unreachable.base.sha256}`)
-    writeFileSync(join(other, '.manifest'), unreachable.envelope, { mode: 0o600 })
-    writeFileSync(join(other, '.release-key'), unreachable.publicKey, { mode: 0o600 })
-    // The window sends the whole release from its own computer then.
-    await expect(install(other, out, unreachable.fetcher)).rejects.toMatchObject({ code: 'CannotDownload' })
-    // Nor where its disk hasn't the room for one, said as the bootstrap says it.
+    const other = unpacked(unreachable)
+    await expect(install(other, out, unreachable.fetcher)).rejects.toMatchObject({ code: 'CannotDownload', step: 'get' })
+    expect(unreachable.asked).toContain('https://updates.example/claude-agent-sdk-test.tar.zst')
+    expect(existsSync(other)).toBe(false)
+    expect(readdirSync(join(data, 'althar-worker-program')).filter((name) => !name.startsWith('upload.'))).toEqual([])
+    // Nor where its disk hasn't the room for one, said at the download as the bootstrap says it.
     const was = restore
     restore = withWorkerSystem({ free: async () => 1_048_576 })
-    await expect(install(other, out, unreachable.fetcher)).rejects.toMatchObject({ code: 'NotEnoughDisk' })
+    const again = unpacked(unreachable)
+    expect(await workerMain(['install', '--program', again], out)).toBe(1)
+    expect(said.at(-1)).toMatchObject({ step: 'get', state: 'failed', code: 'NotEnoughDisk' })
+    expect(existsSync(again)).toBe(false)
     restore()
     restore = was
+  })
+
+  it('never removes the release it runs when making it whole again fails', async () => {
+    const unreachable = await published()
+    unreachable.served.delete('https://updates.example/codex-test.tar.zst')
+    const folder = release(`bundle-${unreachable.base.sha256}`)
+    writeFileSync(join(folder, '.manifest'), unreachable.envelope, { mode: 0o600 })
+    writeFileSync(join(folder, '.release-key'), unreachable.publicKey, { mode: 0o600 })
+    symlinkSync(folder, join(data, 'althar-worker-program', 'current'))
+    await expect(install(folder, out, unreachable.fetcher)).rejects.toMatchObject({ code: 'CannotDownload' })
+    expect(existsSync(join(folder, 'althar-worker'))).toBe(true)
   })
 })

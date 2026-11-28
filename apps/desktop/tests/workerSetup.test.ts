@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest'
 
 import { findRelease, findWorkerRelease, workerRelease } from '../src/main/homes/release'
 import type { Ran, RunOptions, SetupSystem } from '../src/main/homes/setup'
-import { forTheLog, workerSetups, type WorkerLog } from '../src/main/homes/workerSetup'
+import { forTheLog, transferTime, workerSetups, type WorkerLog } from '../src/main/homes/workerSetup'
 import type { WorkerSetup } from '../src/workers'
 
 const now = Date.parse('2026-01-20T00:00:00.000Z')
@@ -357,28 +357,31 @@ it('takes a worker release in parts by its base, and leaves a malformed or home�
   ).rejects.toThrow(/failed its check/)
 })
 
-it('downloads a release in parts on the machine by its base, and sends the whole one where the machine can’t download', async () => {
+/** Adding a worker from a release in parts, its first install answered as `first` says: what each install was asked, and its deadline. */
+const addingInParts = async (first: Partial<Ran>) => {
   const event = (step: string, state: string, more: Record<string, unknown> = {}) => JSON.stringify({ protocol: 1, step, state, ...more })
-  const installs: Array<ReadonlyArray<string>> = []
+  const installs: Array<{ readonly args: ReadonlyArray<string>; readonly timeout: number }> = []
   const { system: given, log } = machine({})
   const system: SetupSystem = {
     ...given,
-    run: async (program: string, args: ReadonlyArray<string>, _options: RunOptions) => {
+    run: async (program: string, args: ReadonlyArray<string>, options: RunOptions) => {
       const operation = program !== 'ssh' ? program : (/^sh -s -- '([a-z-]+)'/.exec(args.at(-1) ?? '')?.[1] ?? 'resolve')
       const answers: Record<string, string> = {
         probe: [event('reach', 'done'), event('look', 'done', { arch: 'x64', freeKiB: 65_000_000, linger: true })].join('\n'),
         'worker-prepare-upload': event('get', 'started', { uploadId: 'abcdefgh', uploadPath: '/u/archive.partial' }),
       }
       if (operation === 'worker-install') {
-        installs.push(
-          args
-            .at(-1)
-            ?.split(' ')
-            .map((one) => one.replace(/^'|'$/gu, '')) ?? [],
-        )
-        const stdout =
-          installs.length === 1 ? event('install', 'failed', { code: 'CannotDownload' }) : event('key', 'done', { publicKey: 'PUBLIC' })
-        return { code: installs.length === 1 ? 1 : 0, stdout, stderr: '' }
+        installs.push({
+          args:
+            args
+              .at(-1)
+              ?.split(' ')
+              .map((one) => one.replace(/^'|'$/gu, ''))
+              .slice(4, 9) ?? [],
+          timeout: options.timeout,
+        })
+        if (installs.length === 1) return { code: 1, stdout: '', stderr: '', ...first }
+        return { code: 0, stdout: event('key', 'done', { publicKey: 'PUBLIC' }), stderr: '' }
       }
       return { code: 0, stdout: answers[operation] ?? '', stderr: '' }
     },
@@ -389,19 +392,43 @@ it('downloads a release in parts on the machine by its base, and sends the whole
     version: '0.3.1',
     url: 'https://x.test/whole.tar.gz',
     sha256: 'a'.repeat(64),
-    bytes: 400,
-    unpackedBytes: 1000,
+    bytes: 400_000_000,
+    unpackedBytes: 1_000_000_000,
     apiVersion: 1,
     storage: 'c'.repeat(64),
-    base: { url: 'https://x.test/base.tar.gz', sha256: 'e'.repeat(64), bytes: 50, unpackedBytes: 200, totalBytes: 300 },
+    base: {
+      url: 'https://x.test/base.tar.gz',
+      sha256: 'e'.repeat(64),
+      bytes: 60_000_000,
+      unpackedBytes: 200_000_000,
+      totalBytes: 320_000_000,
+    },
   })
   vi.mocked(system.scratch).mockResolvedValue({ path: '/scratch', remove: async () => {} })
   const told: Array<WorkerSetup | null> = []
   const release = vi.fn(async () => ({ kind: 'ready' as const, version: '0.3.1', base: 'https://x.test' }))
   workerSetups(system, vi.fn(), (setup) => told.push(setup), vi.fn(), { log, release }).start({ target: 'build@box' }, true)
-  await vi.waitFor(() => expect(told.at(-1)?.phase).toBe('enroll'))
-  // On the machine, the base; sent from here, the whole release, which needs nothing more.
-  expect(installs[0]?.slice(4, 9)).toEqual(['download', 'e'.repeat(64), '50', '200', 'https://x.test/base.tar.gz'])
-  expect(installs[1]?.slice(4, 9)).toEqual(['upload', 'a'.repeat(64), '400', '1000', 'abcdefgh'])
+  await vi.waitFor(() => expect(['enroll', 'failed']).toContain(told.at(-1)?.phase))
+  return { installs, told, system, event }
+}
+
+it('downloads a release in parts on the machine by its base, and sends the whole one where the machine can’t download', async () => {
+  const event = (step: string, state: string, more: Record<string, unknown> = {}) => JSON.stringify({ protocol: 1, step, state, ...more })
+  const { installs, system } = await addingInParts({ stdout: event('get', 'failed', { code: 'CannotDownload' }) })
+  // On the machine, the base, with the time all its parts take; sent from here, the whole release, which needs nothing more.
+  expect(installs[0]?.args).toEqual(['download', 'e'.repeat(64), '60000000', '200000000', 'https://x.test/base.tar.gz'])
+  expect(installs[0]?.timeout).toBe(transferTime(320_000_000))
+  expect(transferTime(320_000_000)).toBeGreaterThan(40 * 60_000)
+  expect(installs[1]?.args).toEqual(['upload', 'a'.repeat(64), '400000000', '1000000000', 'abcdefgh'])
   expect(vi.mocked(system.fetchArchive).mock.calls[0]?.[0]).toMatchObject({ url: 'https://x.test/whole.tar.gz', sha256: 'a'.repeat(64) })
+})
+
+it('sends the whole release where downloading on the machine outran its time, and stops at Get where a part won’t fit', async () => {
+  // Stopped at its deadline: no word from the machine, no key.
+  const slow = await addingInParts({ code: null })
+  expect(slow.installs.map((one) => one.args[0])).toEqual(['download', 'upload'])
+  expect(slow.told.at(-1)?.phase).toBe('enroll')
+  const full = await addingInParts({ stdout: slow.event('get', 'failed', { code: 'NotEnoughDisk' }) })
+  expect(full.installs).toHaveLength(1)
+  expect(full.told.at(-1)).toMatchObject({ phase: 'failed', at: 2, problem: { code: 'NotEnoughDisk' } })
 })

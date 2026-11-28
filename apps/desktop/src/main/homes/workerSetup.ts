@@ -91,6 +91,12 @@ export interface WorkerLog {
  * What of a program's words may go to the log: never a one-time code, the home's grant or anything as long as a key or
  * a token (base64 of 40 characters or more), and its last lines only.
  */
+/**
+ * How long a release's transfer to a worker may take, with unpacking and checking it: ten minutes, and as long as its bytes
+ * take at 128 KiB/s, the slowest the worker's own downloads allow (apps/host/src/updates/network.ts `downloadTime`).
+ */
+export const transferTime = (bytes: number) => 10 * 60_000 + Math.ceil(bytes / 131_072) * 1000
+
 export const forTheLog = (text: string, lines = 20) =>
   text
     .replaceAll(/althar-worker1\.[A-Za-z0-9._-]+/g, 'althar-worker1.…')
@@ -356,7 +362,7 @@ export const workerSetups = (
       const asked = method === 'download' && base !== undefined ? [base.sha256, String(base.bytes), String(base.unpackedBytes)] : signed
       const total = method === 'download' && base !== undefined ? base.totalBytes : release.bytes
       const ran = await bootstrap(target, 'worker-install', [method, ...asked, source, ...trust], signal, {
-        timeout: 15 * 60_000,
+        timeout: transferTime(total),
         event: (one) => {
           // The base's own progress counts toward the whole download's.
           if (one.step === 'get' && typeof one.bytes === 'number' && typeof one.totalBytes === 'number')
@@ -364,6 +370,8 @@ export const workerSetups = (
         },
       })
       const key = ran.events.find((one) => one.step === 'key' && one.state === 'done')
+      // Stopped at its deadline, still downloading: sent from here instead.
+      if (typeof key?.publicKey !== 'string' && ran.code === null && method === 'download') throw new Stopped('CannotDownload', STEP.get)
       if (typeof key?.publicKey !== 'string') throw new Stopped('NoWorker', STEP.get)
       say(`althar-worker ${release.version}: checked against Althar’s release key`)
       return key.publicKey
@@ -397,7 +405,7 @@ export const workerSetups = (
           ...(target.port === undefined ? [] : ['-P', String(target.port)]),
           target.target,
         ],
-        { input: `put "${file}" "${started.uploadPath}"\n`, signal, timeout: 15 * 60_000 },
+        { input: `put "${file}" "${started.uploadPath}"\n`, signal, timeout: transferTime(release.bytes) },
       )
       if (signal.aborted) throw signal.reason
       if (sent.code !== 0) {
