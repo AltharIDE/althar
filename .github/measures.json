@@ -30,9 +30,9 @@
     },
     "runtime-live-sleeps": {
       "what": "Runtime tests on the real clock that sleep: an `it.live` in packages/runtime/tests whose body, up to the next `it.live` or `it.effect`, calls Effect.sleep, sleep( or setTimeout(. What waits for time to pass belongs on the test's clock (`it.effect` with onTestClock). Not every `it.live`: a test of real processes and git needs the real clock, and a new one would raise it. detail counts each kind of test.",
-      "baseline": 170,
+      "baseline": 171,
       "detail": {
-        "it.live": 2741,
+        "it.live": 2743,
         "it.effect": 484
       }
     },
