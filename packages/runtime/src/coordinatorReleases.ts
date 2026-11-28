@@ -753,6 +753,34 @@ const openPullRequest = (projectId: string, input: unknown) =>
 
 // ---- The tools -------------------------------------------------------------------
 
+/** An asked-for action made in `provide`'s context, its read and act run there too: what Errands takes. */
+const actionIn = (
+  provide: <A, E>(effect: Effect.Effect<A, E, Needs>) => Effect.Effect<A, E>,
+  making: Effect.Effect<Made, unknown, Needs>,
+): Effect.Effect<AskedAction, ToolRefused> =>
+  provide(making).pipe(
+    Effect.map(({ read, readBack, act, ...made }): AskedAction => ({
+      ...made,
+      read: provide(read),
+      ...(readBack === undefined ? {} : { readBack: provide(readBack) }),
+      act: (fresh) => provide(Effect.mapError(act(fresh), plainly)),
+    })),
+    Effect.mapError((error) => {
+      const said = plainly(error)
+      return said instanceof ToolRefused ? said : refused(said.message)
+    }),
+  )
+
+/**
+ * The tag Althar makes on the code host, on the person's word, as the coordinator's `push_tag` makes it: for a lead's own
+ * `push_tag`, where it has no tag of its own to push, or takes an errand's step (ADR-081, a lead's tag).
+ */
+export const tagOnHost = (
+  provide: <A, E>(effect: Effect.Effect<A, E, Needs>) => Effect.Effect<A, E>,
+  projectId: string,
+  input: unknown,
+): Effect.Effect<AskedAction, ToolRefused> => actionIn(provide, pushTag(projectId, input))
+
 /** The coordinator's release tools, each run in its context by `provide`. */
 export const releaseTools = (
   provide: <A, E>(effect: Effect.Effect<A, E, Needs>) => Effect.Effect<A, E>,
@@ -774,19 +802,7 @@ export const releaseTools = (
     kind: 'asked-for',
     description,
     input,
-    action: (value, access) =>
-      provide(action(access.projectId, value)).pipe(
-        Effect.map(({ read, readBack, act, ...made }): AskedAction => ({
-          ...made,
-          read: provide(read),
-          ...(readBack === undefined ? {} : { readBack: provide(readBack) }),
-          act: (fresh) => provide(Effect.mapError(act(fresh), plainly)),
-        })),
-        Effect.mapError((error) => {
-          const said = plainly(error)
-          return said instanceof ToolRefused ? said : refused(said.message)
-        }),
-      ),
+    action: (value, access) => actionIn(provide, action(access.projectId, value)),
   })
   return [
     asked(
