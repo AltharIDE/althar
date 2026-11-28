@@ -1,11 +1,13 @@
 name: release
 
 # Releases come from here (ADR-024, Linear DEV-81): a tag v<version> pushed on
-# a commit on main builds every platform, signs and notarizes the Mac's two
+# a commit on main, or for a patch on its release branch (release/0.10 for
+# 0.10.1), builds every platform, signs and notarizes the Mac's two
 # (Windows' is unsigned for now, DEV-78), and leaves ONE draft GitHub
 # Release with all their files. A person publishes it on
-# GitHub; nothing reaches anyone before that. Run by hand on main, it makes
-# the same draft without a tag, which publishing then makes.
+# GitHub; nothing reaches anyone before that. Run by hand on main or the
+# release branch, it makes the same draft without a tag, which publishing
+# then makes. DEVELOPMENT.md ("Release branches") says how they go.
 #
 # Every job that uses a secret runs in the `release` environment, which holds
 # them and waits for a required reviewer to approve. Set it up as
@@ -30,7 +32,8 @@ concurrency:
 
 jobs:
   # What is released, checked before anyone is asked to approve: a tag that is v<apps/desktop's version>, on a commit on
-  # main, or a run by hand from main; release notes for the version; no published release of it already; and every
+  # its release branch where it has one and else on main, or a run by hand from there; release notes for the version;
+  # no published release of it already; and every
   # suite passed on the commit.
   check:
     runs-on: ubuntu-24.04
@@ -44,28 +47,37 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          # The whole history, to tell whether the commit is on main.
+          # The whole history and every branch, to tell whether the commit is on main or its release branch.
           fetch-depth: 0
       - id: what
-        name: The tag, the version and main agree
+        name: The tag, the version and the branch agree
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="$(jq -r .version apps/desktop/package.json)"
           tag="v$version"
+          # A version's patches come from its release branch (release/0.10 for 0.10.1) once it has one; until then, and
+          # for a new minor or major, from main.
+          branch="release/${version%.*}"
+          if git rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null; then
+            from="$branch"
+          else
+            from=main
+          fi
           if [ "$GITHUB_EVENT_NAME" = push ]; then
             if [ "$GITHUB_REF_NAME" != "$tag" ]; then
               echo "::error::The tag $GITHUB_REF_NAME and apps/desktop/package.json's version ($version) disagree." \
-                "Raise the version on main, then tag that commit v$version."
+                "Raise the version on $from, then tag that commit v$version."
               exit 1
             fi
-            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-              echo "::error::$GITHUB_REF_NAME is on a commit that isn't on main. Releases are cut from main."
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$from"; then
+              echo "::error::$GITHUB_REF_NAME is on a commit that isn't on $from. $version is cut from $from:" \
+                "merge the change there, then tag that commit."
               exit 1
             fi
           else
-            if [ "$GITHUB_REF" != refs/heads/main ]; then
-              echo "::error::Run this by hand from main, not $GITHUB_REF_NAME."
+            if [ "$GITHUB_REF" != "refs/heads/$from" ]; then
+              echo "::error::Run this by hand from $from, not $GITHUB_REF_NAME: $version is cut from there."
               exit 1
             fi
             if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
@@ -369,14 +381,23 @@ jobs:
             echo "::error::$TAG was published while this ran; nothing is changed."
             exit 1
           fi
+          # A patch to an older line (0.10.1 once 0.11.0 is out) is never the latest release: the updater and the
+          # Homebrew tap follow the latest, and must stay on the newest line.
+          newest="$( (gh release list --exclude-drafts --exclude-pre-releases --limit 100 --json tagName --jq '.[].tagName' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//'; echo "$VERSION") | sort -V | tail -n 1)"
+          latest=true
+          if [ "$newest" != "$VERSION" ]; then latest=false; fi
           if [ "$state" = true ]; then
             # The draft is pointed at this run's commit too: a draft from an earlier run by hand may target another one.
-            gh release edit "$TAG" --target "$GITHUB_SHA" --title "Althar $VERSION" --notes-file "$notes"
+            gh release edit "$TAG" --target "$GITHUB_SHA" --title "Althar $VERSION" --notes-file "$notes" --latest="$latest"
             gh release upload "$TAG" release/* --clobber
           elif [ "$GITHUB_EVENT_NAME" = push ]; then
-            gh release create "$TAG" release/* --draft --verify-tag --title "Althar $VERSION" --notes-file "$notes"
+            gh release create "$TAG" release/* --draft --verify-tag --title "Althar $VERSION" --notes-file "$notes" --latest="$latest"
           else
-            gh release create "$TAG" release/* --draft --target "$GITHUB_SHA" --title "Althar $VERSION" --notes-file "$notes"
+            gh release create "$TAG" release/* --draft --target "$GITHUB_SHA" --title "Althar $VERSION" --notes-file "$notes" --latest="$latest"
           fi
           echo "### Draft release $TAG" >> "$GITHUB_STEP_SUMMARY"
           echo "$(gh release view "$TAG" --json url --jq .url). Smoke-test its two dmgs and Windows installer, then publish it there." >> "$GITHUB_STEP_SUMMARY"
+          if [ "$latest" = false ]; then
+            echo "It is a patch to an older line ($newest is out): publish it with \"Set as the latest release\" unticked." >> "$GITHUB_STEP_SUMMARY"
+          fi

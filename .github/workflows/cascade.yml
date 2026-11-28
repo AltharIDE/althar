@@ -1,0 +1,81 @@
+name: cascade
+
+# Fixes cascade from a release branch to the next newer release branch of its line, and from the newest into main
+# (DEVELOPMENT.md, "Release branches"): release/0.9 → release/0.10 → main, release/host-0.2 → main. Each push to a
+# release branch opens, or brings up to date, one pull request from cascade/<source>-into-<target>, which merges by
+# itself once its checks pass: through main's merge queue, and into a release branch, whose rules require nothing, once
+# this job has seen its checks pass. The merge pushes to the target, which cascades on in turn.
+#
+# A cascade that conflicts is committed with its conflict markers, and its pull request stays open as a draft that names
+# the files. Push the fix to its branch: this marks it ready and merges it the same way. .github/scripts/cascade.py says
+# how it works.
+#
+# It pushes and opens pull requests with CASCADE_TOKEN, a repository secret: GitHub starts no workflow for what the run's
+# own token does, so with it the pull request's checks, and the cascade from the branch it merges into, would never
+# run. A fine-grained token for this repository alone, with Contents, Pull requests and Workflows read and write (a
+# cascade can carry a change to .github/workflows).
+on:
+  push:
+    branches: ['release/**', 'cascade/**']
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      from:
+        description: The release branch to cascade on, such as release/0.10
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# One at a time from each release branch, so two pushes can't each open a pull request; a newer push waits.
+concurrency:
+  group: cascade-${{ inputs.from || github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  cascade:
+    # Its own pushes to cascade/… are left alone: the run that made them carries on with them. A person's push there is
+    # the fix for a conflict. A closed pull request counts only when it is a cascade's, merged. A deleted branch is none.
+    if: >-
+      (github.event_name == 'push' && !github.event.deleted && (startsWith(github.ref_name, 'release/') ||
+        github.event.head_commit.author.email != '41898282+github-actions[bot]@users.noreply.github.com')) ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        startsWith(github.event.pull_request.head.ref, 'cascade/')) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    # The wait for a release branch's pull request's checks (cascade.py, under two hours), and the merge around it.
+    timeout-minutes: 120
+    steps:
+      - name: CASCADE_TOKEN is set
+        env:
+          TOKEN: ${{ secrets.CASCADE_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::The repository needs a secret CASCADE_TOKEN: a fine-grained token for it alone, with Contents," \
+              "Pull requests and Workflows read and write. DEVELOPMENT.md (\"Release branches\") says why."
+            exit 1
+          fi
+      - uses: actions/checkout@v5
+        with:
+          # Every branch, whole: the cascade reads both ends' history.
+          fetch-depth: 0
+          token: ${{ secrets.CASCADE_TOKEN }}
+      - env:
+          GH_TOKEN: ${{ secrets.CASCADE_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT: ${{ github.event_name }}
+          FROM: ${{ inputs.from }}
+          PULL: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            python3 .github/scripts/cascade.py --from "$FROM"
+          elif [ "$EVENT" = pull_request ]; then
+            python3 .github/scripts/cascade.py --pull "$PULL"
+          elif [[ "$GITHUB_REF_NAME" == cascade/* ]]; then
+            python3 .github/scripts/cascade.py --pushed "$GITHUB_REF_NAME"
+          else
+            python3 .github/scripts/cascade.py --from "$GITHUB_REF_NAME"
+          fi
