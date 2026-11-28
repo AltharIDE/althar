@@ -167,17 +167,18 @@ function Windows({ account, t }: { account: PlanAccount; t: PlanPeekText }) {
 const standing = (agent: PlanAgent, account: PlanAccount) => {
   // Signed out where the agent can still run: said on the account. Where none can, the row's Sign in again says it.
   const signedOut = account.signedOut === true && agent.stopped === undefined
-  // A read that failed and tries again by itself: its figures are the last good ones.
-  const retry = account.signedOut !== true && account.stale === true ? account.fault : null
-  // Why nothing was read, where nothing was: Connected's reason, a sign-in the agent renews.
-  const why = account.signedOut !== true && account.stale !== true && account.windows.length === 0 ? account.fault : null
-  return { signedOut, retry, why }
+  // Any other fault, whatever rows it has (those reset since included): a read that tries again, a sign-in the agent
+  // renews, why nothing reads it. Quiet, as none is the person's to put right.
+  const note = account.signedOut === true ? null : account.fault
+  return { signedOut, note }
 }
+
+/** A read that failed and tries again by itself, over figures it left; else why there are none, or none fresh. */
+const noteIcon = (account: PlanAccount): IconName => (account.stale === true ? 'reload' : 'info')
 
 /** An account, where it is the agent's only one: its windows, under what is wrong. */
 function Only({ agent, account, t, onSignIn }: { agent: PlanAgent; account: PlanAccount; t: PlanPeekText; onSignIn: SignIn | undefined }) {
-  const { signedOut, retry, why } = standing(agent, account)
-  const said = retry !== null || why !== null
+  const { signedOut, note } = standing(agent, account)
   return (
     <>
       {signedOut && (
@@ -197,25 +198,20 @@ function Only({ agent, account, t, onSignIn }: { agent: PlanAgent; account: Plan
           {t.signedOut}
         </Problem>
       )}
-      {retry !== null && (
-        <Note icon="reload" age={account.age}>
-          {retry}
-        </Note>
-      )}
-      {why !== null && (
-        <Note icon="info" age={account.age}>
-          {why}
+      {note !== null && (
+        <Note icon={noteIcon(account)} age={account.age}>
+          {note}
         </Note>
       )}
       <Windows account={account} t={t} />
-      {!said && account.age !== null && account.windows.length > 0 && <span className={s.age}>{account.age}</span>}
+      {note === null && account.age !== null && account.windows.length > 0 && <span className={s.age}>{account.age}</span>}
     </>
   )
 }
 
 /** An account, where the agent has several: a card with its name and how it stands on top. */
 function Card({ agent, account, t, onSignIn }: { agent: PlanAgent; account: PlanAccount; t: PlanPeekText; onSignIn: SignIn | undefined }) {
-  const { signedOut, retry, why } = standing(agent, account)
+  const { signedOut, note } = standing(agent, account)
   const name = <span className={s.cardName}>{account.name}</span>
   return (
     <div className={s.card} data-problem={signedOut ? '' : undefined} role="group" aria-label={account.name ?? undefined}>
@@ -239,17 +235,12 @@ function Card({ agent, account, t, onSignIn }: { agent: PlanAgent; account: Plan
       ) : (
         <div className={s.cardHead}>
           {name}
-          {retry === null && account.age !== null && <span className={s.age}>{account.age}</span>}
+          {note === null && account.age !== null && <span className={s.age}>{account.age}</span>}
         </div>
       )}
-      {retry !== null && (
-        <Note icon="reload" age={account.age}>
-          {retry}
-        </Note>
-      )}
-      {why !== null && (
-        <Note icon="info" age={account.age}>
-          {why}
+      {note !== null && (
+        <Note icon={noteIcon(account)} age={account.age}>
+          {note}
         </Note>
       )}
       <Windows account={account} t={t} />

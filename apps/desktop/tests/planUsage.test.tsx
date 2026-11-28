@@ -1,19 +1,22 @@
-import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from '@tanstack/react-router'
+import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider, useSearch } from '@tanstack/react-router'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ModelRoom, PlanUsage } from '@althar/contracts'
+import type { Client } from '../src/renderer/data/client'
+import type { ModelRoom, PlanUsage, Status } from '@althar/contracts'
 
 import { PlanGauge } from '@althar/ui'
 
 import type { Host } from '../src/renderer/data/services'
+import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
+import { useStart } from '../src/renderer/features/start/useStart'
 import { TabsFrame } from '../src/renderer/features/tabs/TabsFrame'
 import { elapsedOf, limitWords, planOf, roomOf, windowName } from '../src/renderer/features/usage/plan'
 import { waitsWords } from '../src/renderer/shared/agents'
 import { ModelChoice } from '../src/renderer/shared/ModelChoice'
 import { clock } from '../src/renderer/shared/time'
-import { agents, fakeClient, fakeHost, planUsage, project, usageAccount } from './fixtures'
+import { agents, fakeClient, fakeHost, planUsage, project, usageAccount, usual } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -341,6 +344,66 @@ describe('what the window says of a plan', () => {
     expect(signIn).toHaveBeenCalledWith('codex', 'acc_codex_side')
   })
 
+  it('keeps an account every window of which has reset since, beside one still read, and runs on one signed in', () => {
+    const SIGNED_OUT = { kind: 'sign_in_again' as const, message: 'Signed out. Sign in again to read usage.' }
+    const MONTH = '2026-10-15T09:00:00.000Z'
+    // Plus read now; Main signed out, its month sent apart as reset: Main stays, with its card's own Sign in.
+    const plus = usageAccount({ accountName: 'Plus', windows: [{ kind: 'five_hour', label: null, usedPercent: 39, resetsAt: RESET }] })
+    const main = usageAccount({
+      accountId: 'acc_codex_main',
+      accountName: 'Main',
+      windows: [],
+      resetWindows: [{ kind: 'monthly', label: null, usedPercent: 19, resetsAt: MONTH }],
+      fault: SIGNED_OUT,
+    })
+    const [codex] = planOf(planUsage([plus, main]), NOW).agents
+    expect(codex).toMatchObject({ left: 61, account: 'Plus' })
+    expect(codex?.accounts.map((one) => [one.name, one.signedOut, one.windows.map((window) => [window.label, window.unread])])).toEqual([
+      ['Plus', undefined, [['5 hours', undefined]]],
+      ['Main', true, [['Month', true]]],
+    ])
+    // Its only reading from an account signed out, the other signed in but reset since: work can start there, so it isn't
+    // signed out, only not read since reset.
+    const reset = { ...plus, windows: [], resetWindows: plus.windows, resetSince: true }
+    const out = { ...main, windows: [{ kind: 'weekly' as const, label: null, usedPercent: 30, resetsAt: WEEK }], resetWindows: [] }
+    const [agent] = planOf(planUsage([reset, out]), NOW).agents
+    expect([agent?.unread, agent?.stopped, agent?.signIn]).toEqual(['Not read since reset', undefined, undefined])
+    expect(agent?.accounts.map((one) => [one.name, one.signedOut])).toEqual([
+      ['Plus', undefined],
+      ['Main', true],
+    ])
+    // Both signed out: then it is.
+    expect(planOf(planUsage([{ ...reset, fault: SIGNED_OUT }, out]), NOW).agents[0]).toMatchObject({ stopped: 'Signed out', signIn: true })
+  })
+
+  it('says why an account wasn’t read again over the rows the runtime sends as reset, and keeps a signed-out one’s card', () => {
+    const after = new Date('2026-10-20T00:00:00.000Z')
+    const expired = { kind: 'expired' as const, message: 'Sign-in expired. Claude Code renews it on its next run.' }
+    // As the runtime sends it once every window has reset: none current, each apart as reset, and the fault.
+    const claudeReset = { ...claudeBoth, windows: [], resetWindows: claudeBoth.windows, resetSince: true, fault: expired }
+    const plus = usageAccount({
+      accountName: 'Plus',
+      windows: [{ kind: 'weekly', label: null, usedPercent: 30, resetsAt: '2026-10-25T00:00:00.000Z' }],
+    })
+    const main = usageAccount({
+      accountId: 'acc_codex_main',
+      accountName: 'Main',
+      windows: [],
+      resetWindows: [{ kind: 'weekly', label: null, usedPercent: 10, resetsAt: WEEK }],
+      resetSince: true,
+      fault: { kind: 'sign_in_again', message: 'Signed out. Sign in again to read usage.' },
+    })
+    render(<PlanGauge agents={planOf(planUsage([claudeReset, plus, main]), after).agents} defaultOpen onSignIn={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /^Claude Code/ }))
+    expect(screen.getByText(expired.message)).toBeTruthy()
+    expect(screen.getAllByText(/, not read since$/).length).toBe(2)
+    fireEvent.click(screen.getByRole('button', { name: /^Codex/ }))
+    const card = within(screen.getByRole('group', { name: 'Main' }))
+    expect(card.getByRole('alert').textContent).toContain('Main Signed out')
+    expect(card.getByText(/, not read since$/)).toBeTruthy()
+    expect(card.getByRole('button', { name: 'Sign in' })).toBeTruthy()
+  })
+
   it('shows no room in the bar for an agent whose only account is signed out', async () => {
     const signedOut = usageAccount({
       windows: [{ kind: 'five_hour', label: null, usedPercent: 20, resetsAt: RESET }],
@@ -607,14 +670,31 @@ const projectRoute = createRoute({
   component: () => <textarea aria-label="Message the lead" />,
 })
 
-const windowAt = (path: string, usage: PlanUsage, host: Host = fakeHost()) => {
+/** Settings, as its route has it: an agent's tab with the sign-in asked for started, the account's where one is named. */
+function SettingsAt() {
+  const { signIn, account } = useSearch({ strict: false }) as { signIn?: string; account?: string }
+  const start = useStart({ recheck: true })
+  return (
+    <SettingsPage
+      start={start}
+      section="agents"
+      onSection={() => {}}
+      {...(signIn === undefined ? {} : { signIn })}
+      {...(account === undefined ? {} : { account })}
+    />
+  )
+}
+const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/settings/$section', component: SettingsAt })
+
+const windowAt = (path: string, usage: PlanUsage, host: Host = fakeHost(), overrides: Partial<Client> = {}) => {
   const router = createRouter({
-    routeTree: rootRoute.addChildren([homeRoute, projectRoute]),
+    routeTree: rootRoute.addChildren([homeRoute, projectRoute, settingsRoute]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
   const fake = fakeClient({
     listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
     getPlanUsage: vi.fn(async () => usage),
+    ...overrides,
   })
   withServices(<RouterProvider router={router} />, fake.client, host)
   return fake
@@ -680,6 +760,44 @@ describe('the plan gauge in the bar', () => {
     await userEvent.click(second!)
     expect(within(opened).getByText('work')).toBeTruthy()
     expect(within(opened).queryByText(/No reading for/)).toBeNull()
+  })
+})
+
+describe('an account signed in again from its card in the bar’s peek', () => {
+  it('opens Settings with that account’s sign-in started, not the agent’s first signed out', async () => {
+    const side = usageAccount({
+      accountId: 'acc_codex_side',
+      accountName: 'side',
+      windows: [{ kind: 'weekly', label: null, usedPercent: 20, resetsAt: WEEK }],
+      fault: { kind: 'sign_in_again', message: 'Signed out. Sign in again to read usage.' },
+    })
+    // Codex as Settings reads it: two accounts signed out, the other one first, and Work signed in; its own login the one
+    // way, so a sign-in starts at once.
+    const codex: Status = {
+      apiVersion: 1,
+      appVersion: '0.0.0',
+      agents: [
+        {
+          ...agents[1]!,
+          ways: [],
+          accounts: [
+            { ...usual('acc_codex_other', 'signed_out'), name: 'other' },
+            { ...usual('acc_codex_side', 'signed_out'), name: 'side' },
+            { ...usual('acc_codex_work', 'signed_in'), name: 'work' },
+          ],
+        },
+      ],
+    }
+    const { client } = windowAt('/', planUsage([codexWork, side]), fakeHost(), { status: vi.fn(async () => codex) })
+    await userEvent.click(await gauge())
+    const opened = await screen.findByRole('dialog', { name: 'Plan usage' })
+    await userEvent.click(within(opened).getByRole('button', { name: /^Codex/ }))
+    // A minute on: Settings reads the agents again as it opens, and starts the sign-in once that read is newer than it.
+    vi.setSystemTime(new Date(NOW.getTime() + 60_000))
+    await userEvent.click(within(within(opened).getByRole('group', { name: 'side' })).getByRole('button', { name: 'Sign in' }))
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_codex_side'))
+    expect(client.signInAccount).toHaveBeenCalledTimes(1)
+    expect(peek()).toBeNull()
   })
 })
 

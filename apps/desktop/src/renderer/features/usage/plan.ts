@@ -231,40 +231,37 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
       })
       continue
     }
+    // An account read before, every window of which has reset since: its rows say so, beside the accounts still read.
+    const reset = accounts.filter((account) => wasRead.has(account.accountId) && !read.some((one) => one.account === account))
     // Another account on the plan, connected but unread (a fresh OpenCode Go key in a new account), is in the detail too.
     const named = accounts.filter((account) => !wasRead.has(account.accountId) && namedUnread(account))
     // The figure is of the account new work would start on: one signed out keeps its last numbers in the peek, but runs nothing, as the runtime skips it.
-    const usable = read.filter(({ account }) => account.fault?.kind !== 'sign_in_again')
+    const runs = (account: AccountUsage) => account.fault?.kind !== 'sign_in_again'
+    const usable = read.filter(({ account }) => runs(account))
     const route = usable.length === 0 ? undefined : usable.reduce((most, one) => (leftOf(one.window) > leftOf(most.window) ? one : most))
-    // The peek lists that account first, then the rest tightest first, and those signed out last.
+    // With no figure of its own, an account says why: its fault, or why nothing reads it.
+    const unnumbered = (account: AccountUsage) => ({
+      ...accountOf(account, several, now, asRead.get(account.accountId)),
+      fault: faultOf(account) ?? account.noReading,
+    })
+    // The peek lists that account first, then the rest tightest first, then those with no figure, and those signed out last.
     const each = [
       ...[
         ...(route === undefined ? [] : [route]),
         ...read.filter((one) => one !== route).toSorted((a, b) => leftOf(a.window) - leftOf(b.window)),
       ].map(({ account }) => accountOf(account, several, now, asRead.get(account.accountId))),
-      ...named.map((account) => ({
-        ...accountOf(account, several, now, asRead.get(account.accountId)),
-        fault: faultOf(account) ?? account.noReading,
-      })),
+      ...reset.map(unnumbered),
+      ...named.map(unnumbered),
     ].toSorted((a, b) => Number(a.signedOut === true) - Number(b.signedOut === true))
     const detail = collapsed(each)
-    // None read can run, but one unread can: the runtime starts work there, so the plan is connected, with no figure.
-    if (usable.length === 0 && named.some((account) => account.fault?.kind !== 'sign_in_again')) {
-      agents.push({
-        id: agentId,
-        name: nameOf(first),
-        ...(brand === undefined ? {} : { brand }),
-        left: 0,
-        limit: '',
-        until: null,
-        account: null,
-        ...detail,
-        connected: text.connected,
-      })
-      continue
-    }
     if (route === undefined) {
-      // None signed in: no room to give it, only why, with its saved numbers in the detail.
+      // None read can run. One reset since, or never read, that can is where the runtime starts work: no figure, and the
+      // row says why (not read since reset, or connected). Only where none can is it signed out, with its saved numbers.
+      const instead = reset.some(runs)
+        ? { unread: text.unread }
+        : named.some(runs)
+          ? { connected: text.connected }
+          : { stopped: text.signedOut, signIn: true }
       agents.push({
         id: agentId,
         name: nameOf(first),
@@ -274,8 +271,7 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
         until: null,
         account: null,
         ...detail,
-        stopped: text.signedOut,
-        signIn: true,
+        ...instead,
       })
       continue
     }
