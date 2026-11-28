@@ -154,8 +154,8 @@ describe('what the window says of a plan', () => {
       ['Codex', 50, 'side'],
     ])
     expect(read[1]?.limit).toBe('weekly limit')
-    // Opened, the tightest account first, each named where there are several.
-    expect(read[1]?.accounts.map((account) => account.name)).toEqual(['work', 'side'])
+    // Opened, the account work goes to first, then the rest tightest first, each named where there are several.
+    expect(read[1]?.accounts.map((account) => account.name)).toEqual(['side', 'work'])
     // A model's own window is in the detail, not the agent's figure.
     expect(read[0]?.accounts[0]?.windows.map((window) => [window.label, window.left])).toEqual([
       ['5 hours', 3],
@@ -174,7 +174,11 @@ describe('what the window says of a plan', () => {
     const [codex] = planOf(planUsage([work, signedOut]), NOW).agents
     // Side's saved 80% runs nothing: new work starts on Work, at 3%.
     expect([codex?.left, codex?.account]).toEqual([3, 'work'])
-    expect(codex?.accounts.map((account) => account.name)).toEqual(['work', 'side'])
+    // Side last, said signed out, so the peek gives its card its own Sign in.
+    expect(codex?.accounts.map((account) => [account.name, account.signedOut])).toEqual([
+      ['work', undefined],
+      ['side', true],
+    ])
     // With every account signed out, it has no room: it says why in place of a figure, after every agent that can run,
     // its last numbers kept in the detail.
     const claude = usageAccount({
@@ -258,10 +262,10 @@ describe('what the window says of a plan', () => {
     expect(both).toMatchObject({ name: 'OpenCode Go', connected: 'Connected' })
     expect(both?.stopped).toBeUndefined()
     expect(both?.signIn).toBeUndefined()
-    // Each account says how it stands in the detail.
-    expect(both?.accounts.map((account) => [account.name, account.fault])).toEqual([
-      ['Personal', 'OpenCode Go needs signing in again.'],
-      ['Account 2', why],
+    // Each account says how it stands in the detail, the one signed out last.
+    expect(both?.accounts.map((account) => [account.name, account.fault, account.signedOut])).toEqual([
+      ['Account 2', why, undefined],
+      ['Personal', 'OpenCode Go needs signing in again.', true],
     ])
     // Account 2 refused too: nothing runs, so the row signs Go in again.
     expect(planOf(planUsage([personal, { ...fresh, fault: again }]), NOW).agents[0]).toMatchObject({ stopped: 'Signed out', signIn: true })
@@ -317,6 +321,26 @@ describe('what the window says of a plan', () => {
     expect(signIn).toHaveBeenCalledWith('opencode')
   })
 
+  it('signs one account in again from its card, in Settings, where the agent still runs on another', () => {
+    const work = usageAccount({ windows: [{ kind: 'five_hour', label: null, usedPercent: 40, resetsAt: RESET }] })
+    const side = usageAccount({
+      accountId: 'acc_codex_side',
+      accountName: 'side',
+      windows: [{ kind: 'weekly', label: null, usedPercent: 20, resetsAt: WEEK }],
+      fault: { kind: 'sign_in_again', message: 'Signed out. Sign in again to read usage.' },
+    })
+    const signIn = vi.fn()
+    render(<PlanGauge agents={planOf(planUsage([side, work]), NOW).agents} defaultOpen onSignIn={signIn} />)
+    // The row has a figure, from Work: no Sign in again beside it.
+    expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Codex/ }))
+    const card = within(screen.getByRole('group', { name: 'side' }))
+    expect(card.getByRole('alert').textContent).toContain('side Signed out')
+    expect(within(screen.getByRole('group', { name: 'work' })).queryByRole('alert')).toBeNull()
+    fireEvent.click(card.getByRole('button', { name: 'Sign in' }))
+    expect(signIn).toHaveBeenCalledWith('codex', 'acc_codex_side')
+  })
+
   it('shows no room in the bar for an agent whose only account is signed out', async () => {
     const signedOut = usageAccount({
       windows: [{ kind: 'five_hour', label: null, usedPercent: 20, resetsAt: RESET }],
@@ -336,7 +360,7 @@ describe('what the window says of a plan', () => {
       fault: { kind: 'expired', message: 'Sign-in expired. Claude Code renews it on its next run.' },
     })
     const [account] = planOf(planUsage([old]), NOW).agents[0]?.accounts ?? []
-    expect(account?.age).toBe('read 2h ago')
+    expect(account?.age).toBe('Last read 2h ago')
     expect(account?.fault).toBe('Sign-in expired. Claude Code renews it on its next run.')
     expect(planOf(planUsage([codexWork]), new Date('2026-10-15T10:10:00.000Z')).agents[0]?.accounts[0]?.age).toBeNull()
   })
@@ -348,7 +372,7 @@ describe('what the window says of a plan', () => {
     })
     const [account] = planOf(planUsage([waiting]), new Date('2026-10-15T10:00:00.000Z')).agents[0]?.accounts ?? []
     expect(account?.fault).toBe('Rate limited. Tries again later.')
-    expect(account?.age).toBe('read 10m ago')
+    expect(account?.age).toBe('Last read 10m ago')
     expect(account?.stale).toBe(true)
     expect(account?.windows.length).toBeGreaterThan(0)
     // Old numbers set against now's clock would mislead: no tick on a stale bar.
@@ -362,8 +386,8 @@ describe('what the window says of a plan', () => {
     const agent = planOf(planUsage([main, pro]), NOW).agents[0]
     expect(agent).toMatchObject({ stopped: 'Signed out', signIn: true, fault: expired.message })
     expect(agent?.accounts.map((one) => [one.name, one.fault, one.age, one.stale])).toEqual([
-      ['Main', null, 'read 20m ago', true],
-      ['Pro', null, 'read 20m ago', true],
+      ['Main', null, 'Last read 20m ago', true],
+      ['Pro', null, 'Last read 20m ago', true],
     ])
     // Failed differently, each says its own.
     const other = { ...pro, fault: { kind: 'unreachable' as const, message: 'No reply. Tries again soon.' } }
@@ -557,7 +581,9 @@ describe('what the window says of a plan', () => {
     ])
     expect(
       planOf(sent, after).agents.map((agent) => [agent.unread, agent.accounts.map((account) => [account.age, account.fault])]),
-    ).toEqual([['Not read since reset', [[expect.stringMatching(/^read /), 'Sign-in expired. Claude Code renews it on its next run.']]]])
+    ).toEqual([
+      ['Not read since reset', [[expect.stringMatching(/^Last read /), 'Sign-in expired. Claude Code renews it on its next run.']]],
+    ])
     // Signed out as well, it can't run: said as it is, not as unread.
     const [out] = planOf(planUsage([{ ...claudeBoth, fault: { kind: 'sign_in_again', message: 'Sign in.' } }]), after).agents
     expect([out?.stopped, out?.unread]).toEqual(['Signed out', undefined])

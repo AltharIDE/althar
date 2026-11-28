@@ -77,12 +77,57 @@ export const CODEX_SIGNED_OUT: PlanAgent = {
     {
       id: 'codex-work',
       name: null,
-      age: 'read 3 hours ago',
+      age: 'Last read 3 hours ago',
       fault: 'Signed out. Sign in again to read usage.',
       stale: true,
+      signedOut: true,
       windows: [
         { id: 'five_hour', label: '5 hours', left: 80, until: '11:00' },
         { id: 'weekly', label: 'Week', left: 74, until: 'Sun 18:12' },
+      ],
+    },
+  ],
+}
+
+/**
+ * Codex on two accounts: Plus has room, so work goes there and its five hours are the figure; Main is signed out, its last
+ * month saved.
+ */
+export const CODEX_MAIN_SIGNED_OUT: PlanAgent = {
+  ...CODEX_PLENTY,
+  left: 61,
+  limit: 'five-hour limit',
+  until: '13:55',
+  elapsed: 98,
+  account: 'Plus',
+  accounts: [
+    {
+      id: 'codex-plus',
+      name: 'Plus',
+      age: null,
+      fault: null,
+      windows: [
+        { id: 'five_hour', label: '5 hours', left: 61, until: '13:55', resets: 'in 6m', resetsTitle: 'Resets 13:55 · in 6m', elapsed: 98 },
+        {
+          id: 'weekly',
+          label: 'Week',
+          left: 64,
+          until: 'Sun 00:47',
+          resets: 'in 10h 58m',
+          resetsTitle: 'Resets Sun 00:47 · in 10h 58m',
+          elapsed: 93,
+        },
+      ],
+    },
+    {
+      id: 'codex-main',
+      name: 'Main',
+      age: 'Last read 1h ago',
+      fault: 'Signed out. Sign in again to read usage.',
+      stale: true,
+      signedOut: true,
+      windows: [
+        { id: 'monthly', label: 'Month', left: 81, until: '22 Dec', resets: 'in 24d 9h', resetsTitle: 'Resets 22 Dec 22:49 · in 24d 9h' },
       ],
     },
   ],
@@ -99,7 +144,7 @@ export const CLAUDE_UNREAD: PlanAgent = {
     {
       id: 'claude-personal',
       name: null,
-      age: 'read 2 days ago',
+      age: 'Last read 2 days ago',
       fault: 'Sign-in expired. Claude Code renews it on its next run.',
       windows: [],
     },
@@ -121,9 +166,10 @@ export const CODEX_EXPIRED: PlanAgent = {
   accounts: ['Main', 'Pro'].map((name) => ({
     id: `codex-${name.toLowerCase()}`,
     name,
-    age: 'read 20m ago',
+    age: 'Last read 20m ago',
     fault: null,
     stale: true,
+    signedOut: true,
     windows: [
       { id: 'weekly', label: 'Week', left: 51, until: 'Mon 11:00', resets: 'in 3d 23h', resetsTitle: 'Resets Mon 11:00 · in 3d 23h' },
     ],
@@ -142,7 +188,7 @@ export const CLAUDE_RATE_LIMITED: PlanAgent = {
     {
       id: 'claude-work',
       name: 'Work',
-      age: 'read 6m ago',
+      age: 'Last read 6m ago',
       fault: null,
       stale: true,
       windows: [
@@ -153,7 +199,7 @@ export const CLAUDE_RATE_LIMITED: PlanAgent = {
     {
       id: 'claude-personal',
       name: 'Personal',
-      age: 'read 6m ago',
+      age: 'Last read 6m ago',
       fault: null,
       stale: true,
       windows: [
@@ -164,7 +210,7 @@ export const CLAUDE_RATE_LIMITED: PlanAgent = {
   ],
 }
 
-/** Two accounts, one out: work goes to the one with room, Personal, whose figure is the agent's. Personal's last read didn't answer: its numbers are the last good ones. */
+/** Two accounts, one out: work goes to the one with room, Personal, first, whose figure is the agent's. Personal's last read didn't answer: its numbers are the last good ones. */
 export const CLAUDE_TWO: PlanAgent = {
   ...CLAUDE_PLENTY,
   left: 41,
@@ -173,6 +219,17 @@ export const CLAUDE_TWO: PlanAgent = {
   account: 'Personal',
   accounts: [
     {
+      id: 'claude-personal',
+      name: 'Personal',
+      age: 'Last read 2 hours ago',
+      fault: 'No reply. Tries again soon.',
+      stale: true,
+      windows: [
+        { id: 'five_hour', label: '5 hours', left: 80, until: '15:40', resets: 'in 50m', resetsTitle: 'Resets 15:40 · in 50m' },
+        { id: 'weekly', label: 'Week', left: 41, until: 'Fri 09:00', resets: 'in 1d 18h', resetsTitle: 'Resets Fri 09:00 · in 1d 18h' },
+      ],
+    },
+    {
       id: 'claude-work',
       name: 'Work',
       age: null,
@@ -180,17 +237,6 @@ export const CLAUDE_TWO: PlanAgent = {
       windows: [
         { id: 'five_hour', label: '5 hours', left: 52, until: '17:00', resets: 'in 2h 10m', resetsTitle: 'Resets 17:00 · in 2h 10m' },
         { id: 'weekly', label: 'Week', left: 0, until: 'Mon 09:00', resets: 'in 3d 18h', resetsTitle: 'Resets Mon 09:00 · in 3d 18h' },
-      ],
-    },
-    {
-      id: 'claude-personal',
-      name: 'Personal',
-      age: 'read 2 hours ago',
-      fault: 'No reply. Tries again soon.',
-      stale: true,
-      windows: [
-        { id: 'five_hour', label: '5 hours', left: 80, until: '15:40', resets: 'in 50m', resetsTitle: 'Resets 15:40 · in 50m' },
-        { id: 'weekly', label: 'Week', left: 41, until: 'Fri 09:00', resets: 'in 1d 18h', resetsTitle: 'Resets Fri 09:00 · in 1d 18h' },
       ],
     },
   ],
@@ -292,7 +338,7 @@ export const OPENCODE_GO_SIGN_IN: PlanAgent = {
   account: null,
   stopped: 'Signed out',
   signIn: true,
-  accounts: [{ id: 'opencode-usual', name: null, age: null, fault: 'OpenCode Go needs signing in again.', windows: [] }],
+  accounts: [{ id: 'opencode-usual', name: null, age: null, fault: 'OpenCode Go needs signing in again.', signedOut: true, windows: [] }],
 }
 
 /** 40% through the week with 65% left: use is a little under the clock's pace, so the fill runs past the tick (at the 60% of the week left). */
