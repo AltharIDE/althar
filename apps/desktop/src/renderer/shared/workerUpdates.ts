@@ -1,10 +1,11 @@
-import { useQuery } from '@tanstack/react-query'
+import { type QueryClient, useQuery } from '@tanstack/react-query'
 import { useCallback, useSyncExternalStore } from 'react'
 
 import { type HomeWorker, type HomeWorkers, workerName } from '@althar/contracts'
 import type { UpdatingWorker, WorkerUpdateView } from '@althar/ui'
 
 import { newer } from '../../homes'
+import type { Client } from '../data/client'
 import { keys } from '../data/reads'
 import { useServices } from '../data/services'
 
@@ -181,32 +182,32 @@ export interface WorkerUpdatesModel {
   readonly cancel: (workerId: string) => void
 }
 
+/**
+ * The home took a press, or refused it: a read of its own, sent now (any read still out is let go), and only its answer,
+ * in the cache, lets the press go. Where it fails, as on a dropped connection, the press holds and it's read again,
+ * more slowly each time. Pressed again since, that press settles itself.
+ */
+const confirm = (cache: QueryClient, client: Client, workerId: string, pressed: number, attempt = 0): void => {
+  if (presses.get(workerId) !== pressed) return
+  void cache
+    .cancelQueries({ queryKey: keys.workers })
+    .then(() => cache.fetchQuery({ queryKey: keys.workers, queryFn: () => client.getWorkers(), staleTime: 0, retry: false }))
+    .then(
+      () => {
+        if (presses.get(workerId) === pressed) change((was) => ({ intents: without(was.intents, workerId) }))
+      },
+      () => {
+        setTimeout(
+          () => confirm(cache, client, workerId, pressed, attempt + 1),
+          Math.min(confirmTiming.maxMs, confirmTiming.firstMs * 2 ** attempt),
+        )
+      },
+    )
+}
+
 export const useWorkerUpdates = (): WorkerUpdatesModel => {
   const { client, cache } = useServices()
-  /**
-   * The home took it, or refused it: a read sent from now on (any read still out is let go) says it, and once that's in,
-   * what was pressed is let go too.
-   */
-  const settle = useCallback(
-    (workerId: string, press: number, attempt = 0): void => {
-      // Pressed again since: that press settles itself.
-      if (presses.get(workerId) !== press) return
-      // A read of its own, sent now (any read still out is let go): only its answer, in the cache, lets the press go.
-      void cache
-        .cancelQueries({ queryKey: keys.workers })
-        .then(() => cache.fetchQuery({ queryKey: keys.workers, queryFn: () => client.getWorkers(), staleTime: 0, retry: false }))
-        .then(
-          () => {
-            if (presses.get(workerId) === press) change((was) => ({ intents: without(was.intents, workerId) }))
-          },
-          () => {
-            // Not read: the press holds, and it's read again before long, more slowly each time.
-            setTimeout(() => settle(workerId, press, attempt + 1), Math.min(confirmTiming.maxMs, confirmTiming.firstMs * 2 ** attempt))
-          },
-        )
-    },
-    [cache, client],
-  )
+  const settle = useCallback((workerId: string, pressed: number) => confirm(cache, client, workerId, pressed), [cache, client])
   const update = useCallback(
     (workerIds: readonly string[]) => {
       if (workerIds.length === 0) return
