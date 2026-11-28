@@ -153,13 +153,16 @@ describe('locked host dependency bundles', () => {
     writeFileSync(join(codex, 'codex-resources', 'bwrap'), 'bubblewrap')
     writeFileSync(join(codex, 'codex-path', 'rg'), 'ripgrep')
     pkg(root, 'sharp')
+    // node-pty with this machine's own build of it, as every release carries.
+    mkdirSync(join(pkg(root, 'node-pty'), 'build/Release'), { recursive: true })
+    writeFileSync(join(root, 'node_modules/node-pty/build/Release/pty.node'), 'own build')
     writeFileSync(join(root, 'althar-worker'), 'worker binary')
     for (const part of ['bin', 'licenses']) mkdirSync(join(root, 'tools', part), { recursive: true })
     writeFileSync(join(root, 'tools/bin/socat'), 'socat')
     const home = join(temporary(), 'release')
     await assembleBundle({ entry, node, version: '1.2.3' }, home)
     // The adapters and their SDKs, and no program of an agent's own: each comes on first use.
-    for (const kept of ['@agentclientprotocol/claude-agent-acp', '@anthropic-ai/claude-agent-sdk', '@openai/codex', 'sharp'])
+    for (const kept of ['@agentclientprotocol/claude-agent-acp', '@anthropic-ai/claude-agent-sdk', '@openai/codex', 'sharp', 'node-pty'])
       expect(existsSync(join(home, 'node_modules', kept)), kept).toBe(true)
     for (const gone of [`@anthropic-ai/claude-agent-sdk-${system}`, `@openai/codex-${system}`])
       expect(existsSync(join(home, 'node_modules', gone)), gone).toBe(false)
@@ -203,6 +206,9 @@ describe('locked host dependency bundles', () => {
     writeFileSync(join(codex, 'codex-resources', 'bwrap'), 'bubblewrap')
     writeFileSync(join(codex, 'codex-resources', 'voice', 'bin', 'codex-voice-host'), 'voice')
     pkg(root, 'sharp')
+    // node-pty with this machine's own build of it, as every release carries.
+    mkdirSync(join(pkg(root, 'node-pty'), 'build/Release'), { recursive: true })
+    writeFileSync(join(root, 'node_modules/node-pty/build/Release/pty.node'), 'own build')
     writeFileSync(join(root, 'althar-worker'), 'worker binary')
     for (const part of ['bin', 'licenses']) mkdirSync(join(root, 'tools', part), { recursive: true })
     writeFileSync(join(root, 'tools/bin/socat'), 'socat')
