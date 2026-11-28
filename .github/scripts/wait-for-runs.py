@@ -40,6 +40,7 @@ def wait(workflows, sha, error, read=runs, clock=time.monotonic, sleep=time.slee
     failed_reads = dict.fromkeys(pending, 0)
     said = set()
     while True:
+        started = clock()
         for workflow in list(pending):
             try:
                 found = read(workflow, sha)
@@ -68,11 +69,12 @@ def wait(workflows, sha, error, read=runs, clock=time.monotonic, sleep=time.slee
                     print(f"Waiting for {workflow}: {run['url']}", flush=True)
         if not pending:
             return
-        # Read once more at the deadline itself: a run that passed in the last stretch still counts.
-        if clock() >= deadline:
+        # Only a poll begun at the deadline or after is the last: one begun before it, however late it returns, may have
+        # read a run that passed since.
+        if started >= deadline:
             waited = ' and '.join(pending)
             raise Failed(f'Gave up on {waited} after {LIMIT // 60} minutes. ' + error.format(workflow=pending[0]))
-        sleep(min(EVERY, deadline - clock()))
+        sleep(max(0, min(EVERY, deadline - clock())))
 
 
 def main():

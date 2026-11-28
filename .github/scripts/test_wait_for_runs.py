@@ -14,7 +14,7 @@ CANCELLED = dict(status='completed', conclusion='cancelled', url='https://exampl
 
 
 class Tests(unittest.TestCase):
-    def wait(self, *workflows, late=0, **reads):
+    def wait(self, *workflows, late=0, slow=None, **reads):
         """Each workflow's reads, in order, the last one repeating; the seconds slept, once all have passed."""
         self.now = 0
 
@@ -23,6 +23,9 @@ class Tests(unittest.TestCase):
             # `late` is what the first read takes, so the polls don't fall on the limit exactly.
             nonlocal late
             self.now, late = self.now + late, 0
+            # `slow` is (when, how long): the read begun at `when` takes that long to answer.
+            if slow and self.now == slow[0]:
+                self.now += slow[1]
             answers = reads[workflow]
             answer = answers.pop(0) if len(answers) > 1 else answers[0]
             if isinstance(answer, Exception):
@@ -69,6 +72,12 @@ class Tests(unittest.TestCase):
     def test_a_pass_in_the_last_stretch_before_the_limit_counts(self):
         polls = module.LIMIT // module.EVERY
         self.assertEqual(self.wait(late=10, post=[*[[RUNNING]] * polls, [PASSED]]), module.LIMIT)
+
+    def test_a_read_that_spans_the_limit_is_followed_by_a_last_one(self):
+        before = module.LIMIT - module.EVERY
+        polls = before // module.EVERY + 1
+        waited = self.wait(slow=(before, module.EVERY + 1), post=[*[[RUNNING]] * polls, [PASSED]])
+        self.assertEqual(waited, module.LIMIT + 1)
 
     def test_a_run_still_going_after_a_late_start_gives_up_at_the_limit(self):
         with self.assertRaisesRegex(module.Failed, '^Gave up on post'):
