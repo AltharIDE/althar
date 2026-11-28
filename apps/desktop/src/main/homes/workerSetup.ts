@@ -521,7 +521,7 @@ export const workerSetups = (
       set({ phase: 'enroll', at: STEP.enroll, publicKey })
     })
 
-  /** The worker's check, run over SSH at its address; it writes what it found where the worker tells its home. */
+  /** The worker's whole check, run over SSH at its address, for its agents; it writes what it found where the worker tells its home. */
   const checkOver = async (ssh: string) => {
     const controller = new AbortController()
     const ran = await bootstrap(sshTargetOf(ssh), 'worker-check', [], controller.signal, { timeout: 5 * 60_000 }).catch(
@@ -530,12 +530,7 @@ export const workerSetups = (
         throw error
       },
     )
-    const check = checkOf(ran.events.findLast((one) => one.step === 'check' && one.state === 'done')) ?? null
-    log.info('A worker checked', {
-      target: ssh,
-      sandbox: check === null ? 'unsaid' : check.sandbox.starts ? 'starts' : check.sandbox.problem,
-    })
-    return check
+    return checkOf(ran.events.findLast((one) => one.step === 'check' && one.state === 'done')) ?? null
   }
 
   // One sign-in at a time, over its own SSH connection: its input carries a pasted code.
@@ -637,10 +632,41 @@ export const workerSetups = (
       return (check?.agents ?? []).map(({ id, name, signedIn }) => ({ id, name, signedIn }))
     },
     /**
-     * The worker's whole check now, over SSH, as its Check again runs it: its sandbox, as an administrator's fix left it,
-     * and its agents. Null from a release that doesn't say it.
+     * The worker's sandbox, by its check run now over SSH, as Check again runs it: said as soon as the check sees it, while
+     * the rest of the check (each agent started) goes on there. Null from a release that doesn't say it; it fails where the
+     * check couldn't run.
      */
-    check: (ssh: string) => checkOver(ssh),
+    check: (ssh: string) =>
+      new Promise<WorkerCheck['sandbox'] | null>((resolve, reject) => {
+        let said = false
+        const tell = (sandbox: WorkerCheck['sandbox']) => {
+          if (said) return
+          said = true
+          log.info('A worker checked', { target: ssh, sandbox: sandbox.starts ? 'starts' : sandbox.problem })
+          resolve(sandbox)
+        }
+        bootstrap(sshTargetOf(ssh), 'worker-check', [], new AbortController().signal, {
+          timeout: 5 * 60_000,
+          event: (one) => {
+            const seen = one.step === 'sandbox' && one.state === 'seen' ? checkOf(one) : undefined
+            if (seen !== undefined) tell(seen.sandbox)
+          },
+        }).then(
+          (ran) => {
+            const check = checkOf(ran.events.findLast((one) => one.step === 'check' && one.state === 'done'))
+            if (check !== undefined) return tell(check.sandbox)
+            if (said) return
+            // Nothing said of its check: a release from before it said one, or a command that ended without its words.
+            log.warn('A worker’s check said nothing of its sandbox', { target: ssh, exit: ran.code })
+            if (ran.code === 0) resolve(null)
+            else reject(new Stopped('Failed', STEP.check))
+          },
+          (error: unknown) => {
+            log.warn('A worker couldn’t be checked', { target: ssh, code: error instanceof Stopped ? error.code : String(error) })
+            if (!said) reject(error)
+          },
+        )
+      }),
     signIn: (ssh: string, agent: string, way: 'browser' | 'device') => {
       signingIn?.controller.abort()
       const controller = new AbortController()

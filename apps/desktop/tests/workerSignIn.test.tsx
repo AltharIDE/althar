@@ -253,8 +253,8 @@ describe('Check again on a worker’s sandbox problem', () => {
   const starts: HomeWorker = { ...blocked, readiness: { sandbox: { starts: true }, tools: [], models: [] } }
 
   it('clears the problem as soon as the check says the sandbox starts, and lets go once the home says so too', async () => {
-    let answer: (check: WorkerCheck | null) => void = () => undefined
-    const check = vi.fn(() => new Promise<WorkerCheck | null>((resolve) => (answer = resolve)))
+    let answer: (sandbox: WorkerCheck['sandbox'] | null) => void = () => undefined
+    const check = vi.fn(() => new Promise<WorkerCheck['sandbox'] | null>((resolve) => (answer = resolve)))
     const { bridge } = bridgeOf(undefined, check)
     const { result } = hosted(useWorkerCheck, fakeHost({ workers: bridge }))
     act(() => result.current.check(blocked))
@@ -267,7 +267,7 @@ describe('Check again on a worker’s sandbox problem', () => {
     // A read of the home that still says it fails changes nothing while it checks.
     act(() => result.current.confirmed([blocked]))
     expect(view()).toEqual({ kind: 'checking' })
-    await act(async () => answer({ sandbox: { starts: true }, agents: [] }))
+    await act(async () => answer({ starts: true }))
     expect(view()).toEqual({ kind: 'checked', sandbox: { starts: true } })
     // Its problem is gone at once, though the home hasn't heard yet.
     expect(unreadyOf(checkedWorker(blocked, view()))).toBeUndefined()
@@ -278,8 +278,8 @@ describe('Check again on a worker’s sandbox problem', () => {
   })
 
   it('says it still fails with the check’s own command, and why where it couldn’t check', async () => {
-    const answers: Array<() => Promise<WorkerCheck | null>> = [
-      async () => ({ sandbox: { starts: false, problem: 'NoUserNamespaces', fix: 'sudo sh -c new' }, agents: [] }),
+    const answers: Array<() => Promise<WorkerCheck['sandbox'] | null>> = [
+      async () => ({ starts: false, problem: 'NoUserNamespaces', fix: 'sudo sh -c new' }),
       async () => {
         throw new Error('Unreachable')
       },
@@ -301,12 +301,14 @@ describe('Check again on a worker’s sandbox problem', () => {
     act(() => result.current.check(blocked))
     await waitFor(() => expect(view()).toEqual({ kind: 'failed' }))
     expect(checkedUnready(unreadyOf(blocked), view(), 'box')?.note).toBe('Couldn’t check box over SSH. Althar’s log says why.')
-    // A release that doesn't say its check: the home's reads stand.
+    // A release that doesn't say its check: the home's reads stand, with why nothing changed.
     act(() => result.current.check(blocked))
-    await waitFor(() => expect(view()).toBeUndefined())
+    await waitFor(() => expect(view()).toEqual({ kind: 'unsaid' }))
+    const unsaid = checkedUnready(unreadyOf(checkedWorker(blocked, view())), view(), 'box')
+    expect(unsaid).toMatchObject({ command: fix, note: 'box’s release doesn’t say what its check found. Update it, then check again.' })
     // A worker without an SSH address isn't checked from here.
     act(() => result.current.check({ ...blocked, ssh: undefined }))
     expect(check).toHaveBeenCalledTimes(3)
-    expect(view()).toBeUndefined()
+    expect(view()).toEqual({ kind: 'unsaid' })
   })
 })

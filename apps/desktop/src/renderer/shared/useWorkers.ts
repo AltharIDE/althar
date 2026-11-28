@@ -218,10 +218,13 @@ export type WorkerCheckView =
   | { readonly kind: 'checking' }
   | { readonly kind: 'checked'; readonly sandbox: NonNullable<HomeWorker['readiness']>['sandbox'] }
   | { readonly kind: 'failed' }
+  /** Its release ran its check without saying what it found: an older one. */
+  | { readonly kind: 'unsaid' }
 
 export const checkText = {
   stillFails: 'Checked again: it still can’t start.',
   failed: (name: string) => `Couldn’t check ${name} over SSH. Althar’s log says why.`,
+  unsaid: (name: string) => `${name}’s release doesn’t say what its check found. Update it, then check again.`,
 }
 
 export interface WorkerCheckModel {
@@ -250,21 +253,18 @@ export const useWorkerCheck = (): WorkerCheckModel => {
         setChecks((before) => (before.get(id)?.kind === 'checking' ? new Map(before).set(id, view) : before))
       setChecks((before) => new Map(before).set(id, { kind: 'checking' }))
       bridge.check(ssh).then(
-        (found) => {
-          // A release that doesn't say its check: the home's reads stand.
-          if (found === null)
-            return setChecks((before) => {
-              const next = new Map(before)
-              next.delete(id)
-              return next
-            })
-          settle({
-            kind: 'checked',
-            sandbox: found.sandbox.starts
-              ? { starts: true }
-              : { starts: false, problem: found.sandbox.problem, ...(found.sandbox.fix === undefined ? {} : { fix: found.sandbox.fix }) },
-          })
-        },
+        (found) =>
+          // A release that doesn't say its check: the home's reads stand, with why nothing changed.
+          settle(
+            found === null
+              ? { kind: 'unsaid' }
+              : {
+                  kind: 'checked',
+                  sandbox: found.starts
+                    ? { starts: true }
+                    : { starts: false, problem: found.problem, ...(found.fix === undefined ? {} : { fix: found.fix }) },
+                },
+          ),
         () => settle({ kind: 'failed' }),
       )
     },
@@ -302,7 +302,10 @@ export const checkedUnready = (
     ? unready
     : view.kind === 'checking'
       ? { ...unready, checking: true }
-      : { ...unready, note: view.kind === 'failed' ? checkText.failed(name) : checkText.stillFails }
+      : {
+          ...unready,
+          note: view.kind === 'failed' ? checkText.failed(name) : view.kind === 'unsaid' ? checkText.unsaid(name) : checkText.stillFails,
+        }
 
 export interface WorkerSignInModel {
   readonly signingIn: WorkerSignInView | null

@@ -207,8 +207,9 @@ describe('enrolling a worker with what its home gave', () => {
         { id: 'claude-code', signedIn: false, models: 0 },
       ],
     })
-    expect(readFileSync(join(folder, 'readiness'), 'utf8')).toBe(
-      'sandbox\tstarts\ntool\tgit\t2.43.0\nmodel\tcodex\tgpt-6.2-sol\tGPT-6.2 Sol\nagent\tcodex\tstarts\n',
+    // Stamped with when it saw its sandbox, so a slower check beside it never writes an older sight over it.
+    expect(readFileSync(join(folder, 'readiness'), 'utf8')).toMatch(
+      /^observed\t\d+\nsandbox\tstarts\ntool\tgit\t2\.43\.0\nmodel\tcodex\tgpt-6\.2-sol\tGPT-6\.2 Sol\nagent\tcodex\tstarts\n$/u,
     )
   })
 
@@ -882,6 +883,14 @@ describe('its check, and letting its sandbox start', () => {
     expect(await workerMain(['check'], out)).toBe(0)
     const found = said.at(-1) as { sandbox: { starts: boolean; problem: string; fix: string } }
     expect(found).toMatchObject({ step: 'check', state: 'done', sandbox: { starts: false, problem: 'NoUserNamespaces' } })
+    // Its sandbox is said as soon as it is seen, before the check's end, for Check again.
+    expect(said).toContainEqual(
+      expect.objectContaining({
+        step: 'sandbox',
+        state: 'seen',
+        sandbox: { starts: false, problem: 'NoUserNamespaces', fix: found.sandbox.fix },
+      }),
+    )
     expect(found.sandbox.fix).toMatch(/^sudo sh -c '.*apparmor_parser -r \/etc\/apparmor\.d\/althar-worker-bwrap'$/u)
     expect(found.sandbox.fix).toContain(`profile althar-worker-bwrap ${join(data, 'althar-worker-program')}/bundle-*/**/bwrap`)
     expect(readFileSync(join(data, 'althar-worker', 'readiness'), 'utf8')).toContain('sandbox\tfails\tNoUserNamespaces\nfix\tsudo sh -c')
@@ -890,7 +899,7 @@ describe('its check, and letting its sandbox start', () => {
     // What went to sudo is the check's own script, without its `sudo sh -c` and quotes.
     expect(sudo).toEqual([found.sandbox.fix.slice("sudo sh -c '".length, -1)])
     expect(said.at(-1)).toMatchObject({ step: 'check', state: 'done', sandbox: { starts: true } })
-    expect(readFileSync(join(data, 'althar-worker', 'readiness'), 'utf8')).toMatch(/^sandbox\tstarts\n/u)
+    expect(readFileSync(join(data, 'althar-worker', 'readiness'), 'utf8')).toMatch(/^observed\t\d+\nsandbox\tstarts\n/u)
   })
 
   it('says so where its login can’t use sudo without a password, and leaves the command for an administrator', async () => {

@@ -458,6 +458,16 @@ export const check = async (out: (text: string) => void) => {
       })),
     },
     system.check,
+    undefined,
+    // Its sandbox, said as soon as it is seen: Check again shows it without waiting for each agent to start.
+    (sandbox) =>
+      say(out, {
+        step: 'sandbox',
+        state: 'seen',
+        sandbox: sandbox.starts
+          ? { starts: true }
+          : { starts: false, problem: sandbox.problem, ...(sandbox.fix === undefined ? {} : { fix: sandbox.fix }) },
+      }),
   )
   const proven = found.agents.flatMap((agent) => (unknown.has(agent.id) && agent.started === true ? [agent.id] : []))
   await writePrivate(join(folder, 'started'), proven.map((id) => `${id}\n`).join(''), true)

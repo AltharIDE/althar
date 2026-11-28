@@ -54,6 +54,8 @@ export interface CheckSystem {
     env: Readonly<Record<string, string>>,
     sandboxStarts: boolean,
   ) => Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>
+  /** The clock a check stamps when it saw its sandbox by, in ms; the computer's own unless said. */
+  readonly now?: () => number
 }
 
 /** The tools a project's files may ask for, looked for on the worker's PATH. */
@@ -249,6 +251,36 @@ export const readinessLines = (check: WorkerCheck) =>
     .map((line) => `${line}\n`)
     .join('')
 
+/** When the file says its sandbox was seen, in ms; 0 for a file from before checks said so, or none. */
+const observedOf = (text: string | undefined) => Number(/^observed\t(\d{1,16})$/mu.exec(text ?? '')?.[1] ?? 0)
+
+/** The file's lines about its sandbox (its state and the fix), and the rest (tools, models, agents). */
+const partsOf = (text: string | undefined) => {
+  const lines = (text ?? '').split('\n').filter((line) => line !== '' && !line.startsWith('observed\t'))
+  const sandbox = (line: string) => line.startsWith('sandbox\t') || line.startsWith('fix\t')
+  return {
+    sandbox: lines
+      .filter(sandbox)
+      .map((line) => `${line}\n`)
+      .join(''),
+    rest: lines
+      .filter((line) => !sandbox(line))
+      .map((line) => `${line}\n`)
+      .join(''),
+  }
+}
+
+/**
+ * What a check writes, over what the file holds: its sandbox as it saw it at `observed`, unless the file holds a newer
+ * check's (one run beside it, as the service's start and Check again may), which stands; and `rest` where it has it,
+ * else the file's own. Several checks at once each publish what they saw, and the newest sight of the sandbox wins.
+ */
+export const publishedReadiness = (kept: string | undefined, sandbox: string, observed: number, rest?: string) => {
+  const before = partsOf(kept)
+  const newer = observedOf(kept) > observed
+  return `observed\t${newer ? observedOf(kept) : observed}\n${newer ? before.sandbox : sandbox}${rest ?? before.rest}`
+}
+
 /** This computer: its programs, its files, and its agents started as the worker's runs start them. */
 export const checkHere: CheckSystem = {
   run: (command, args, options = {}) =>
@@ -313,7 +345,9 @@ const startProblem = (error: unknown) => {
 
 /**
  * The whole check: the sandbox, the tools, and each signed-in agent started once with the sandbox as it found it. Kept in
- * `readiness`, written only where it changed.
+ * `readiness`, written only where it changed: the sandbox as soon as it is seen (`sandboxSeen` hears it too), so a fix
+ * shows before the agents have started, then the whole. A slower check run beside it never writes an older sight of the
+ * sandbox over a newer one's.
  */
 export const checkWorker = async (
   input: {
@@ -328,10 +362,21 @@ export const checkWorker = async (
     }>
   },
   system: CheckSystem = checkHere,
-  write: (path: string, text: string) => Promise<unknown> = (path, text) => fs.writeFile(path, text, { mode: 0o600 }),
+  write: (path: string, text: string) => Promise<unknown> = writeAtomically,
+  sandboxSeen?: (sandbox: SandboxCheck) => void,
 ): Promise<WorkerCheck> => {
   const path = workerPath(input.folder, input.current)
+  const file = join(input.folder, 'readiness')
+  const publish = async (sandbox: string, rest?: string) => {
+    const kept = system.read(file)
+    const text = publishedReadiness(kept, sandbox, observed, rest)
+    if (kept !== text) await write(file, text)
+  }
   const sandbox = await checkSandbox(path, input.program, system)
+  const observed = (system.now ?? Date.now)()
+  const sandboxText = readinessLines({ sandbox, tools: [], agents: [] })
+  await publish(sandboxText)
+  sandboxSeen?.(sandbox)
   const tools = await checkTools(path, system)
   const agents: AgentCheck[] = []
   // One at a time: a small worker starts one agent's program at once, as it runs one task.
@@ -348,8 +393,13 @@ export const checkWorker = async (
     }
   }
   const check = { sandbox, tools, agents }
-  const file = join(input.folder, 'readiness')
-  const text = readinessLines(check)
-  if (system.read(file) !== text) await write(file, text)
+  await publish(sandboxText, readinessLines(check).slice(sandboxText.length))
   return check
+}
+
+/** Written beside and renamed over, so the worker never reads half of it. */
+const writeAtomically = async (path: string, text: string) => {
+  const next = `${path}.${process.pid}`
+  await fs.writeFile(next, text, { mode: 0o600 })
+  await fs.rename(next, path)
 }

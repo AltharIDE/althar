@@ -10,6 +10,7 @@ use crate::wire::{
  * its service starts, with its hourly timer and at the window's Check again), kept beside `signed-in` as lines of
  * tab-separated fields:
  *
+ *   observed <ms>   when the check saw its sandbox, so a slower check never writes an older sight over it (not read)
  *   sandbox  starts
  *   sandbox  fails   <code>
  *   fix      <the command an administrator runs to let it start>
