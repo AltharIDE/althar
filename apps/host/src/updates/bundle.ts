@@ -75,7 +75,10 @@ export const copyDependencies = async (from: string, destination: string, names:
       recursive: true,
       dereference: true,
       filter: async (path) => {
-        if (path !== source && relative(source, path).split(/[\\/]/).includes('node_modules')) return false
+        const parts = relative(source, path).split(/[\\/]/)
+        if (path !== source && parts.includes('node_modules')) return false
+        // What node-gyp left of compiling a native package (node-pty's): its link to the build machine's Python.
+        if (parts.includes('node_gyp_bins')) return false
         if ((await fs.lstat(path)).isSymbolicLink() && relative(source, await fs.realpath(path)).startsWith('..')) throw failed()
         return true
       },
@@ -182,6 +185,27 @@ const copyWorker = async (source: BundleSource, destination: string) => {
 /** The agents a worker runs, as their ACP adapters, each with the agent's own program among its dependencies. */
 const AGENT_ADAPTERS = ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp']
 
+/**
+ * node-pty, which the runtime loads as a terminal first opens: only this machine's build of it. Its package carries
+ * every platform's prebuilds and Windows' ConPTY; a Linux home has none of those, as npm compiles it into `build/`.
+ */
+export const keepOwnPty = async (destination: string) => {
+  const folder = join(destination, 'node_modules', 'node-pty')
+  const own = `${process.platform}-${process.arch}`
+  const prebuilds = join(folder, 'prebuilds')
+  for (const name of await fs.readdir(prebuilds).catch(() => [])) if (name !== own) await fs.rm(join(prebuilds, name), { recursive: true })
+  if (process.platform !== 'win32') await fs.rm(join(folder, 'third_party'), { recursive: true, force: true })
+  const built = await Promise.all(
+    [join(folder, 'build', 'Release', 'pty.node'), join(prebuilds, own, 'pty.node')].map((path) =>
+      fs.access(path).then(
+        () => true,
+        () => false,
+      ),
+    ),
+  )
+  if (!built.includes(true)) throw failed()
+}
+
 const emptyDestination = async (destination: string) => {
   await privateDirectory(destination, true)
   if ((await fs.readdir(destination)).length !== 0) throw failed()
@@ -196,7 +220,8 @@ export const assembleBundle = async (source: BundleSource, destination: string) 
   await copyHostAssets(source.entry, dist)
   await copyNotices(source.entry, destination)
   await copyNode(source, destination, '@althar/host-release')
-  await copyDependencies(source.entry, destination, [...AGENT_ADAPTERS, 'sharp'])
+  await copyDependencies(source.entry, destination, [...AGENT_ADAPTERS, 'sharp', 'node-pty'])
+  await keepOwnPty(destination)
   await copyWorker(source, destination)
 }
 
