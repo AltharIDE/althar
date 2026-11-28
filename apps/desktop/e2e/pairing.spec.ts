@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { chmodSync, copyFileSync, realpathSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, realpathSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -240,6 +240,30 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
         }
       }),
     ).toBe('refused')
+    // Its terminal, over the paired connection: Ctrl+` opens a shell on the home, in the project's folder there, that runs
+    // what is typed and sends back what it prints.
+    const drawer = remote.getByRole('region', { name: 'Runs and terminals drawer' })
+    await expect(async () => {
+      if ((await drawer.count()) === 0) await remote.keyboard.press('Control+Backquote')
+      await expect(drawer.locator('.xterm-helper-textarea')).toBeFocused({ timeout: budget.small })
+    }).toPass()
+    // zsh's, bash's and PowerShell's alike: the word once in what was typed, and again in what the command printed.
+    await remote.keyboard.type('echo althar-paired > from-the-paired-window.txt; cat from-the-paired-window.txt\n', { delay: 10 })
+    await expect.poll(() => existsSync(join(root, 'remote-project', 'from-the-paired-window.txt'))).toBe(true)
+    // What it printed came back to the window: everything in the terminal, chosen and copied with the system's keys.
+    const mac = process.platform === 'darwin'
+    await expect
+      .poll(async () => {
+        await remote.keyboard.press(mac ? 'Meta+a' : 'Control+Shift+a')
+        await remote.keyboard.press(mac ? 'Meta+c' : 'Control+Shift+c')
+        const copied = await electronApp.evaluate(({ clipboard }) => clipboard.readText())
+        return copied.split('althar-paired').length - 1
+      })
+      .toBeGreaterThanOrEqual(2)
+    await still(remote)
+    await remote.screenshot({ path: 'test-results/pairing-flow-03-terminal.png', scale: 'css' })
+    await remote.keyboard.press('Control+Backquote')
+    await expect(drawer).toHaveCount(0)
     const local = Schema.decodeUnknownSync(Schema.Struct({ homeId: HomeId }))(
       JSON.parse(readFileSync(join(clientRoot, 'profile/api/endpoint.json'), 'utf8')),
     )

@@ -5447,6 +5447,18 @@ const socketCalls = new Set<string>([
   'ReadLaunchPreviewSocket',
   'WriteLaunchPreviewSocket',
   'CloseLaunchPreviewSocket',
+  // The status line along a home's window: the project's runs there, and terminals opened in its folders on the home.
+  'RunProject',
+  'ListLaunches',
+  'ReadLaunchOutput',
+  'StopLaunch',
+  'ClearLaunch',
+  'OpenTerminal',
+  'ListTerminals',
+  'AttachTerminal',
+  'WriteTerminal',
+  'ResizeTerminal',
+  'CloseTerminal',
   'PrepareWorkerSnapshot',
   'ReadWorkerSnapshotChunk',
   'ReleaseWorkerSnapshot',
@@ -7055,7 +7067,10 @@ const WorkApi = RpcGroup.make(
   /** What Althar runs of the project itself, its tasks' too, in the order they started. */
   call('ListLaunches', { projectId: Schema.String }, Schema.Array(Launch)),
   /** What a terminal prints: what it printed so far, kept to its end, then each piece as it comes, until it ends or is closed. */
-  Rpc.make('AttachTerminal', { payload: { id: Schema.String }, success: TerminalChunk, error: ApiError, stream: true }),
+  Rpc.make('AttachTerminal', { payload: { id: Schema.String }, success: TerminalChunk, error: ApiError, stream: true }).annotate(
+    SocketAllowed,
+    socketCanCall('AttachTerminal'),
+  ),
   /** What the person typed or pasted into a terminal, as its keys send it. */
   call('WriteTerminal', { id: Schema.String, data: Schema.String.check(Schema.isMaxLength(1_000_000)) }, Schema.Void),
   /** A terminal's new size, in characters. */
