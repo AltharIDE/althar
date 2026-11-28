@@ -100,6 +100,7 @@ import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, type OutputSoFar, wholePath } from '../../shared/handed'
 import type { Heard } from '../../shared/heard'
 import { Now } from '../../shared/Now'
+import { useEdge, usePinnedMerges } from '../../shared/PinnedMerges'
 import type { Streamed } from '../../shared/thread'
 import { usePrinted } from '../../shared/useOutputs'
 import { useStreaming } from '../../shared/useStreamed'
@@ -434,6 +435,8 @@ const conflictsChoice = (own: boolean | null): TaskConflicts => (own === null ? 
 
 /** How long a title may be, as the runtime keeps it. */
 const TITLE_LENGTH = 60
+/** A thread with nothing in it yet, the same each time, so what is read from it is read once. */
+const NO_ITEMS: ReadonlyArray<ThreadItem> = []
 
 /** The line of a file's first change, where its diff is read: for an editor to open at. */
 const firstChange = (view: FileView): number | undefined => {
@@ -614,7 +617,12 @@ export function TaskView({
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
   const steers = useSendMidTurn()?.to === 'steer'
-  const [goalExpanded, setGoalExpanded] = useState(false)
+  // What is open on the composer's edge, one at a time: the goal, the run chip's list, or a merging pill.
+  const { edge, opens } = useEdge()
+  const goalExpanded = edge === 'goal'
+  const setGoalExpanded = opens('goal')
+  // What is on its way into a branch, pinned on the composer's edge while the thread scrolls on.
+  const pinned = usePinnedMerges(model.snapshot?.items ?? NO_ITEMS, edge, opens)
   // The composer's command picked and open: /goal shows the goal itself there, and its line over the composer steps aside.
   const [commanding, setCommanding] = useState<string | null>(null)
   const [savingWorkerCopy, setSavingWorkerCopy] = useState(false)
@@ -1580,7 +1588,8 @@ export function TaskView({
           conflict !== null ||
           line !== null ||
           aside?.notice != null ||
-          turnUndo.notice !== null ? (
+          turnUndo.notice !== null ||
+          pinned.back !== null ? (
             <>
               {aside?.notice}
               {turnUndo.notice}
@@ -1607,6 +1616,7 @@ export function TaskView({
                 </div>
               )}
               {line !== null && <div>{line}</div>}
+              {pinned.back}
             </>
           ) : null
         }
@@ -1661,9 +1671,12 @@ export function TaskView({
                   heard={heard}
                   onStopListening={(url) => void model.stopListening(url)}
                   text={listeningText}
+                  open={edge === 'runs'}
+                  onOpenChange={opens('runs')}
                 />
               )}
             </Now>
+            {pinned.pills}
           </>
         }
         onSubmit={(body) => submit(body, false)}

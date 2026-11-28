@@ -1,0 +1,311 @@
+/* what is on its way into a branch: a pill on the composer's edge, as the run chip beside it; opened, a card the composer's width, a row for each */
+.contents {
+  display: contents;
+}
+
+/* what is drawn behind the pill and the card: one surface, which reshapes from the one into the other (lib/edgeMorph) */
+.surface {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  transform-origin: 0 0;
+  background: var(--paper);
+  pointer-events: none;
+}
+
+/* ——— folded ——— */
+.pill {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 11px 0 10px;
+  border: 0;
+  background: none;
+  font-size: 11.5px;
+  color: var(--t-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pill > .surface {
+  border-radius: 13px;
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  transition: box-shadow var(--fast) var(--ease);
+}
+.pill:hover > .surface {
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    var(--lift-card);
+}
+.pill:focus-visible {
+  border-radius: 13px;
+  outline: 2px solid var(--live);
+  outline-offset: 2px;
+}
+.pill > * {
+  flex: none;
+}
+.name {
+  font-weight: 550;
+  color: var(--t-2);
+}
+/* a long branch gives way first, cut with "…", read whole in the pill's name */
+.pill > .name,
+.head > .name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pill > .name {
+  /* a share of its own of the edge's width, so what it leaves the tokens doesn't change as they are fitted */
+  flex: none;
+  max-width: 40cqi;
+}
+/* the tokens keep to one line inside the pill; those with no room wrap out of sight, and wait in the card */
+.pill > .tokens {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  column-gap: 10px;
+  min-width: 0;
+  height: 18px;
+  overflow: hidden;
+}
+.tokens > [data-cut] {
+  display: none;
+}
+.more {
+  display: none;
+  margin-left: -6px;
+  color: var(--t-3);
+}
+.tokens[data-cutting] + .more {
+  display: inline;
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  font-weight: 450;
+}
+.token {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-2);
+  transition: color var(--enter) var(--ease-out);
+}
+.token > * {
+  flex: none;
+}
+.token.merged {
+  color: var(--t-3);
+}
+.token.back {
+  color: var(--danger);
+}
+.mark {
+  display: grid;
+  place-items: center;
+  width: 11px;
+  height: 14px;
+  color: var(--t-3);
+}
+.merged .mark,
+.merged .rowMark {
+  color: var(--ok-ink);
+}
+.back .mark,
+.back .rowMark {
+  color: var(--danger);
+}
+/* what waits its turn: a ring; what isn't in line yet, a fainter one */
+.ring {
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  box-shadow: inset 0 0 0 1.5px var(--live);
+}
+.ring.faint {
+  box-shadow: inset 0 0 0 1.5px var(--n-5);
+}
+/* narrow: what is in, and what isn't in line yet, keep only their marks */
+@container composer-edge (max-width: 480px) {
+  .token:is(.merged, .later) .label {
+    display: none;
+  }
+}
+
+/* ——— opened ——— */
+.card {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  padding: 0 4px 4px;
+  font-size: 12.5px;
+}
+.card > .surface {
+  border-radius: 12px;
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-pop);
+}
+.head {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 34px;
+  padding: 0 8px 0 10px;
+  border: 0;
+  border-radius: 9px;
+  text-align: left;
+  color: var(--t-2);
+  cursor: pointer;
+}
+.head:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: -2px;
+}
+.fold {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border-radius: var(--r);
+  color: var(--t-4);
+  transition:
+    color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+.head:hover .fold {
+  background: var(--line);
+  color: var(--t-2);
+}
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /* however many, its head stays in view: the rows scroll within the room between the composer's edge and the top of the
+     conversation (--rows-room, measured as the composer and the window change), and never take more than about half the window */
+  max-height: min(44vh, var(--rows-room, 44vh));
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+/* a row: its mark, its number and title, where it stands in a fixed measure so the words keep their place as it changes; why, under it */
+.row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+.link {
+  transition: background var(--fast) var(--ease);
+}
+.link:hover {
+  background: var(--hover-paper);
+}
+.link:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: -2px;
+}
+.rowMark {
+  display: grid;
+  place-items: center;
+  height: 18px;
+  color: var(--t-3);
+}
+.rowName {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+.number {
+  flex: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-1);
+}
+.number.unnumbered {
+  font-weight: 550;
+  color: var(--t-2);
+}
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-2);
+}
+.state {
+  min-width: 84px;
+  font-size: 11.5px;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--t-3);
+  transition: color var(--enter) var(--ease-out);
+}
+.note {
+  grid-column: 2 / -1;
+  margin-top: 1px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+.merged :is(.number, .title) {
+  color: var(--t-3);
+}
+.merged .state {
+  color: var(--ok-ink);
+}
+.live .state {
+  color: var(--live);
+}
+.back :is(.state, .note) {
+  color: var(--danger);
+}
+
+/* all in: it goes back to --scale-pop as it fades, quicker than it came */
+.going {
+  opacity: 0;
+  scale: var(--scale-pop);
+  pointer-events: none;
+  transition:
+    opacity var(--exit) var(--ease-out),
+    scale var(--exit) var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .going {
+    scale: none;
+  }
+}
+
+/* why one came back, on the composer's notice line */
+.backLine {
+  color: var(--danger);
+}
+.backWho {
+  font-weight: 600;
+}
