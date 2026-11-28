@@ -1,14 +1,14 @@
 import { execFileSync } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
 import { ADAPTER_PATCH_MARKER, adapterPatchFor, applyAdapterPatch, assertAdapterPatched, PATCHED_FILE } from '../scripts/adapterPatch'
-import { isMachO, LIPO_ARCH, macBuild, wrongArchs } from '../scripts/archs'
-import { binariesFor, speechPackage } from '../scripts/binaries'
+import { isMachO, LIPO_ARCH, macBuild, machOFiles, wrongArchs } from '../scripts/archs'
+import { ADAPTERS, binariesFor, NATIVE, prunePrebuilds, speechPackage } from '../scripts/binaries'
 import { entitlementsFor } from '../scripts/entitlements'
 import { fetchNode, NODE_ARCHIVES, NODE_VERSION, nodeArchive, nodeProgram } from '../scripts/node'
 
@@ -151,6 +151,83 @@ describe('the packaged app', () => {
 
   it('refuses a platform it has no Node for, before fetching anything', async () => {
     await expect(fetchNode(mkdtempSync(join(tmpdir(), 'althar-node-')), 'plan9', 'mips')).rejects.toThrow(/no Node for plan9-mips/)
+  })
+})
+
+/*
+ * The Mac app is packaged only for a release, where a program for the other
+ * processor fails it. This finds one on any pull request, Linux's included:
+ * a package npm doesn't pick by platform comes whole into both builds, so
+ * what staging leaves of it must run on each.
+ */
+describe('the programs inside the packages every build gets', () => {
+  /** Each shipped package and what it depends on, as the workspace has them, without those npm picks by `os` or `cpu`. */
+  const everyBuilds = () => {
+    const found = new Map<string, string>()
+    const visit = (from: string, name: string) => {
+      const folder = (createRequire(from).resolve.paths(name) ?? [])
+        .map((each) => join(each, name))
+        .find((each) => existsSync(join(each, 'package.json')))
+      // An optional dependency for another platform isn't installed.
+      if (folder === undefined) return
+      const real = realpathSync(folder)
+      if (found.has(real)) return
+      const manifest = join(real, 'package.json')
+      const own = JSON.parse(readFileSync(manifest, 'utf8')) as {
+        readonly os?: ReadonlyArray<string>
+        readonly cpu?: ReadonlyArray<string>
+        readonly dependencies?: Record<string, string>
+        readonly optionalDependencies?: Record<string, string>
+      }
+      if (own.os !== undefined || own.cpu !== undefined) return
+      found.set(real, name)
+      for (const next of Object.keys({ ...own.dependencies, ...own.optionalDependencies })) visit(manifest, next)
+    }
+    for (const name of [...ADAPTERS, ...NATIVE]) visit(join(import.meta.dirname, '..', 'package.json'), name)
+    return found
+  }
+
+  /** The processors a Mach-O file holds, by their cputype, read here as only a Mac has lipo. */
+  const processors = (path: string) => {
+    const file = readFileSync(path)
+    const magic = file.readUInt32BE(0)
+    const types =
+      magic === 0xcafebabe || magic === 0xcafebabf
+        ? Array.from({ length: file.readUInt32BE(4) }, (_, i) => file.readUInt32BE(8 + i * (magic === 0xcafebabe ? 20 : 32)))
+        : [magic === 0xcffaedfe || magic === 0xcefaedfe ? file.readUInt32LE(4) : file.readUInt32BE(4)]
+    return types.map((type) => (type === 0x0100000c ? 'arm64' : type === 0x01000007 ? 'x64' : `cputype ${type}`))
+  }
+
+  it.each(['arm64', 'x64'])('all run on the %s Mac build once staged', (arch) => {
+    const app = mkdtempSync(join(tmpdir(), 'althar-shipped-'))
+    for (const [folder, name] of everyBuilds()) {
+      // A package's own files: what it depends on is visited by itself.
+      const programs = machOFiles(folder).filter((path) => !relative(folder, path).startsWith('node_modules'))
+      for (const program of programs) cpSync(program, join(app, 'node_modules', name, relative(folder, program)))
+    }
+    prunePrebuilds(app, 'darwin', arch)
+    const left = machOFiles(app)
+    // node-pty's own two, so an empty app doesn't pass.
+    expect(left.length).toBeGreaterThanOrEqual(2)
+    expect(left.filter((path) => !processors(path).includes(arch)).map((path) => relative(app, path))).toEqual([])
+  })
+
+  it('keeps only the build’s own node-pty prebuild, and none on Linux, which compiles its own', () => {
+    const staged = () => {
+      const app = mkdtempSync(join(tmpdir(), 'althar-prebuilds-'))
+      const source = join(dirname(createRequire(import.meta.url).resolve('node-pty/package.json')), 'prebuilds')
+      cpSync(source, join(app, 'node_modules', 'node-pty', 'prebuilds'), { recursive: true })
+      return app
+    }
+    const kept = (platform: string, arch: string) => {
+      const app = staged()
+      prunePrebuilds(app, platform, arch)
+      return readdirSync(join(app, 'node_modules', 'node-pty', 'prebuilds'))
+    }
+    expect(kept('darwin', 'x64')).toEqual(['darwin-x64'])
+    expect(kept('win32', 'x64')).toEqual(['win32-x64'])
+    expect(kept('linux', 'x64')).toEqual([])
+    expect(() => prunePrebuilds(staged(), 'darwin', 'ia32')).toThrow(/no prebuild for darwin-ia32/)
   })
 })
 

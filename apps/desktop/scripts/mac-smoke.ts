@@ -11,7 +11,7 @@ import { LIPO_ARCH, macBuild, wrongArchs } from './archs.ts'
 /*
  * The Mac smoke test, for a build bun run package made: every program in the
  * app is for the build's processor, the Node, Codex, Claude Code and speech
- * engine it bundles run on it, and Althar opens on a profile of its own and
+ * engine it bundles run on it, a terminal's shell starts, and Althar opens on a profile of its own and
  * its first screen, past the welcome's tour, finds the agents. For an Intel build on Apple silicon,
  * where no Intel Mac is at hand, all of it runs under Rosetta: `arch -x86_64`
  * starts each program as an Intel Mac would, and ps says Althar's processes
@@ -105,6 +105,17 @@ tryTo('the computer-use driver loads', () =>
     pathToFileURL(join(modules, '@trycua', 'cua-driver', 'dist', 'index.js')).href,
   ]),
 )
+
+// A terminal needs node-pty's build for this processor, and its helper, which starts the shell.
+tryTo('a terminal opens, its shell saying the processor it runs as', () => {
+  const said = runAs(loader, [
+    '-e',
+    "const pty = require(process.argv[1]).spawn('/bin/sh', ['-c', 'uname -m'], {}); let said = ''; pty.onData((data) => (said += data)); pty.onExit(({ exitCode }) => { process.stdout.write(said); process.exit(exitCode) })",
+    join(modules, 'node-pty'),
+  ])
+  if (said !== lipo) throw new Error(`the shell said ${said || 'nothing'}`)
+  return said
+})
 
 // Althar itself, on a profile of its own, with the window reachable over Chromium's debugging port (the Node inspector's flags are off).
 const profile = mkdtempSync(join(tmpdir(), 'althar-smoke-'))

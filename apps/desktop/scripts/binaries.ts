@@ -1,3 +1,25 @@
+import { existsSync, readdirSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+
+/** The packages the runtime starts as processes, at the versions the app depends on. */
+export const ADAPTERS: ReadonlyArray<string> = ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp']
+/** What stays in node_modules, including packages with platform binaries. */
+export const NATIVE: ReadonlyArray<string> = ['sherpa-onnx-node', 'electron-updater', 'sharp', 'node-pty', '@trycua/cua-driver']
+
+/**
+ * node-pty is one package for every platform, with each one's build in
+ * `prebuilds/<platform>-<arch>`, where the others' packages are one per
+ * platform and npm installs only the one asked for. So all but the build's
+ * own are removed from the staged app. Linux has none there: node-pty is
+ * compiled into `build/` as npm installs it.
+ */
+export const prunePrebuilds = (app: string, platform: string, arch: string) => {
+  const prebuilds = join(app, 'node_modules', 'node-pty', 'prebuilds')
+  const own = `${platform}-${arch}`
+  if (platform !== 'linux' && !existsSync(join(prebuilds, own))) throw new Error(`node-pty has no prebuild for ${own}.`)
+  for (const name of readdirSync(prebuilds)) if (name !== own) rmSync(join(prebuilds, name), { recursive: true })
+}
+
 /*
  * The programs a package carries for the platform it is made on, beside
  * Electron and the Node in its resources (node.ts): Codex and Claude Code,
