@@ -979,7 +979,8 @@ export class MergeLine extends Context.Service<
               // Waiting already, however it was asked for: the one errand goes on.
               if (
                 (yield* provide(entriesOf(input.projectId))).some(
-                  (entry) => entry.state === 'open' && entry.target.toLowerCase() === change.url.toLowerCase(),
+                  (entry) =>
+                    entry.state === 'open' && [change.url, input.url].some((url) => entry.target.toLowerCase() === url.toLowerCase()),
                 )
               )
                 return
@@ -1003,7 +1004,8 @@ export class MergeLine extends Context.Service<
                   key: STEP,
                   tool: MERGE_TOOL,
                   taskId: input.taskId,
-                  target: change.url,
+                  // By the address its task follows it at, which its card reads it by: the host's own, as its link keeps it.
+                  target: input.url,
                   head: input.head,
                   branch: change.target,
                   says: `Merge ${name}`,
@@ -1029,12 +1031,19 @@ export class MergeLine extends Context.Service<
           .withLock(
             input.projectId,
             Effect.gen(function* () {
-              for (const entry of yield* provide(entriesOf(input.projectId)))
-                if (entry.target.toLowerCase() === input.url.toLowerCase()) yield* errands.callOff(entry.errandId, '', true)
-              yield* touchTask(input.taskId).pipe(provide)
+              // Out of Althar's line first, which never fails on the host: by the address it was kept by, or the host's own.
+              const calledOff = (urls: ReadonlyArray<string>) =>
+                Effect.gen(function* () {
+                  const named = new Set(urls.map((url) => url.toLowerCase()))
+                  for (const entry of yield* provide(entriesOf(input.projectId)))
+                    if (named.has(entry.target.toLowerCase())) yield* errands.callOff(entry.errandId, '', true)
+                  yield* touchTask(input.taskId).pipe(provide)
+                })
+              yield* calledOff([input.url])
               const place = yield* provide(placeOf(input.projectId, input.url))
               const { host, repository } = place
               const change = yield* viaHost(host.change(repository, place.number, { queue: true }))
+              yield* calledOff([change.url])
               if (change.state !== 'open' || (change.queued !== true && change.autoMerge !== true)) return
               const out = yield* host.leaveQueue(repository, change).pipe(Effect.option)
               if (Option.isNone(out) || out.value.queued === true || out.value.autoMerge === true)
