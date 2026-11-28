@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -88,12 +88,42 @@ describe('a program the lockfile pins, downloaded from npm', () => {
       ),
     )
     assert.isTrue(Exit.isSuccess(installed), JSON.stringify(installed))
-    const program = join(root, 'claude-code', 'current', 'claude')
+    // Found by the version pinned, the folder it is kept in, never through `current`.
+    const program = join(root, 'claude-code', '0.3.331', 'claude')
     if (Exit.isSuccess(installed)) assert.deepStrictEqual(installed.value, { command: program, whose: 'althar' })
     assert.deepStrictEqual(pinned.asked, [TARBALL])
     // Kept whole, by the version npm gave it; what never runs, gone; nothing of the download left.
     assert.isTrue(existsSync(join(root, 'claude-code', '0.3.331', 'package.json')))
     assert.isFalse(existsSync(join(root, 'claude-code', 'current', 'voice')))
+    assert.deepStrictEqual(readdirSync(join(root, 'claude-code')).toSorted(), ['0.3.331', 'current'])
+  })
+
+  it('takes no copy of an earlier pin for the one pinned now: none is found, its adapter is told the new one, which replaces it', async () => {
+    const { bytes, integrity } = await tarball({ claude: '#!/bin/sh\necho "2.1.331 (Claude Code)"\n' })
+    const root = mkdtempSync(join(tmpdir(), 'althar-agents-'))
+    // What Althar kept while Claude Code was pinned at 0.3.330, at the same path in its package, and in use.
+    const earlier = join(root, 'claude-code', '0.3.330')
+    mkdirSync(earlier, { recursive: true })
+    writeFileSync(join(earlier, 'claude'), '#!/bin/sh\necho "2.1.330 (Claude Code)"\n', { mode: 0o755 })
+    symlinkSync('0.3.330', join(root, 'claude-code', 'current'))
+    const pinned = pinnedTo(bytes, integrity)
+    const now = join(root, 'claude-code', '0.3.331', 'claude')
+    const before = await using(root, pinned, (installs) =>
+      Effect.map(installs.state(pinned.agent), (state) => ({ state, kept: installs.keptAt(pinned.agent) })),
+    )
+    assert.isTrue(Exit.isSuccess(before))
+    if (Exit.isSuccess(before)) {
+      assert.strictEqual(before.value.state.located, null)
+      assert.strictEqual(before.value.kept, now)
+    }
+    const after = await using(root, pinned, (installs) =>
+      Effect.andThen(
+        installs.install(pinned.agent),
+        Effect.sync(() => installs.locate(pinned.agent)),
+      ),
+    )
+    assert.isTrue(Exit.isSuccess(after), JSON.stringify(after))
+    if (Exit.isSuccess(after)) assert.deepStrictEqual(after.value, { command: now, whose: 'althar' })
     assert.deepStrictEqual(readdirSync(join(root, 'claude-code')).toSorted(), ['0.3.331', 'current'])
   })
 
@@ -115,6 +145,25 @@ describe('a program the lockfile pins, downloaded from npm', () => {
     await refused(empty.bytes, empty.integrity, 'has no claude in it')
     const broken = await tarball({ claude: '#!/bin/sh\nexit 3\n' })
     await refused(broken.bytes, broken.integrity, "wouldn't run on this computer")
+  })
+
+  it('fails the install, and keeps nothing, where the disk won’t take the download', async () => {
+    const { bytes, integrity } = await tarball({ claude: '#!/bin/sh\necho 2.1.331\n' })
+    const root = mkdtempSync(join(tmpdir(), 'althar-agents-'))
+    const pinned = pinnedTo(bytes, integrity)
+    // Where the package would be written, something the file can't be opened over, as a disk that refuses it.
+    const refusing = {
+      ...pinned,
+      fetch: (async (url: string) => {
+        const scratch = readdirSync(join(root, 'claude-code')).find((entry) => entry.startsWith('.download-'))
+        if (scratch !== undefined) mkdirSync(join(root, 'claude-code', scratch, 'package.tgz'))
+        return pinned.fetch(url)
+      }) as unknown as typeof fetch,
+    }
+    const exit = await using(root, refusing, (installs) => installs.install(pinned.agent))
+    assert.isTrue(Exit.isFailure(exit))
+    assert.include(JSON.stringify(exit), "couldn't be kept on this computer")
+    assert.deepStrictEqual(readdirSync(join(root, 'claude-code')), [])
   })
 
   it('has none for a platform its maker publishes no package for, and Windows’ program by its own name', async () => {

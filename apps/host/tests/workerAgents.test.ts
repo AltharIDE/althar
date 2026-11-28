@@ -14,6 +14,8 @@ import { temporary } from './support'
  */
 
 const ARCH = process.arch === 'arm64' ? 'arm64' : 'x64'
+/** Codex's package for this Linux, by the version its folder is kept as. */
+const PINNED_CODEX = PINNED_PROGRAMS.codex.assets[`linux-${ARCH}`]?.version ?? ''
 const TARGET = ARCH === 'arm64' ? 'aarch64-unknown-linux-musl' : 'x86_64-unknown-linux-musl'
 
 /** A file, its folders made, runnable. */
@@ -70,7 +72,7 @@ describe('the agents a worker runs', () => {
     }
     expect(bare.get('junie')).toMatchObject({ located: null, downloadable: false, guide: expect.stringMatching(/^https:\/\//u) })
     // Its launch names where Althar will keep it, which its adapter is told to drive.
-    const kept = join(folder, 'programs', 'codex', 'current', 'vendor', TARGET, 'bin', 'codex')
+    const kept = join(folder, 'programs', 'codex', PINNED_CODEX, 'vendor', TARGET, 'bin', 'codex')
     expect(bare.get('codex')?.definition.launch('/node').env?.CODEX_PATH).toBe(kept)
     expect(bare.get('junie')?.definition.launch('/node').command).toBe('junie')
   })
@@ -80,7 +82,7 @@ describe('the agents a worker runs', () => {
     const release = temporary()
     const carried = carrying(release)
     expect(await bringProgram(folder, '', 'codex', [temporary(), release])).toBe('adopted')
-    const kept = join(folder, 'programs', 'codex', 'current')
+    const kept = join(folder, 'programs', 'codex', PINNED_CODEX)
     expect(statSync(join(kept, 'vendor', TARGET, 'bin', 'codex')).ino).toBe(statSync(carried.codex).ino)
     expect(existsSync(join(kept, 'vendor', TARGET, 'codex-resources', 'voice'))).toBe(false)
     expect(await bringProgram(folder, '', 'claude-code', [release])).toBe('adopted')

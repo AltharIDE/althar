@@ -1,11 +1,9 @@
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { once } from 'node:events'
 import {
   chmodSync,
   closeSync,
   copyFileSync,
-  createWriteStream,
   linkSync,
   readFileSync,
   statfsSync,
@@ -21,6 +19,7 @@ import {
   writeFileSync,
   writeSync,
 } from 'node:fs'
+import { open } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
@@ -317,15 +316,18 @@ export class Installs extends Context.Service<
 
         /**
          * Where Althar's downloaded copy of the agent's command is, whether or not it is there: in a package it keeps
-         * whole, where the package has it.
+         * whole, where the package has it. One pinned at a version (the package an adapter's lockfile names, or a pinned
+         * archive) is found in that version's own folder only, never through `current`: once its pin moves, the copy before
+         * it is no copy of it, so nothing finds or drives it, and its first use brings the one pinned.
          */
         const kept = (definition: AgentDefinition, name: string) => {
           if (root === undefined) return null
           const spec = definition.cli?.download
           if (spec !== undefined && fromNpm(spec)) {
             const asset = assetOf(spec.assets)
-            return asset === undefined ? null : join(root, definition.id, 'current', ...asset.program.split('/'))
+            return asset === undefined ? null : join(root, definition.id, asset.version, ...asset.program.split('/'))
           }
+          if (spec !== undefined && pinned(spec)) return join(root, definition.id, spec.version, programName(name, platform))
           return join(root, definition.id, 'current', programName(name, platform))
         }
 
@@ -451,20 +453,28 @@ export class Installs extends Context.Service<
                   if (!response.ok || response.body === null)
                     throw fail(definition.id, `${definition.name} couldn't be downloaded.`, response.status)
                   const hash = createHash('sha512')
-                  const out = createWriteStream(archive, { mode: 0o600 })
+                  // Each write awaited on the file's own handle, so a disk that refuses it (full, not writable) fails the
+                  // install here, as the network failing does, never as an error nothing hears.
+                  const out = await open(archive, 'w', 0o600).catch((error: unknown) => {
+                    throw fail(definition.id, `${definition.name} couldn't be kept on this computer.`, error)
+                  })
                   let received = 0
                   try {
                     for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
                       hash.update(chunk)
                       received += chunk.length
                       progress?.(received, asset.bytes)
-                      if (!out.write(chunk)) await once(out, 'drain')
+                      await out.write(chunk).catch((error: unknown) => {
+                        throw fail(definition.id, `${definition.name} couldn't be kept on this computer.`, error)
+                      })
                     }
                   } catch (error) {
-                    out.destroy()
-                    throw fail(definition.id, `${definition.name}'s download stopped part-way.`, error)
+                    throw error instanceof InstallFailed
+                      ? error
+                      : fail(definition.id, `${definition.name}'s download stopped part-way.`, error)
+                  } finally {
+                    await out.close().catch(() => undefined)
                   }
-                  await new Promise<void>((done, failed) => out.end((error?: Error | null) => (error ? failed(error) : done())))
                   return `sha512-${hash.digest('base64')}`
                 },
                 catch: (error) =>

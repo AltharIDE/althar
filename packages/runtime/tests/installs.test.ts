@@ -512,8 +512,9 @@ describe('downloading a pinned agent', () => {
     assert.strictEqual(execFileSync(join(root, 'antigravity', 'current', 'localharness_external'), { encoding: 'utf8' }).trim(), 'harness')
     assert.deepStrictEqual(readdirSync(join(root, 'antigravity')).toSorted(), ['1.3.0', 'current'])
     const after = await run(Effect.map(Installs, (installs) => installs.locate(agent)))
+    // Found in the folder of the version pinned, never through `current`, so a pin that moves finds no copy of the one before.
     assert.deepStrictEqual(Exit.isSuccess(after) ? after.value : null, {
-      command: join(root, 'antigravity', 'current', 'agy_acp_server.par'),
+      command: join(root, 'antigravity', '1.3.0', 'agy_acp_server.par'),
       whose: 'althar',
     })
   })
@@ -603,7 +604,7 @@ describe('downloading a pinned agent', () => {
     assert.strictEqual(readFileSync(join(current, 'agy_acp_server.exe'), 'utf8'), 'server')
     assert.strictEqual(readFileSync(join(current, 'localharness_external.exe'), 'utf8'), 'harness')
     const found = await run(Effect.map(Installs, (installs) => installs.locate(agent)))
-    const command = join(current, 'agy_acp_server.exe')
+    const command = join(root, 'antigravity', '1.3.0', 'agy_acp_server.exe')
     assert.deepStrictEqual(Exit.isSuccess(found) ? found.value : null, { command, whose: 'althar' })
     // Its launch names the same program, so Althar runs the copy it kept.
     const pointed = usingLocated({ ...agent, launch: () => ({ ...agents.antigravity.launch(''), command: agyServer('win32') }) }, () =>
