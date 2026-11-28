@@ -12,6 +12,7 @@ import { Errands, type AskedAction, type TurnWord } from './Errands'
 import { errandTools } from './errandTools'
 import { ToolRefused } from './toolErrors'
 import { refusalWords } from './toolRefusal'
+import { redact } from './diagnostics'
 import { singleTypes } from './toolSchemas'
 import { workerMcpMounts, WORKER_MCP_PATH } from './workerMcp'
 export { ActionNotPerformed, ToolRefused } from './toolErrors'
@@ -172,10 +173,14 @@ export class ToolServer extends Context.Service<
         })
         server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const tool = tools.find((candidate) => candidate.name === request.params.name)
+          // Every refusal leaves here with any credential in it taken out, a guard's as a tool's (toolRefusal.ts).
           if (tool === undefined)
-            return { isError: true, content: [{ type: 'text' as const, text: `Althar has no tool called ${request.params.name}.` }] }
+            return {
+              isError: true,
+              content: [{ type: 'text' as const, text: redact(`Althar has no tool called ${request.params.name}.`) }],
+            }
           const guarded = await refusal(tool)
-          if (guarded !== null) return { isError: true, content: [{ type: 'text' as const, text: guarded }] }
+          if (guarded !== null) return { isError: true, content: [{ type: 'text' as const, text: redact(guarded) }] }
           const input = request.params.arguments ?? {}
           const controller = tool.cancelWithRequest ? new AbortController() : undefined
           if (controller !== undefined) res.once('close', () => controller.abort())

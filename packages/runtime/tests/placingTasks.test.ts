@@ -540,6 +540,17 @@ describe('what a failed tool tells its agent (toolRefusal.ts)', () => {
         ])
         assert.deepStrictEqual((yield* said('fails_leaking')).content, [{ type: 'text', text: 'The host said: token [REDACTED] is bad.' }])
         assert.deepStrictEqual((yield* said('refuses_leaking')).content, [{ type: 'text', text: 'Connect with Bearer [REDACTED] again.' }])
+        // A guard's refusal, which answers before the tool runs, is taken out of too.
+        const toolServer = Context.get(context, ToolServer)
+        yield* toolServer.serve('coordinator', [
+          { name: 'guarded_leaking', description: 'Guarded.', input: { type: 'object' }, call: () => Effect.succeed('ran') },
+        ])
+        yield* toolServer.guard('coordinator', (tool) =>
+          Effect.succeed(tool.name === 'guarded_leaking' ? 'A helper named ghp_abcdefghijklmnopqrstuvwxyz is still at work.' : null),
+        )
+        assert.deepStrictEqual((yield* said('guarded_leaking')).content, [
+          { type: 'text', text: 'A helper named [REDACTED] is still at work.' },
+        ])
       }),
     ),
   )
