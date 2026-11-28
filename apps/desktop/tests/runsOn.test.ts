@@ -45,12 +45,19 @@ describe('where a held plan runs', () => {
       ['This Mac', null, false],
       ['Any free worker', runsOnText.noneFree, true],
       ['Linux worker aaaaaa', 'One repository', true],
-      ['Linux worker bbbbbb', 'At work', true],
+      ['Linux worker bbbbbb', 'One repository', true],
       ['Linux worker cccccc', 'Full', true],
       ['Linux worker dddddd', 'No Claude Code', true],
       ['Linux worker eeeeee', 'One repository', true],
     ])
     expect(hints(placementOf(base))[2]).toEqual(['Linux worker aaaaaa', '12 GB free', false])
+    // At work on another task, it can still be picked by name: the task waits for it in Up next. Any free worker passes it over.
+    const atWork = placementOf({ ...base, workers: [{ ...free, busy: true }], selected: free.workerId })
+    expect(hints(atWork).slice(1)).toEqual([
+      ['Any free worker', runsOnText.noneFree, true],
+      ['Linux worker aaaaaa', 'At work · this waits for it', false],
+    ])
+    expect(atWork.problem).toBeUndefined()
     const small = { ...free, capacity: { ...capacity, freeMemoryMib: 512 } }
     expect(hints(placementOf({ ...base, workers: [small] }))[2]?.[1]).toBe('512 MB free')
     // A worker that hasn't said how much it has: free, and no Any free worker, which picks by what each has.
@@ -81,9 +88,8 @@ describe('where a held plan runs', () => {
     expect(placementOf({ ...base, selected: free.workerId }).problem).toBeUndefined()
     expect(placementOf({ ...base, selected: ANY }).problem).toBeUndefined()
     expect(placementOf({ ...base, selected: ANY, workers: [{ ...free, busy: true }] }).problem).toBe('No worker is free for this task now.')
-    expect(placementOf({ ...base, selected: free.workerId, workers: [{ ...free, busy: true }] }).problem).toBe(
-      'Linux worker aaaaaa is at work on another task.',
-    )
+    // Picked by name, a worker at work on another task is no problem: the task waits for it in Up next.
+    expect(placementOf({ ...base, selected: free.workerId, workers: [{ ...free, busy: true }] }).problem).toBeUndefined()
     expect(placementOf({ ...base, selected: free.workerId, worksIn: 'checkout' }).problem).toBe('Choose Worktree to run it on a worker.')
     expect(placementOf({ ...base, selected: free.workerId, requirements: { ...requirements, readOnly: true } }).problem).toBe(
       'Reviews of pull requests run on This Mac.',
