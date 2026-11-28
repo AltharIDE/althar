@@ -581,7 +581,8 @@ export function Composer({
   return (
     <div className={s.stack} data-tray-host="" {...drop.handlers}>
       {edgeShown && (
-        <div ref={edge} className={s.floats}>
+        // What moves between what floats here, as the merging pill opening into its card, reads where each stands within this (lib/edgeMorph).
+        <div ref={edge} className={s.floats} data-composer-floats="">
           {carried && <div className={s.carried}>{carried}</div>}
           {above && <div className={s.above}>{above}</div>}
           {notice && <div className={s.notice}>{notice}</div>}
