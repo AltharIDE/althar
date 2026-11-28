@@ -119,7 +119,7 @@ pub fn outcome(journal: &str, result: &str) -> Outcome {
         .lines()
         .filter(|line| field(line, "step").as_deref() == Some("update"))
         .filter_map(|line| field(line, "state").map(|state| (state, line)))
-        .last();
+        .next_back();
     let version = |line: &str| field(line, "version").unwrap_or_default();
     match said {
         Some((state, line)) if state == "waiting" => Outcome::Waiting {
