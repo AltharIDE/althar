@@ -17,7 +17,8 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # The wait for post-merge and host (wait-for-runs.py, two hours), and the checks before it.
+    timeout-minutes: 130
     permissions:
       contents: read
       actions: read
@@ -29,7 +30,7 @@ jobs:
         with:
           fetch-depth: 0
       - id: what
-        name: Check version, main, release notes and completed validation
+        name: Check version, main, release notes and validation
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -55,13 +56,9 @@ jobs:
             echo '::error::A release already exists for this version. Never replace signed assets; use a new version.'
             exit 1
           fi
-          for workflow in post-merge.yml host.yml; do
-            passed="$(gh run list --workflow "$workflow" --commit "$GITHUB_SHA" --status success --json databaseId --jq length)"
-            if [ "$passed" = 0 ]; then
-              echo "::error::$workflow has not passed on this exact commit. Complete validation before releasing."
-              exit 1
-            fi
-          done
+          # A tag may be pushed while these are still running on its commit, so they are waited for.
+          python3 .github/scripts/wait-for-runs.py post-merge.yml host.yml \
+            --error '{workflow} has not passed on this exact commit. Complete validation before releasing.'
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 

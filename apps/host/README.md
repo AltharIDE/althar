@@ -396,10 +396,10 @@ The host and its agents run as the home user and share that user's file access. 
 
 ## Producing a release
 
-The [host release workflow](../../.github/workflows/host-release.yml) builds native Linux x64 and arm64 releases and opens a draft after the exact `main` commit passes host and post-merge validation.
+The [host release workflow](../../.github/workflows/host-release.yml) builds native Linux x64 and arm64 releases and opens a draft after the exact `main` commit passes host and post-merge validation, waiting up to two hours for runs still going.
 
 1. Bump the version in `apps/host/package.json` and add `release-notes/<version>.md`.
-2. After validation, tag that commit `host-v<version>` or dispatch the workflow on `main`.
+2. Once its validation has started or passed, tag that commit `host-v<version>` or dispatch the workflow on `main`.
 3. Use the protected `release` environment with `ALTHAR_HOST_RELEASE_SIGNING_KEY` set to the Ed25519 private PEM. Keep the private key out of Git, logs and release assets. Distribute the public key separately.
 4. Verify a reboot on a personal VPS and actual provider sign-in and refresh on a headless host. Publish the draft after those checks. Give a corrected release a new version and sequence so published signed assets stay immutable.
 
