@@ -257,6 +257,8 @@ describe('push_tag, on the person’s word in the lead’s thread', () => {
       )
       assert.strictEqual(git(remote, 'rev-parse', 'v1.0.0^{commit}'), head)
       assert.strictEqual(git(remote, 'cat-file', '-t', 'v1.0.0'), 'tag')
+      // The very tag object made here, not another made of the same name.
+      assert.strictEqual(git(remote, 'rev-parse', 'refs/tags/v1.0.0'), git(worktree, 'rev-parse', 'refs/tags/v1.0.0'))
       const sql = yield* SqlClient.SqlClient
       assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'permission'`, 0)
       assert.include(
@@ -271,6 +273,29 @@ describe('push_tag, on the person’s word in the lead’s thread', () => {
       const again = yield* turn(access, 'person', 'Push v1.0.0 again')
       assert.include(yield* callTool(access, 'push_tag', { tag: 'v1.0.0', message: again }), "Althar doesn't move it")
       assert.strictEqual(git(remote, 'rev-parse', 'v1.0.0^{commit}'), head)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('reads where the remote pushes, not where it fetches from, before saying the tag is there', () =>
+    Effect.gen(function* () {
+      const { access, worktree, remote, root } = yield* leadWithRemote()
+      // origin fetches from one place and pushes to another, as a mirror or a fork set up that way does.
+      const pushed = mkdtempSync(join(tmpdir(), 'althar-push-'))
+      git(pushed, 'init', '-q', '--bare', '-b', 'main')
+      git(root, 'config', 'remote.origin.pushurl', pushed)
+      writeFileSync(join(worktree, 'CHANGELOG.md'), '1.1.0\n')
+      git(worktree, 'add', '.')
+      git(worktree, 'commit', '-q', '-m', 'Release 1.1.0')
+      const head = git(worktree, 'rev-parse', 'HEAD')
+      git(worktree, 'tag', 'v1.1.0')
+      // Where it fetches from has the tag already: where it pushes doesn't.
+      git(root, 'push', '-q', remote, 'refs/tags/v1.1.0')
+      const message = yield* turn(access, 'person', 'Push the v1.1.0 tag')
+      assert.strictEqual(
+        yield* callTool(access, 'push_tag', { tag: 'v1.1.0', message }),
+        `Pushed v1.1.0, on ${head.slice(0, 8)}, to origin.`,
+      )
+      assert.strictEqual(git(pushed, 'rev-parse', 'v1.1.0^{commit}'), head)
     }).pipe(Effect.provide(runtime())),
   )
 })

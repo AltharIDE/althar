@@ -1101,6 +1101,18 @@ export class MergeLine extends Context.Service<
           ),
         )
 
+      /** Whether an errand was kept by its own task's lead, in that task's thread: the one to see to what holds it. */
+      const ownedBy = (entry: Pick<Entry, 'taskId' | 'threadId'>) =>
+        entry.taskId === null
+          ? Effect.succeed(false)
+          : Effect.map(
+              Effect.flatMap(
+                SqlClient.SqlClient,
+                (sql) => sql<{ id: string }>`SELECT id FROM threads WHERE id = ${entry.threadId} AND task_id = ${entry.taskId}`,
+              ),
+              (rows) => rows.length > 0,
+            )
+
       const line = (projectId: string, threadId: string, title: string) =>
         addItem({ projectId: projectId as ProjectId, threadId }, 'notice', { source: 'runtime', severity: 'info', title })
 
@@ -1402,7 +1414,6 @@ export class MergeLine extends Context.Service<
           projectId,
           provide(
             Effect.gen(function* () {
-              const sql = yield* SqlClient.SqlClient
               const taskNews = yield* errands.taskNews(projectId)
               yield* bindTaskMerges(projectId, taskNews.ready)
               const entries = yield* Effect.filter(yield* entriesOf(projectId), (entry) =>
@@ -1527,6 +1538,24 @@ export class MergeLine extends Context.Service<
                       if (seen.fresh.state === 'done') held = !queued
                       break
                     case 'red':
+                      // Sent back, for its checks or by the host's queue: said once for each head, so a lead woken by nothing
+                      // else hears it and tells the person, and sees to it. Its card says it too.
+                      if (yield* note(projectId, stepOf(entry), 'said', `red:${seen.change.headSha}:${seen.why}`)) {
+                        const own = yield* ownedBy(entry)
+                        const queue = seen.why === 'sent back by the queue'
+                        wakeOf(entry.threadId).push(
+                          `- ${seen.fresh.reason ?? seen.why} Errand ${entry.errandId} waits meanwhile, with no step to take: say so to the person in a line${
+                            entry.taskId === null
+                              ? ''
+                              : own
+                                ? queue
+                                  ? ', and find out why the queue’s build failed (read_checks); it goes back in only on their fresh word'
+                                  : ', and fix it on your branch (read_checks shows what failed)'
+                                : ', and to its task’s lead (message_lead)'
+                          }.`,
+                        )
+                      }
+                      break
                     case 'held':
                       break
                     case 'conflict':
@@ -1534,15 +1563,12 @@ export class MergeLine extends Context.Service<
                       // The lead's or the person's to do, or a passing one Althar tries again: said once for each head, and the slot left to the next.
                       if (yield* note(projectId, stepOf(entry), 'said', `${seen.next}:${seen.change.headSha}:${seen.base ?? ''}`)) {
                         // Kept by the task's own lead, it is that lead's to settle: no one to pass it on to.
-                        const [own] =
-                          entry.taskId === null
-                            ? []
-                            : yield* sql<{ id: string }>`SELECT id FROM threads WHERE id = ${entry.threadId} AND task_id = ${entry.taskId}`
+                        const own = yield* ownedBy(entry)
                         wakeOf(entry.threadId).push(
                           `- ${seen.fresh.reason ?? seen.why} Errand ${entry.errandId} waits meanwhile: say so to the person in a line${
                             seen.passing === true
                               ? ''
-                              : own === undefined
+                              : !own
                                 ? ', and to its task’s lead (message_lead)'
                                 : `, and merge ${entry.branch} into your branch yourself, never by a rebase: it goes back in once its head moves`
                           }.`,

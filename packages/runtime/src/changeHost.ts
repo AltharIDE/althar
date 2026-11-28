@@ -1543,7 +1543,7 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
    * (ADR-013), short of a project that allows everything or never this.
    */
   /** The tag a lead names, in its task's repository: the commit it is on here (null where it made none), and the remote it goes to. */
-  const tagHere = (taskId: string, input: unknown) =>
+  const tagHere = (taskId: string, input: unknown, whereNone: 'refuse' | 'host' = 'refuse') =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const asked = yield* Schema.decodeUnknownEffect(TagAsked)(input).pipe(
@@ -1560,6 +1560,8 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
       const named = asked.repository == null ? null : String(asked.repository).trim()
       const candidates = named === null ? repositories : repositories.filter((one) => one.slug === named)
       const [repository] = candidates
+      // Nothing of the task's here to tag from, none at all or none by that name: on the person's word, Althar tags on the host.
+      if (whereNone === 'host' && candidates.length === 0) return null
       if (repository === undefined || candidates.length > 1)
         return yield* new ToolRefused({
           message:
@@ -1572,7 +1574,12 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
       if (tag === '' || tag.startsWith('-') || valid.code !== 0)
         return yield* new ToolRefused({ message: `\`${tag}\` isn't a name git takes for a tag.` })
       const [commit = null] = yield* commitsOf(repository.worktree, [`refs/tags/${tag}`])
-      return { tag, repository, commit }
+      // The tag itself, as made: an annotated tag's own object, which is what goes up, so a tag moved meanwhile can't.
+      const object =
+        commit === null
+          ? null
+          : (yield* gitOutcome(repository.worktree, 'rev-parse', '--verify', '--quiet', `refs/tags/${tag}`)).stdout.trim() || null
+      return { tag, repository, commit, object }
     })
 
   /** What a push of the lead's tag the remote turned down says, for the lead: why it wasn't pushed. */
@@ -1595,47 +1602,58 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
 
   /**
    * The lead's own tag, pushed on the person's word in its thread (ADR-081, a lead's tag): their message in this turn, which
-   * Errands checks, so nothing is asked on a card. It reads the remote first: a tag there on this commit is done, one on
-   * another is refused, never moved. Null where the lead made no tag of that name here: Althar makes it on the host then.
+   * Errands checks, so nothing is asked on a card. It reads where the remote pushes first: a tag there on this commit is
+   * done, one on another is refused, never moved; and pushes the very tag object it read. Null where the lead made no tag
+   * of that name here, or the task has no repository here by that name: Althar makes it on the host then.
    */
   const pushTagOnWord = (taskId: string, input: unknown) =>
     Effect.gen(function* () {
-      const { tag, repository, commit } = yield* tagHere(taskId, input)
-      if (commit === null) return null
+      const here = yield* tagHere(taskId, input, 'host')
+      if (here === null || here.commit === null || here.object === null) return null
+      const { tag, repository, commit, object } = here
       const remote = yield* remoteOf(repository.root, repository.base)
       if (remote === null) return yield* new ToolRefused({ message: `${repository.slug} has no remote to push ${tag} to.` })
       const message = (input as { readonly message?: unknown }).message
-      const read = Effect.gen(function* () {
-        const said = yield* gitWithin(
-          60_000,
-          repository.root,
-          'ls-remote',
-          '--tags',
-          remote,
-          `refs/tags/${tag}`,
-          `refs/tags/${tag}^{}`,
-        ).pipe(
-          Effect.mapError(
-            (failed) =>
-              new ToolRefused({
-                message: `Althar couldn't read ${remote}'s tags, so ${tag} wasn't pushed: ${redacted(failed.stderr.trim().split('\n').at(-1) ?? '')}`,
-              }),
-          ),
-        )
-        // An annotated tag is named twice: the tag, and the commit it is on (`^{}`), which is what is compared.
-        const there = new Map(
-          said
-            .split('\n')
-            .filter((line) => line.includes('\t'))
-            .map((line) => [line.slice(line.indexOf('\t') + 1), line.slice(0, line.indexOf('\t'))] as const),
-        )
-        const on = there.get(`refs/tags/${tag}^{}`) ?? there.get(`refs/tags/${tag}`)
-        if (on === undefined) return { state: 'absent', head: commit } satisfies FreshAction
-        if (on === commit)
-          return { state: 'done', head: commit, answer: `${remote} has ${tag} on ${commit.slice(0, 8)} already.` } satisfies FreshAction
-        return yield* new ToolRefused({
-          message: `${remote} has a tag ${tag} already, on ${on.slice(0, 8)}, not ${commit.slice(0, 8)}, so ${tag} wasn't pushed. Althar doesn't move it.`,
+      const unread = (failed: GitFailed) =>
+        new ToolRefused({
+          message: `Althar couldn't read ${remote}'s tags, so ${tag} wasn't pushed: ${redacted(failed.stderr.trim().split('\n').at(-1) ?? '')}`,
         })
+      const read = Effect.gen(function* () {
+        // Where a push goes, which a remote's pushurl may make another place than where it fetches from: each of them.
+        const urls = (yield* gitWithin(60_000, repository.root, 'remote', 'get-url', '--push', '--all', remote).pipe(
+          Effect.mapError(unread),
+        ))
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line !== '')
+        const ons: Array<string | undefined> = []
+        for (const url of urls) {
+          const said = yield* gitWithin(
+            60_000,
+            repository.root,
+            'ls-remote',
+            '--tags',
+            url,
+            `refs/tags/${tag}`,
+            `refs/tags/${tag}^{}`,
+          ).pipe(Effect.mapError(unread))
+          // An annotated tag is named twice: the tag, and the commit it is on (`^{}`), which is what is compared.
+          const there = new Map(
+            said
+              .split('\n')
+              .filter((line) => line.includes('\t'))
+              .map((line) => [line.slice(line.indexOf('\t') + 1), line.slice(0, line.indexOf('\t'))] as const),
+          )
+          ons.push(there.get(`refs/tags/${tag}^{}`) ?? there.get(`refs/tags/${tag}`))
+        }
+        const elsewhere = ons.find((on) => on !== undefined && on !== commit)
+        if (elsewhere !== undefined)
+          return yield* new ToolRefused({
+            message: `${remote} has a tag ${tag} already, on ${elsewhere.slice(0, 8)}, not ${commit.slice(0, 8)}, so ${tag} wasn't pushed. Althar doesn't move it.`,
+          })
+        if (ons.length > 0 && ons.every((on) => on === commit))
+          return { state: 'done', head: commit, answer: `${remote} has ${tag} on ${commit.slice(0, 8)} already.` } satisfies FreshAction
+        return { state: 'absent', head: commit } satisfies FreshAction
       })
       const action: AskedAction = {
         ...(typeof message === 'string' ? { messageId: message } : {}),
@@ -1645,7 +1663,8 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
         read: provide(read),
         act: () =>
           provide(
-            gitWithin(60_000, repository.root, 'push', '--', remote, `refs/tags/${tag}:refs/tags/${tag}`).pipe(
+            // The very object read when asked, never the name again: one moved since doesn't go up in its place.
+            gitWithin(60_000, repository.root, 'push', '--', remote, `${object}:refs/tags/${tag}`).pipe(
               Effect.as(`Pushed ${tag}, on ${commit.slice(0, 8)}, to ${remote}.`),
               Effect.catchTag('GitFailed', (failed) =>
                 Effect.flatMap(tagRefused(taskId, remote, tag, failed), (why) => Effect.fail(new ActionNotPerformed({ message: why }))),
@@ -1658,7 +1677,9 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
 
   const pushTag = (taskId: string, input: unknown, access: ToolAccess) =>
     Effect.gen(function* () {
-      const { tag, repository, commit } = yield* tagHere(taskId, input)
+      const here = yield* tagHere(taskId, input)
+      if (here === null) return yield* new ToolRefused({ message: 'This task has no repository of its own to push a tag from.' })
+      const { tag, repository, commit } = here
       if (commit === null)
         return yield* new ToolRefused({
           message: `There's no tag ${tag} here. Make it first, with \`git tag ${tag}\` on the commit it's for, then call push_tag.`,

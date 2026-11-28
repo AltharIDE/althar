@@ -872,7 +872,9 @@ describe('a lead merging its own task’s pull request, on the person’s word i
       const url = `${HOST}/meridian/api/pull/${number}`
       const linkId = yield* newId(Ids.externalLink)
       const at = yield* timestamp
-      yield* sql`INSERT INTO external_links ${sql.insert({ id: linkId, projectId: coordinator.projectId, taskId: task.taskId, connectionId: null, product: 'github', kind: 'change', externalId: String(number), ref: String(number), key: String(number), url, snapshot: JSON.stringify({ number, title: 'Retry refunds', url, state: 'open', draft: false, words: { noun: 'pull request', short: 'PR', prefix: '#' }, repository: ['meridian', 'api'] }), listening: 1, createdAt: at, updatedAt: at })}`
+      // Its link names the connection it came through, as a task's own does, so Althar reads it again as it merges.
+      const [connection] = yield* sql<{ id: string }>`SELECT id FROM connections WHERE product = 'github' LIMIT 1`
+      yield* sql`INSERT INTO external_links ${sql.insert({ id: linkId, projectId: coordinator.projectId, taskId: task.taskId, connectionId: connection?.id ?? null, product: 'github', kind: 'change', externalId: String(number), ref: String(number), key: String(number), url, snapshot: JSON.stringify({ number, title: 'Retry refunds', url, state: 'open', draft: false, headSha: `head-${number}`, additions: null, deletions: null, changedFiles: null, checks: null, target: 'main', words: { noun: 'pull request', short: 'PR', prefix: '#' }, repository: ['meridian', 'api'] }), listening: 1, createdAt: at, updatedAt: at })}`
       const sessionId = yield* newId(Ids.providerSession)
       yield* sql`INSERT INTO provider_sessions ${sql.insert({ id: sessionId, projectId: coordinator.projectId, threadId: task.threadId, agentId, state: 'completed', startedAt: at, endedAt: at })}`
       const lead: ToolAccess = { role: 'lead', projectId: coordinator.projectId, threadId: task.threadId, sessionId, taskId: task.taskId }
@@ -921,6 +923,12 @@ describe('a lead merging its own task’s pull request, on the person’s word i
       yield* sweep(coordinator)
       assert.strictEqual((yield* cards(lead))[0]?.rows[0]?.state, 'sent_back')
       assert.deepStrictEqual(did.merged, [])
+      // The lead hears it was sent back, once for the head, and that it is its own to fix.
+      const sentBack = (yield* news(lead)).at(-1) ?? ''
+      assert.match(sentBack, /checks failed at head-1/)
+      assert.include(sentBack, 'fix it on your branch')
+      yield* sweep(coordinator)
+      assert.lengthOf(yield* news(lead), 1)
 
       // The lead pushes a fix, green: the line wakes the lead with the step, not the coordinator.
       const fix = yield* fixPushed(service, coordinator, number, linkId)
@@ -976,15 +984,102 @@ describe('a lead merging its own task’s pull request, on the person’s word i
         const other = pull('Cap retries')
         const message = yield* turn(lead, 'person', 'Merge #2 as well')
         assert.match(yield* merge(lead, { pull_request: `#${other}`, head: `head-${other}`, message }), /^Merged PR #2/)
-        // Their word for a tag the lead didn't make: Althar makes it on the host, on main's latest.
-        assert.match(yield* callTool(lead, 'push_tag', { tag: 'v1.0.0', message }), /^Pushed the tag v1\.0\.0 on /)
+        // Their word for a tag the lead didn't make: Althar makes it on the host, on main's latest, named by the host's own
+        // name for the repository, which is none of the task's checkouts here.
+        assert.match(
+          yield* callTool(lead, 'push_tag', { tag: 'v1.0.0', repository: 'meridian/api', message }),
+          /^Pushed the tag v1\.0\.0 on /,
+        )
+        // A task with no checkout here at all tags on the host too.
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`DELETE FROM workspaces WHERE task_id = ${lead.taskId}`
+        assert.match(yield* callTool(lead, 'push_tag', { tag: 'v1.0.1', message }), /^Pushed the tag v1\.0\.1 on /)
         assert.deepStrictEqual(
           did.tagsPushed.map((one) => one.name),
-          ['v1.0.0'],
+          ['v1.0.0', 'v1.0.1'],
         )
       }).pipe(Effect.provide(layer(service)))
     },
   )
+
+  it.live('one the host’s queue sends back wakes its lead, once, to find out why: it isn’t put back without the person', () => {
+    const { service, pull, did } = leadsHost()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const coordinator = yield* opened(working)
+      const number = pull('Retry refunds')
+      const { lead } = yield* leadOf(coordinator, number)
+      service.mergeQueue()
+      const message = yield* turn(lead, 'person', 'Merge it once it’s green')
+      assert.match(yield* merge(lead, { head: `head-${number}`, message }), /merge queue at head-1/)
+      // The queue's build with main fails: GitHub takes it out, its own head's checks still green.
+      did.queueCommit(number, 'group-1')
+      did.dequeue(number, 'checks')
+      yield* sweep(coordinator)
+      const said = (yield* news(lead)).at(-1) ?? ''
+      assert.include(said, 'was sent back by main’s merge queue')
+      assert.include(said, 'find out why the queue’s build failed')
+      yield* sweep(coordinator)
+      assert.lengthOf(yield* news(lead), 1)
+      assert.deepStrictEqual(
+        did.merged.map((one) => one.how),
+        ['queue'],
+      )
+      assert.deepStrictEqual(yield* news(coordinator), [])
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('its task settled on the merge, the tag step starts its lead again, which takes it: the coordinator hears none of it', () => {
+    const { service, pull, did } = leadsHost()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const coordinator = yield* opened(working)
+      const number = pull('Retry refunds')
+      const { lead, slug } = yield* leadOf(coordinator, number, 'tag-lead')
+      const message = yield* turn(lead, 'person', 'Merge it, and tag it v1.0.0 after')
+      const tagging = yield* callTool(lead, 'keep_errand', {
+        message,
+        steps: [
+          {
+            key: 'tag',
+            tool: 'push_tag',
+            taskId: slug,
+            target: 'meridian/api tag v1.0.0',
+            request: { tag: 'v1.0.0', commit: `task:${slug}` },
+            waits: [{ kind: 'task_merged', target: slug }],
+          },
+        ],
+      })
+      assert.match(yield* merge(lead, { head: `head-${number}`, message }), /^Merged PR #1/)
+      // Merged, the task settles as done, and its lead has no session.
+      yield* until(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${lead.taskId}`, (rows) => rows[0]?.state === 'done')
+      assert.deepStrictEqual(did.tagsPushed, [])
+      // The person's turn ended, as the host ends one.
+      yield* sql`UPDATE turn_deliveries SET state = 'completed', ended_at = ${yield* timestamp} WHERE thread_id = ${lead.threadId}`
+      yield* sql`UPDATE user_inputs SET state = 'delivered' WHERE thread_id = ${lead.threadId} AND state = 'queued'`
+      // A lead started again reads its brief, then the news: it takes the step the news names, as a lead does.
+      yield* sql`UPDATE tasks SET description = '[lead:take-steps]' WHERE id = ${lead.taskId}`
+      yield* sweep(coordinator)
+      assert.include((yield* news(lead)).at(-1), `Errand ${tagging}, step tag`)
+      yield* until(
+        Effect.sync(() => did.tagsPushed.map((one) => [one.name, one.commit])),
+        (pushed) => pushed.length > 0,
+      )
+      assert.deepStrictEqual(
+        did.tagsPushed.map((one) => [one.name, one.commit]),
+        [['v1.0.0', `merge-${number}`]],
+      )
+      assert.include(
+        promptsGot
+          .filter((one) => one.agentId === 'tag-lead')
+          .map((one) => one.text)
+          .join('\n'),
+        `Errand ${tagging}, step tag`,
+      )
+      assert.deepStrictEqual(yield* news(coordinator), [])
+    }).pipe(Effect.provide(layer(service)))
+  })
 
   it.live('a merge its lead kept wakes that lead after a restart, starting it again', () => {
     const { service, checks, pull } = leadsHost()

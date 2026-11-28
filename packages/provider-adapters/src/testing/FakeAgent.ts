@@ -1125,6 +1125,11 @@ const playRole = async (
         ],
       })
     }
+    // A lead woken by Althar's news for an errand's step, `[lead:take-steps]` (in its brief, as a settled task's lead keeps it),
+    // takes the step the news names, `Take it now: <tool> with <json>.`, as a lead does what it is told to take.
+    const step = session.markers.has('[lead:take-steps]') ? /Take it now: ([a-z_]+) with (\{[^\n]*\})\./.exec(text) : null
+    if (step?.[1] !== undefined && step[2] !== undefined && available.has(step[1]))
+      return await call(step[1], JSON.parse(step[2]) as Record<string, unknown>)
     if (available.has('finish_step')) {
       // A lead that takes a while over what it was asked, `[lead:slowly]`: long enough to be seen at work.
       if (text.includes('[lead:slowly]')) await takesAWhile(session, '[lead:slowly]', 6_000)
