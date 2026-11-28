@@ -82,7 +82,17 @@ export interface ComputerWorker {
    * What its own check found that stops a task there (ADR-103), in words: what, what to do, and the command an
    * administrator runs there, to copy; none where it is ready, or hasn't checked.
    */
-  unready?: { title: string; body?: string | undefined; command?: string | undefined } | undefined
+  unready?:
+    | {
+        title: string
+        body?: string | undefined
+        command?: string | undefined
+        /** Check again runs its check now. */
+        checking?: boolean | undefined
+        /** What the last Check again came to, where the problem stands: it still fails, or it couldn't run. */
+        note?: string | undefined
+      }
+    | undefined
   /** The Althar release it runs, where it says. */
   release?: string | undefined
   /** Where its update stands, where a newer release is out or one was asked for. */
@@ -118,6 +128,8 @@ export interface ComputersText {
   diskFree: string
   unknown: string
   facts: { computer: string; agents: string; projects: string; id: string; memory: string; workers: string; ready: string }
+  checkAgain: string
+  checkingAgain: string
   noAgents: string
   noProjects: string
   /** Over the projects to pick, while none is. */
@@ -210,6 +222,8 @@ export const computersText: ComputersText = {
     workers: 'Workers',
     ready: 'Ready',
   },
+  checkAgain: 'Check again',
+  checkingAgain: 'Checking…',
   noAgents: 'None it has said',
   noProjects: 'None yet',
   pickProjects: 'Pick the projects it works on. It takes no tasks until one is picked.',
@@ -417,6 +431,8 @@ export interface ComputersProps {
   /** Reads who is signed in again, for an agent signed in in a terminal on the worker. */
   onCheckSignIn?: (() => void) | undefined
   onCancelSignIn?: (() => void) | undefined
+  /** Runs a worker's check again now, for a problem its administrator fixed; none where this window can't reach it. */
+  onCheckWorker?: ((id: string) => void) | undefined
   /** Opens a sign-in's page in the person's browser. */
   onOpenLink?: ((url: string) => void) | undefined
   /** The home's own settings, opened out: its Agents at once. */
@@ -448,6 +464,7 @@ export function Computers({
   onPaste,
   onCheckSignIn,
   onCancelSignIn,
+  onCheckWorker,
   onOpenLink,
   homeSettings,
   slots,
@@ -484,6 +501,7 @@ export function Computers({
           onPaste={onPaste}
           onCheckSignIn={onCheckSignIn}
           onCancelSignIn={onCancelSignIn}
+          onCheck={onCheckWorker === undefined ? undefined : () => onCheckWorker(worker.id)}
           onOpenLink={onOpenLink}
           t={t}
         />
@@ -611,6 +629,7 @@ function WorkerSheet({
   onPaste,
   onCheckSignIn,
   onCancelSignIn,
+  onCheck,
   onOpenLink,
   t,
 }: {
@@ -630,6 +649,7 @@ function WorkerSheet({
   onPaste: ((code: string) => void) | undefined
   onCheckSignIn: (() => void) | undefined
   onCancelSignIn: (() => void) | undefined
+  onCheck: (() => void) | undefined
   onOpenLink: ((url: string) => void) | undefined
   t: ComputersText
 }) {
@@ -681,6 +701,17 @@ function WorkerSheet({
                       <span className={s.lineToRun}>
                         <Code className={s.lineToRunText}>{worker.unready.command}</Code>
                         <CopyButton value={worker.unready.command} ghost />
+                      </span>
+                    )}
+                    {/* Once its administrator has fixed it: its check now, over the SSH address it was set up at. */}
+                    {onCheck !== undefined && worker.reachable === true && (
+                      <span className={s.signInRow}>
+                        <LinkButton onClick={onCheck} disabled={worker.unready.checking === true}>
+                          {worker.unready.checking === true ? t.checkingAgain : t.checkAgain}
+                        </LinkButton>
+                        {worker.unready.checking !== true && worker.unready.note !== undefined && (
+                          <span className={s.checkNote}>{worker.unready.note}</span>
+                        )}
                       </span>
                     )}
                   </span>

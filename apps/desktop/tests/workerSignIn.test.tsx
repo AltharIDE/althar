@@ -4,10 +4,19 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { HomeWorker, HomeWorkers } from '@althar/contracts'
 
-import type { WorkerAgent, WorkerSignInEvent, WorkersHost } from '../src/workers'
+import type { WorkerAgent, WorkerCheck, WorkerSignInEvent, WorkersHost } from '../src/workers'
 import { keys } from '../src/renderer/data/reads'
 import { type Host, ServicesProvider } from '../src/renderer/data/services'
-import { useRemoveWorker, useWorkerProjects, useWorkerSignIn } from '../src/renderer/shared/useWorkers'
+import {
+  checkedUnready,
+  checkedWorker,
+  checkText,
+  unreadyOf,
+  useRemoveWorker,
+  useWorkerCheck,
+  useWorkerProjects,
+  useWorkerSignIn,
+} from '../src/renderer/shared/useWorkers'
 import { fakeClient, fakeHost } from './fixtures'
 import { servicesFor } from './render'
 
@@ -30,7 +39,7 @@ const box: HomeWorker = {
 }
 
 /** A window's bridge to its workers, whose sign-in events the test says, and whose check answers as it is told. */
-const bridgeOf = (agents: WorkersHost['agents'] = vi.fn(async () => [])) => {
+const bridgeOf = (agents: WorkersHost['agents'] = vi.fn(async () => []), check: WorkersHost['check'] = vi.fn(async () => null)) => {
   let listener: ((event: WorkerSignInEvent) => void) | undefined
   const bridge: WorkersHost = {
     release: vi.fn(async () => ({ kind: 'none' as const, newest: null })),
@@ -39,6 +48,7 @@ const bridgeOf = (agents: WorkersHost['agents'] = vi.fn(async () => [])) => {
     act: vi.fn(async () => undefined),
     onSetup: vi.fn(() => () => undefined),
     agents,
+    check,
     signIn: vi.fn(async () => undefined),
     signInAct: vi.fn(async () => undefined),
     onSignIn: vi.fn((heard) => {
@@ -231,5 +241,72 @@ describe('a worker taken out, or its projects changed', () => {
     services.cache.removeQueries({ queryKey: keys.workers })
     act(() => result.current.set(box.workerId, []))
     expect(services.cache.getQueryData(keys.workers)).toBeUndefined()
+  })
+})
+
+describe('Check again on a worker’s sandbox problem', () => {
+  const fix = "sudo sh -c 'apparmor_parser -r /etc/apparmor.d/althar-worker-bwrap'"
+  const blocked: HomeWorker = {
+    ...box,
+    readiness: { sandbox: { starts: false, problem: 'NoUserNamespaces', fix }, tools: [], models: [] },
+  }
+  const starts: HomeWorker = { ...blocked, readiness: { sandbox: { starts: true }, tools: [], models: [] } }
+
+  it('clears the problem as soon as the check says the sandbox starts, and lets go once the home says so too', async () => {
+    let answer: (check: WorkerCheck | null) => void = () => undefined
+    const check = vi.fn(() => new Promise<WorkerCheck | null>((resolve) => (answer = resolve)))
+    const { bridge } = bridgeOf(undefined, check)
+    const { result } = hosted(useWorkerCheck, fakeHost({ workers: bridge }))
+    act(() => result.current.check(blocked))
+    expect(check).toHaveBeenCalledWith('althar@box:2222')
+    // At once: the press says it checks, over the problem as the home still has it.
+    const view = () => result.current.checks.get(box.workerId)
+    expect(view()).toEqual({ kind: 'checking' })
+    const under = checkedUnready(unreadyOf(checkedWorker(blocked, view())), view(), 'box')
+    expect(under).toMatchObject({ title: 'Its agents’ sandbox can’t start.', command: fix, checking: true })
+    // A read of the home that still says it fails changes nothing while it checks.
+    act(() => result.current.confirmed([blocked]))
+    expect(view()).toEqual({ kind: 'checking' })
+    await act(async () => answer({ sandbox: { starts: true }, agents: [] }))
+    expect(view()).toEqual({ kind: 'checked', sandbox: { starts: true } })
+    // Its problem is gone at once, though the home hasn't heard yet.
+    expect(unreadyOf(checkedWorker(blocked, view()))).toBeUndefined()
+    act(() => result.current.confirmed([blocked]))
+    expect(view()).toBeDefined()
+    act(() => result.current.confirmed([starts]))
+    expect(view()).toBeUndefined()
+  })
+
+  it('says it still fails with the check’s own command, and why where it couldn’t check', async () => {
+    const answers: Array<() => Promise<WorkerCheck | null>> = [
+      async () => ({ sandbox: { starts: false, problem: 'NoUserNamespaces', fix: 'sudo sh -c new' }, agents: [] }),
+      async () => {
+        throw new Error('Unreachable')
+      },
+      async () => null,
+    ]
+    const check = vi.fn(() => (answers.shift() ?? (async () => null))())
+    const { bridge } = bridgeOf(undefined, check)
+    const { result } = hosted(useWorkerCheck, fakeHost({ workers: bridge }))
+    const view = () => result.current.checks.get(box.workerId)
+    act(() => result.current.check(blocked))
+    await waitFor(() => expect(view()?.kind).toBe('checked'))
+    expect(checkedUnready(unreadyOf(checkedWorker(blocked, view())), view(), 'box')).toMatchObject({
+      command: 'sudo sh -c new',
+      note: checkText.stillFails,
+    })
+    // The home agreeing it fails keeps the line; the press again checks again.
+    act(() => result.current.confirmed([blocked]))
+    expect(view()?.kind).toBe('checked')
+    act(() => result.current.check(blocked))
+    await waitFor(() => expect(view()).toEqual({ kind: 'failed' }))
+    expect(checkedUnready(unreadyOf(blocked), view(), 'box')?.note).toBe('Couldn’t check box over SSH. Althar’s log says why.')
+    // A release that doesn't say its check: the home's reads stand.
+    act(() => result.current.check(blocked))
+    await waitFor(() => expect(view()).toBeUndefined())
+    // A worker without an SSH address isn't checked from here.
+    act(() => result.current.check({ ...blocked, ssh: undefined }))
+    expect(check).toHaveBeenCalledTimes(3)
+    expect(view()).toBeUndefined()
   })
 })

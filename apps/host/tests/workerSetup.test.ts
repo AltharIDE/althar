@@ -174,6 +174,11 @@ describe('enrolling a worker with what its home gave', () => {
     const unit = readFileSync(join(config, 'systemd', 'user', 'althar-worker.service'), 'utf8')
     expect(unit).toContain(`ExecStart=${join(data, 'althar-worker-program', 'current', 'althar-worker')} serve ${folder}`)
     expect(unit).toContain('Restart=always')
+    // Each start runs its check again beside it, so a fix made since is heard within seconds.
+    expect(unit).toContain('ExecStartPost=-systemctl --user --no-block start althar-worker-check.service\n')
+    expect(readFileSync(join(config, 'systemd', 'user', 'althar-worker-check.service'), 'utf8')).toContain(
+      `Type=oneshot\nExecStart=${join(data, 'althar-worker-program', 'current', 'node', 'bin', 'node')} ${join(data, 'althar-worker-program', 'current', 'dist', 'althar-host.js')} worker check\n`,
+    )
     expect(existsSync(join(config, 'systemd', 'user', 'althar-worker-update.timer'))).toBe(true)
     // A release with no worker entry of its own is a home's: its update runs as `althar-host worker update`.
     expect(readFileSync(join(config, 'systemd', 'user', 'althar-worker-update.service'), 'utf8')).toContain(

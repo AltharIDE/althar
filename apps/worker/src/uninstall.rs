@@ -1,8 +1,8 @@
 //! Taking a worker its home set up off this computer: what its setup put here (apps/host/src/workerSetup.ts), and
 //! nothing else.
 //!
-//! - its services, `althar-worker.service` and its update timer, stopped and their files removed, and the units of any
-//!   run still going stopped;
+//! - its services, `althar-worker.service`, its check and its update timer, stopped and their files removed, and the
+//!   units of any run still going stopped;
 //! - its folder (its key, certificate, journal, checkouts, agents' launchers and tools) and its program folder (the
 //!   releases it ran);
 //! - the AppArmor rule its setup made for its bubblewrap, where it names this worker's program folder and this login may
@@ -24,8 +24,9 @@ use tokio::process::Command;
 use crate::cleanup::remove_tree;
 
 const SERVICE: &str = "althar-worker.service";
-const UNITS: [&str; 3] = [
+const UNITS: [&str; 4] = [
     SERVICE,
+    "althar-worker-check.service",
     "althar-worker-update.service",
     "althar-worker-update.timer",
 ];
@@ -135,7 +136,11 @@ async fn uninstall_with(folder: &Path, units: &Path) -> io::Result<()> {
             "The worker's services couldn't be stopped, so nothing was removed. `journalctl --user -u althar-worker.service` says why.",
         ));
     }
-    let mut stop = vec!["stop", "althar-worker-update.service"];
+    let mut stop = vec![
+        "stop",
+        "althar-worker-check.service",
+        "althar-worker-update.service",
+    ];
     stop.extend(RUN_UNITS);
     systemctl(&stop).await;
     println!("Stopped the worker's services and its runs.");

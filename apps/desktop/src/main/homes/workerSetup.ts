@@ -521,6 +521,23 @@ export const workerSetups = (
       set({ phase: 'enroll', at: STEP.enroll, publicKey })
     })
 
+  /** The worker's check, run over SSH at its address; it writes what it found where the worker tells its home. */
+  const checkOver = async (ssh: string) => {
+    const controller = new AbortController()
+    const ran = await bootstrap(sshTargetOf(ssh), 'worker-check', [], controller.signal, { timeout: 5 * 60_000 }).catch(
+      (error: unknown) => {
+        log.warn('A worker couldn’t be checked', { target: ssh, code: error instanceof Stopped ? error.code : String(error) })
+        throw error
+      },
+    )
+    const check = checkOf(ran.events.findLast((one) => one.step === 'check' && one.state === 'done')) ?? null
+    log.info('A worker checked', {
+      target: ssh,
+      sandbox: check === null ? 'unsaid' : check.sandbox.starts ? 'starts' : check.sandbox.problem,
+    })
+    return check
+  }
+
   // One sign-in at a time, over its own SSH connection: its input carries a pasted code.
   let signingIn: { readonly controller: AbortController; readonly write: (line: string) => void } | undefined
 
@@ -616,16 +633,14 @@ export const workerSetups = (
      * Vibe, signed in in a terminal) is signed in only once it starts.
      */
     agents: async (ssh: string) => {
-      const controller = new AbortController()
-      const ran = await bootstrap(sshTargetOf(ssh), 'worker-check', [], controller.signal, { timeout: 5 * 60_000 }).catch(
-        (error: unknown) => {
-          log.warn('A worker’s agents couldn’t be checked', { target: ssh, code: error instanceof Stopped ? error.code : String(error) })
-          throw error
-        },
-      )
-      const check = checkOf(ran.events.findLast((one) => one.step === 'check' && one.state === 'done'))
+      const check = await checkOver(ssh)
       return (check?.agents ?? []).map(({ id, name, signedIn }) => ({ id, name, signedIn }))
     },
+    /**
+     * The worker's whole check now, over SSH, as its Check again runs it: its sandbox, as an administrator's fix left it,
+     * and its agents. Null from a release that doesn't say it.
+     */
+    check: (ssh: string) => checkOver(ssh),
     signIn: (ssh: string, agent: string, way: 'browser' | 'device') => {
       signingIn?.controller.abort()
       const controller = new AbortController()

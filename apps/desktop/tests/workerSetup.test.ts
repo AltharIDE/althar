@@ -469,3 +469,21 @@ it('checks a worker’s sign-ins by its whole check, so one signed in in a termi
   expect(asked).toContain('worker-check')
   expect(asked).not.toContain('worker-agents')
 })
+
+it('runs a worker’s whole check for Check again: its sandbox as a fix left it, and nothing where its release doesn’t say', async () => {
+  const event = (step: string, state: string, more: Record<string, unknown> = {}) => JSON.stringify({ protocol: 1, step, state, ...more })
+  const fix = "sudo sh -c 'apparmor_parser -r /etc/apparmor.d/althar-worker-bwrap'"
+  const { system, asked, log } = machine({
+    'worker-check': {
+      stdout: [
+        event('check', 'started'),
+        event('check', 'done', { sandbox: { starts: false, problem: 'NoUserNamespaces', fix }, agents: [] }),
+      ].join('\n'),
+    },
+  })
+  const setups = workerSetups(system, vi.fn(), vi.fn(), vi.fn(), { log, release: vi.fn() })
+  expect(await setups.check('build@box')).toEqual({ sandbox: { starts: false, problem: 'NoUserNamespaces', fix }, agents: [] })
+  expect(asked).toContain('worker-check')
+  const older = machine({ 'worker-check': { stdout: event('check', 'started') } })
+  expect(await workerSetups(older.system, vi.fn(), vi.fn(), vi.fn(), { log: older.log, release: vi.fn() }).check('build@box')).toBeNull()
+})

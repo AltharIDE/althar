@@ -341,6 +341,76 @@ export const WorkerNotReady: Story = {
 
 export const WorkerNotReadyDark: Story = { ...WorkerNotReady, globals: { theme: 'dark' } }
 
+const SANDBOX_FIX =
+  'sudo sh -c \'printf "%s\\n" "abi <abi/4.0>," "include <tunables/global>" "profile althar-worker-bwrap /home/ubuntu/.local/share/althar-worker-program/bundle-*/**/bwrap flags=(unconfined) {" "  userns," "  include if exists <local/althar-worker-bwrap>" "}" > /etc/apparmor.d/althar-worker-bwrap && apparmor_parser -r /etc/apparmor.d/althar-worker-bwrap\''
+
+const BLOCKED: ComputerWorker = {
+  ...ADDED,
+  name: 'cloud-ubuntu',
+  projects: ['meridian'],
+  projectIds: ['proj_meridian'],
+  unready: {
+    title: 'Its agents’ sandbox can’t start.',
+    body: 'This Linux lets only programs it names make the namespaces it needs. Have its administrator run this once there:',
+    command: SANDBOX_FIX,
+  },
+}
+
+/**
+ * A worker reached over SSH whose sandbox an administrator has just let start: Check again runs its check now, says so at
+ * once, and its problem goes as soon as the check says the sandbox starts, without waiting for the hourly one.
+ */
+function CheckAgain(props: Parameters<typeof Held>[0]) {
+  const [worker, setWorker] = useState<ComputerWorker>(BLOCKED)
+  return (
+    <Held
+      {...props}
+      workers={{ enabled: true, list: [worker] }}
+      onCheckWorker={(id) => {
+        props.onCheckWorker?.(id)
+        setWorker((was) => (was.unready === undefined ? was : { ...was, unready: { ...was.unready, checking: true } }))
+        setTimeout(() => {
+          const { unready: _cleared, ...ready } = BLOCKED
+          setWorker(ready)
+        }, 400)
+      }}
+    />
+  )
+}
+
+/** Its sandbox can't start, with Check again under the command for once its administrator has run it. */
+export const SandboxCheckAgain: Story = {
+  args: { opened: BLOCKED.id, allProjects: PROJECTS, onProjects: fn(), onSignIn: fn(), onCheckWorker: fn() },
+  render: (args) => <CheckAgain {...args} />,
+}
+
+/** Check again pressed after the fix: Checking… at once, then the problem gone and the worker ready for a task. */
+export const SandboxCleared: Story = {
+  ...SandboxCheckAgain,
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Can’t take a task yet')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Check again' }))
+    await expect(args.onCheckWorker).toHaveBeenCalledWith(BLOCKED.id)
+    await expect(c.getByRole('button', { name: 'Checking…' })).toBeDisabled()
+    await expect(await c.findByText('Ready for a task')).toBeInTheDocument()
+    await expect(c.queryByText('Its agents’ sandbox can’t start.')).not.toBeInTheDocument()
+  },
+}
+
+/** Checked again before the fix took: it still can't start, said beside Check again, with the check's own command. */
+export const SandboxStillFails: Story = {
+  args: {
+    opened: BLOCKED.id,
+    workers: { enabled: true, list: [{ ...BLOCKED, unready: { ...BLOCKED.unready!, note: 'Checked again: it still can’t start.' } }] },
+    allProjects: PROJECTS,
+    onProjects: fn(),
+    onCheckWorker: fn(),
+  },
+}
+
+export const SandboxStillFailsDark: Story = { ...SandboxStillFails, globals: { theme: 'dark' } }
+
 const behind = (worker: ComputerWorker, update: NonNullable<ComputerWorker['update']>): ComputerWorker => ({
   ...worker,
   release: '0.2.2',

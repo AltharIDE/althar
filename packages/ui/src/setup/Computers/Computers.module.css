@@ -711,6 +711,12 @@
   letter-spacing: 0.08em;
   color: var(--t-1);
 }
+/* What Check again came to, beside it: a line that wraps where the sheet is narrow. */
+.checkNote {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
 .signInRow {
   display: flex;
   flex-wrap: wrap;

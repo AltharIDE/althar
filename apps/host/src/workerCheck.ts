@@ -8,8 +8,8 @@ import { BWRAP_TRY, bundledCodex, connect, type AgentDefinition, type ConfigOpti
 import { Duration, Effect } from 'effect'
 
 /*
- * A worker's check of itself (`althar-host worker check`), as its setup ends, after each sign-in, and with its hourly
- * timer: what Claude Code's and Codex's sandbox need shipped and linked where its runs find them (bubblewrap and
+ * A worker's check of itself (`althar-host worker check`), as its setup ends, after each sign-in, each time its service
+ * starts, with its hourly timer, and at the window's Check again: what Claude Code's and Codex's sandbox need shipped and linked where its runs find them (bubblewrap and
  * ripgrep from Codex's own package, socat built for the release), whether bubblewrap actually starts a namespace there,
  * and where it can't, why and the one command an administrator runs to let it; the tools on its PATH; and each
  * signed-in agent started once, as a run starts it, which says the models it offers there. What it finds is kept in

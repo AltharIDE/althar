@@ -43,7 +43,8 @@ import { installTools } from './workerTools'
  *   own commands (`prepare`) before the worker moves to it.
  * - `prepare`: the programs of the agents signed in here, for this release: each adopted or downloaded.
  * - `check`: whether its agents' sandbox starts, its tools, and each signed-in agent started once, which says its
- *   models (workerCheck.ts); kept where the worker reads it with its heartbeats. Setup ends with it.
+ *   models (workerCheck.ts); kept where the worker reads it with its heartbeats. Setup ends with it, each start of the
+ *   worker's service runs it (`althar-worker-check.service`), and the window's Check again runs it over SSH.
  * - `sandbox`: what only root may do to let the sandbox start (newer Ubuntu's AppArmor rule for bubblewrap), with
  *   `sudo -n` where this login may without a password; then the check again. Without, it only says the command.
  * - `tools <name@version>…`: what a project needs that the worker installs itself (workerTools.ts), before its setup.
@@ -61,6 +62,8 @@ export const workerFolder = (env: NodeJS.ProcessEnv = process.env) => join(data(
 export const programFolder = (env: NodeJS.ProcessEnv = process.env) => join(data(env), 'althar-worker-program')
 const unitsFolder = (env: NodeJS.ProcessEnv = process.env) => join(env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'systemd', 'user')
 const SERVICE = 'althar-worker.service'
+/** Its check, as a unit of its own: started each time the worker's service starts. */
+const CHECK_SERVICE = 'althar-worker-check.service'
 
 /** The system's processor, as releases name it. */
 const ARCH = process.arch === 'arm64' ? 'arm64' : 'x64'
@@ -259,7 +262,10 @@ const commandsOf = async (release: string): Promise<readonly [entry: string, ...
 
 const renderUnits = (folder: string, program: string, [entry, ...rest]: Awaited<ReturnType<typeof commandsOf>>) => {
   const current = join(program, 'current')
+  const node = [join(current, 'node', 'bin', 'node'), join(current, entry), ...rest].join(' ')
   return {
+    // Each time it starts, its check runs again beside it: what an administrator let since (the sandbox's AppArmor rule,
+    // a kernel switch) is said to the home within seconds, not at the next hourly update.
     [SERVICE]: `[Unit]
 Description=Althar worker
 Wants=network-online.target
@@ -267,6 +273,7 @@ After=network-online.target
 
 [Service]
 ExecStart=${join(current, 'althar-worker')} serve ${folder}
+ExecStartPost=-systemctl --user --no-block start ${CHECK_SERVICE}
 Restart=always
 RestartSec=5
 UMask=0077
@@ -274,12 +281,19 @@ UMask=0077
 [Install]
 WantedBy=default.target
 `,
+    [CHECK_SERVICE]: `[Unit]
+Description=Althar worker check
+
+[Service]
+Type=oneshot
+ExecStart=${node} check
+`,
     'althar-worker-update.service': `[Unit]
 Description=Althar worker update
 
 [Service]
 Type=oneshot
-ExecStart=${[join(current, 'node', 'bin', 'node'), join(current, entry), ...rest].join(' ')} update
+ExecStart=${node} update
 `,
     'althar-worker-update.timer': `[Unit]
 Description=Check for a newer Althar worker every hour
