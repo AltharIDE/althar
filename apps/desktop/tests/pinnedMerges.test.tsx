@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ThreadItem } from '@althar/contracts'
@@ -108,5 +108,59 @@ describe('the merging pill on the composer’s edge', () => {
   it('shows nothing for a thread opened once its merges were in', () => {
     render(<Edge thread={[items.says('All in.'), card('merged')]} />)
     expect(pill()).toBeNull()
+  })
+})
+
+describe('what the pill and its card say', () => {
+  it('names each by its number, folded, and opens to a row for each linked with where it stands', () => {
+    render(<Edge thread={[items.mergeLine()]} />)
+    for (const number of ['#778', '#783', '#773', '#779']) expect(pill()?.textContent).toContain(number)
+    // Folded, it is one line: the rows wait behind it.
+    expect(screen.queryByRole('link', { name: /#783/ })).toBeNull()
+    fireEvent.click(pill()!)
+    expect(opened()?.querySelectorAll('li')).toHaveLength(4)
+    expect(screen.getByRole('link', { name: /#783/ }).getAttribute('href')).toBe('https://github.com/meridian/api/pull/783')
+    for (const word of ['Merged', 'In the queue', 'Checks running', 'Waiting']) expect(screen.getAllByText(word).length).toBeGreaterThan(0)
+    // Nothing of the internal name, the repository or a number said twice.
+    expect(screen.queryByText(/merge line,|AltharIDE|of meridian/i)).toBeNull()
+  })
+
+  it('stands by its task’s name, then by its number in place, and says why it came back', () => {
+    const URL = `${PULL}1231`
+    const errand = (title: string, merges: ReadonlyArray<{ label: string; url: string | null }>) =>
+      items.notice(
+        {
+          title,
+          source: 'runtime',
+          errand: { id: 'e1', quiet: true, merges: merges.map((merge) => ({ ...merge, task: 'task_workers', once: '' })) },
+        },
+        null,
+      )
+    const one = (state: 'checks' | 'sent_back', reason?: string) => ({
+      ...items.mergeLine({
+        rows: [{ number: 1231, title: 'A worker says when it’s ready', url: URL, state, ...(reason === undefined ? {} : { reason }) }],
+      }),
+      id: 'card',
+    })
+    const kept = errand('Kept your errand: merge the workers readiness pull request', [{ label: 'Workers readiness', url: null }])
+    const bound = errand('Its task’s pull request is #1231', [{ label: '#1231', url: URL }])
+
+    // Kept, with no pull request yet: by its task's name.
+    render(<Edge thread={[kept]} />)
+    expect(pill()?.textContent).toContain('Workers readiness')
+    cleanup()
+
+    // Its pull request opens and goes on the card: one row, by its number, not the task's name beside it.
+    render(<Edge thread={[kept, bound, one('checks')]} />)
+    expect(pill()?.textContent).toContain('#1231')
+    expect(pill()?.textContent).not.toContain('Workers readiness')
+    cleanup()
+
+    // The queue sends it back: why stands on the notice line, and under its row once opened.
+    render(<Edge thread={[kept, bound, one('sent_back', 'The queue’s end-to-end checks failed.')]} />)
+    expect(screen.getByRole('note').textContent).toBe('#1231 sent back. The queue’s end-to-end checks failed.')
+    fireEvent.click(pill()!)
+    expect(screen.getByText('Sent back', { selector: 'li span' })).toBeTruthy()
+    expect(opened()?.textContent).toContain('The queue’s end-to-end checks failed.')
   })
 })

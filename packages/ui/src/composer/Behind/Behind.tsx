@@ -202,7 +202,13 @@ export function Behind({
   const quiet = !ran && fine.length > 0 && wait === null && sources.length === 0
   const folded = !unfolded && (live.length > 0 || failed.length > 0)
   const heardNow = sources.length > 0 ? showing : null
-  if (wait === null && !ran && !quiet && sources.length === 0) return null
+  const empty = wait === null && !ran && !quiet && sources.length === 0
+  // Opened by whoever holds it (one thing open on the composer's edge at a time), it closes as it goes, with nothing behind the
+  // task: back again, it comes folded, and its first press opens it.
+  useEffect(() => {
+    if (empty && open === true) onOpenChange?.(false)
+  }, [empty, open, onOpenChange])
+  if (empty) return null
 
   const one = live.length === 1 ? live[0] : undefined
   const marks = [...new Set(sources.map((x) => x.mark))]
