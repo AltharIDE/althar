@@ -367,11 +367,13 @@ export const checkWorker = async (
 ): Promise<WorkerCheck> => {
   const path = workerPath(input.folder, input.current)
   const file = join(input.folder, 'readiness')
-  const publish = async (sandbox: string, rest?: string) => {
-    const kept = system.read(file)
-    const text = publishedReadiness(kept, sandbox, observed, rest)
-    if (kept !== text) await write(file, text)
-  }
+  // Read, weighed and replaced under its lock: a check beside it can't write between this one's read and its write.
+  const publish = (sandbox: string, rest?: string) =>
+    holding(`${file}.lock`, async () => {
+      const kept = system.read(file)
+      const text = publishedReadiness(kept, sandbox, observed, rest)
+      if (kept !== text) await write(file, text)
+    })
   const sandbox = await checkSandbox(path, input.program, system)
   const observed = (system.now ?? Date.now)()
   const sandboxText = readinessLines({ sandbox, tools: [], agents: [] })
@@ -395,6 +397,36 @@ export const checkWorker = async (
   const check = { sandbox, tools, agents }
   await publish(sandboxText, readinessLines(check).slice(sandboxText.length))
   return check
+}
+
+/** How long a lock may stand before it is taken for one a check left as it died. */
+const STALE_LOCK = 30_000
+
+/**
+ * Runs `work` holding `lock`, a file made only where there is none, so checks in several processes (the service's start,
+ * its hourly update, Check again over SSH) read and replace readiness one at a time. One left by a check that died
+ * goes once it is older than any write takes.
+ */
+export const holding = async <A>(lock: string, work: () => Promise<A>): Promise<A> => {
+  for (;;) {
+    try {
+      await (await fs.open(lock, 'wx', 0o600)).close()
+      break
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error
+      const made = await fs.stat(lock).then(
+        (stat) => stat.mtimeMs,
+        () => undefined,
+      )
+      if (made !== undefined && Date.now() - made > STALE_LOCK) await fs.rm(lock, { force: true })
+      else await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+  }
+  try {
+    return await work()
+  } finally {
+    await fs.rm(lock, { force: true })
+  }
 }
 
 /** Written beside and renamed over, so the worker never reads half of it. */
