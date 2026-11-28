@@ -67,6 +67,7 @@ import { addItem, betweenTurns, recorder } from './threads'
 import type { ToolServer } from './ToolServer'
 import { ToolRefused } from './toolErrors'
 import { taskWorker, type WorkerExecution } from './workerExecution'
+import { WorkerTaken } from './workerWait'
 import { workerSkillFiles } from './workerSkills'
 import { workerStdioMcp } from './workerMcp'
 import { startsAgain } from './startAgain'
@@ -839,6 +840,21 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       if (Exit.isFailure(started)) {
         yield* Scope.close(scope, Exit.void)
         yield* tools.revoke
+        // Its worker taken by another run between looking and asking: no failure to say. The start waits for it again (Sessions.ts).
+        const taken = Option.getOrUndefined(Cause.findErrorOption(started.cause))
+        if (taken instanceof WorkerTaken) {
+          yield* Effect.logInfo('The worker was taken before the agent could start there').pipe(
+            Effect.annotateLogs({ agent: definition.id, session: sessionId, thread: thread.threadId, reason: taken.reason }),
+          )
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const revision = yield* moveSession(sessionId, 'failed', { endedAt: yield* timestamp })
+              // Kept apart from a start that failed: what waits for it isn't unsent (Queries.ts).
+              yield* sessionFact(thread, sessionId, revision, 'provider_session.failed', { reason: taken.reason, workerTaken: true })
+            }),
+          )
+          return yield* taken
+        }
         // The whole answer, its code and all its data (failures.ts' rawOf), is the log's and the record's; the person reads words.
         const answer = answerOf(started.cause)
         yield* Effect.logWarning(first ? 'Agent could not start' : 'Agent could not start again', started.cause).pipe(
@@ -881,6 +897,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           severity: 'error',
           title: `${definition.name} couldn't start.`,
           ...(summary === '' ? {} : { description: summary }),
+          // What it was started on: what waits for it is unsent, and Try again starts it so again (Queries.ts, Sessions.ts).
+          startFailed: { agentId: definition.id, model: model ?? null, effort: effort ?? null },
         })
         return yield* new SessionFailed({ agentId: definition.id, reason, summary })
       }

@@ -394,18 +394,30 @@ const YouView = memo(
     threadId,
     undoable,
     onUndoFrom,
+    onTryAgain,
   }: {
     block: Block
     threadId: string
     undoable: boolean
     onUndoFrom?: ((id: string) => void) | undefined
+    /** Sends again what wasn't sent. */
+    onTryAgain?: (() => void) | undefined
   }) {
-    return <ThreadBlocks threadId={threadId} blocks={[block]} undoable={undoable ? [block.id] : []} onUndoFrom={onUndoFrom} />
+    return (
+      <ThreadBlocks
+        threadId={threadId}
+        blocks={[block]}
+        undoable={undoable ? [block.id] : []}
+        onUndoFrom={onUndoFrom}
+        onTryAgain={onTryAgain}
+      />
+    )
   },
   (before, after) =>
     before.threadId === after.threadId &&
     before.undoable === after.undoable &&
     before.onUndoFrom === after.onUndoFrom &&
+    before.onTryAgain === after.onTryAgain &&
     same(before.block, after.block),
 )
 
@@ -619,6 +631,7 @@ export function TaskThread({
             threadId={threadId}
             undoable={shared.undoable?.includes(block.id) === true}
             onUndoFrom={shared.onUndoFrom}
+            onTryAgain={onTryAgain}
           />
         )
       default:

@@ -269,6 +269,11 @@ interface Slot {
   readonly busy: () => boolean
   /** Tells it the person removed it, so it takes itself off its computer, and ends its stream: where it is idle. */
   readonly remove: () => boolean
+  /**
+   * Stops the run it holds, where the home holds it no longer: confirmed stopped, the slot frees; unconfirmed, the stream
+   * ends and the run stays outstanding, for the worker to reconcile when it reconnects. False where it holds none now.
+   */
+  readonly stopRun: () => boolean
 }
 
 interface SnapshotPart {
@@ -376,6 +381,11 @@ const validSetupResult = (current: Run, result: AgentWorkspaceSetupResult | unde
 }
 
 export type AgentWorkerConnection = 'connected' | 'disconnected'
+
+/** A start a worker refused only because another run holds it: one to wait for, not a failure. */
+export const workerBusyError = (message: string): Error => Object.assign(new Error(message), { workerBusy: true as const })
+export const isWorkerBusy = (error: unknown): boolean =>
+  error instanceof Error && (error as Error & { readonly workerBusy?: boolean }).workerBusy === true
 
 /** The home routes by a verified certificate and the worker's operator-granted project and provider. */
 export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: (outcome: AgentWorkerConnection) => void) => {
@@ -529,7 +539,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
     }
     const start: Slot['start'] = (placement, { checkout, repositories, signal, toolPort, setup, skills }) => {
       if (closed || run !== undefined || recovering !== undefined)
-        return Promise.reject(new Error('The worker is already running an agent.'))
+        return Promise.reject(workerBusyError('The worker is already running an agent.'))
       if (signal?.aborted === true) return Promise.reject(new Error('The agent start was cancelled.'))
       const group = setup !== undefined && 'repositories' in setup ? setup.repositories : undefined
       if (
@@ -766,6 +776,11 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
             busy: () =>
               run !== undefined || recovering !== undefined || (accountReserved && performance.now() - sampledAt <= AGENT_WORKER_LEASE_MS),
             capacity: () => (performance.now() - sampledAt > AGENT_WORKER_LEASE_MS ? undefined : capacity),
+            stopRun: () => {
+              if (closed || run === undefined) return false
+              void stop(run).catch(() => undefined)
+              return true
+            },
             remove: () => {
               // A run, or one to reconcile, holds its workspace: the home doesn't remove a worker then.
               if (closed || run !== undefined || recovering !== undefined) return false
@@ -1005,11 +1020,9 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
         clearTimeout(current.stopping)
         current.cleanup()
         current.ready.reject(
-          new Error(
-            payload.value.workerBusy
-              ? 'This worker account is busy. Wait for its current task to finish.'
-              : 'The worker could not start the agent. Check the worker log and provider setup.',
-          ),
+          payload.value.workerBusy
+            ? workerBusyError('This worker account is busy. Wait for its current task to finish.')
+            : new Error('The worker could not start the agent. Check the worker log and provider setup.'),
         )
         current.files.close(new Error('The worker workspace ended.'))
         current.managed.close(new Error('The worker workspace ended.'))
@@ -1058,6 +1071,8 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger, connectionChanged?: 
         }
       }),
     openTools: (workerId: string, runId: string, invalidate: () => void) => slots.get(workerId)?.openTools(runId, invalidate),
+    /** Stops the run a connected worker holds that the home has no use for any more (`Slot.stopRun`). */
+    stopRun: (workerId: string): boolean => slots.get(workerId)?.stopRun() ?? false,
     /** Tells a worker connected now that the person removed it: whether it was there, idle, to hear it. */
     remove: (workerId: string): boolean => slots.get(workerId)?.remove() ?? false,
     start: async (workerId: string, placement: AgentPlacement, options: AgentRunOptions = {}): Promise<WorkerAgentProcess> => {

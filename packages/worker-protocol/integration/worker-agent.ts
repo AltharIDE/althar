@@ -1,4 +1,4 @@
-import { deepEqual, equal, ok, rejects } from 'node:assert/strict'
+import { deepEqual, equal, match, ok, rejects } from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -13,7 +13,7 @@ import { setInterval, setTimeout as delay } from 'node:timers/promises'
 import { createHash, X509Certificate } from 'node:crypto'
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { Client, credentials, status } from '@grpc/grpc-js'
-import { makeAgentWorkerPool, runAgentMethod, type AgentRunAssignment } from '../src/agentRuns.ts'
+import { isWorkerBusy, makeAgentWorkerPool, runAgentMethod, type AgentRunAssignment } from '../src/agentRuns.ts'
 import { agentToolsMethod } from '../src/agentTools.ts'
 import { agentPreviewMethod } from '../src/agentPreviews.ts'
 import { bindWorkerHandshake, workerCertificateFingerprint } from '../src/grpc.ts'
@@ -204,7 +204,10 @@ void test('the enrolled stream owns one project-scoped agent run and confirms st
   await rejects(pool.start(workerId, { ...placement, providerId: 'other' }), /unavailable/)
 
   const pending = pool.start(workerId, placement)
-  await rejects(pool.start(workerId, placement), /already running/)
+  // A second start is turned away as one to wait for, not as a failure.
+  const refused: unknown = await pool.start(workerId, placement).catch((error: unknown) => error)
+  ok(isWorkerBusy(refused))
+  match(String(refused), /already running/)
   const start = await worker.read()
   ok(start?.case === 'start')
   const { runId } = start.value
@@ -250,6 +253,46 @@ void test('the enrolled stream owns one project-scoped agent run and confirms st
     value: { $typeName: 'althar.worker.v1.AgentRunExit', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
   })
   equal((await stopping).outcome, AgentRunOutcome.STOPPED)
+  equal(await worker.read(), undefined)
+  deepEqual(pool.list(projectId), [])
+})
+
+void test('stops a run no lead holds any more, and frees the slot once the worker confirms it', { timeout: 15_000 }, async (t) => {
+  const { pool, connect } = await fixture(t)
+  const worker = connect()
+  worker.send(hello())
+  equal((await worker.read())?.case, 'hello')
+  equal(pool.stopRun(workerId), false)
+  const pending = pool.start(workerId, placement)
+  const start = await worker.read()
+  ok(start?.case === 'start')
+  const { runId } = start.value
+  worker.send({
+    case: 'ready',
+    value: {
+      $typeName: 'althar.worker.v1.AgentRunReady',
+      runId,
+      workspacePath: '/private/worker/workspace',
+      toolsPort: 0,
+      skillsPath: '',
+      mcpCommands: [],
+    },
+  })
+  const agent = await pending
+  deepEqual(
+    pool.list(projectId).map(({ busy }) => busy),
+    [true],
+  )
+  // The home has no use for it any more: the worker is asked to stop it, and the slot frees once it says it has.
+  ok(pool.stopRun(workerId))
+  const stop = await worker.read()
+  ok(stop?.case === 'stop')
+  equal(stop.value.runId, runId)
+  worker.send({
+    case: 'exit',
+    value: { $typeName: 'althar.worker.v1.AgentRunExit', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
+  })
+  equal((await agent.exit).outcome, AgentRunOutcome.STOPPED)
   equal(await worker.read(), undefined)
   deepEqual(pool.list(projectId), [])
 })

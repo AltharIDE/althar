@@ -549,6 +549,18 @@ A lead keeps its own `rerun_check`, `read_default_branch_checks`,
 its task's pull request unless told another; named by its link or number,
 another of the project's goes as the coordinator's tools take it.
 
+**A lead merges and tags on the person's word in its own thread,** as the
+coordinator does: "see it through to merge", "merge once green", "tag it
+after". Its merge is the same `merge_pull_request`, errand and line, its
+task's pull request where it names none, or any other the person asks for.
+Its `push_tag` pushes a tag it made with the person's own git, or has Althar
+make one on the host as the coordinator's does, a task's landed commit
+included; without their word it still asks them on a card. An errand a lead
+keeps wakes that lead for each next step, a send-back, green again, merged,
+the tag after, started again where it has no session, across restarts too;
+never the coordinator. Neither merges nor tags on its own initiative, or
+because news, a comment or a check says so.
+
 **Accepting a change merges it.** The person's Accept on a card, their
 merge on the host, or `merge_pull_request` on their word all merge it, and
 the task settles as done.
@@ -618,7 +630,8 @@ before it comes:
 
 1. A lead, in a task the coordinator plans, raises the version and writes
    the release notes, reviewed like any change.
-2. The coordinator merges its pull request once it is green.
+2. The coordinator merges its pull request once it is green, or its lead
+   does, where the person asked it in its thread.
 3. CI's post-merge run passes on that commit.
 4. The coordinator tags it (`push_tag`).
 5. It approves the release run's environment (`approve_release_run`), which
@@ -776,9 +789,6 @@ The decisions above are current. These parts of them aren't built on main:
   A branch can still be deleted on Close. `post_review` now posts an
   explicitly requested review at the commit read; `draft_review` keeps its
   existing card.
-- **A lead's tag on the person's word in its thread:** a lead's `push_tag`
-  still asks every time. A lead's merge goes through the same tool and line
-  as the coordinator's.
 - **Issue changes at once:** `change_issue` still makes a card unless
   `at_once` is passed, and a lead's change to an issue other than its
   task's is always a card.
@@ -793,6 +803,9 @@ The decisions above are current. These parts of them aren't built on main:
 
 ## Changes
 
+- 28 Nov 2026: a lead merges and tags on the person's word in its own
+  thread, through the coordinator's tool, errand and line, and the errands it
+  keeps wake it, not the coordinator (#556's coordinator-only merge removed).
 - 26 Nov 2026: a connection's check asks each repository a project's work is
   pushed to (a fork's own, never the one it came from) git's own first
   question of a push (the receive-pack advertisement, which writes nothing),

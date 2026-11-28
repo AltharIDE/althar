@@ -62,6 +62,7 @@ import {
 } from './runRecords'
 import { addItem } from './threads'
 import { POOL, type Tool, type ToolAccess, ToolRefused, type ToolServer } from './ToolServer'
+import { toolRefusalOf } from './toolRefusal'
 
 interface RunToolsDependencies {
   readonly acceptShipWork: (run: RunRow) => Effect.Effect<void, GitFailed | SqlError.SqlError | Schema.SchemaError, SqlClient.SqlClient>
@@ -893,7 +894,7 @@ export const makeRunTools = (dependencies: RunToolsDependencies) =>
               ? Effect.fail(error)
               : Effect.andThen(
                   Effect.logWarning('A step tool did not succeed', error),
-                  Effect.fail(new ToolRefused({ message: 'Althar could not record that. Try again.' })),
+                  Effect.fail(toolRefusalOf(error, 'Althar could not record that')),
                 ),
           ),
         ),

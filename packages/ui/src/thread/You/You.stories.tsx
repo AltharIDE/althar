@@ -131,6 +131,16 @@ export const Queued: Story = {
 export const Interrupting: Story = {
   args: { delivery: Delivery.Interrupting, at: undefined, children: 'Stop, the limiter belongs in charges.' },
 }
+/** No agent is on its way to read it, as when the lead couldn't start: Send again starts it to read it. */
+export const NotSent: Story = {
+  args: { delivery: Delivery.NotSent, at: undefined, children: 'my message not sending', onSendAgain: fn() },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Not sent')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Send again' }))
+    await expect(args.onSendAgain).toHaveBeenCalledOnce()
+  },
+}
 /** With no shell to open images in, and nothing to open files: every chip is still. */
 export const NothingOpens: Story = {
   decorators: [(Story) => <ThreadShellProvider value={{}}>{Story()}</ThreadShellProvider>],
@@ -189,6 +199,7 @@ export const AllStates: Story = {
         { state: 'message', node: <You {...args} /> },
         { state: 'queued', node: <You {...args} delivery={Delivery.Queued} at={undefined} /> },
         { state: 'interrupting', node: <You {...args} delivery={Delivery.Interrupting} at={undefined} /> },
+        { state: 'not sent', node: <You {...args} delivery={Delivery.NotSent} at={undefined} onSendAgain={fn()} /> },
         { state: 'attachments', node: <You {...args} {...WithAttachments.args} /> },
         { state: 'images', node: <You {...args} {...WithImages.args} /> },
         { state: 'images only', node: <You {...args} {...ImagesOnly.args} /> },

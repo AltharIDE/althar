@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
+import { Ids, newId } from '@althar/domain'
 import { Effect, Fiber } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -14,6 +15,7 @@ import { Permissions } from '../src/Permissions'
 import { Instance } from '../src/Instance'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
+import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { callTool, notices, repository, runtime, turns, until } from './support'
@@ -211,4 +213,89 @@ describe('push_tag, where the tag doesn’t go up at once', () => {
       )
     }).pipe(Effect.ensuring(Effect.sync(() => server.close())), Effect.provide(runtime()))
   })
+})
+
+describe('push_tag, on the person’s word in the lead’s thread', () => {
+  /** A turn of the lead's, as the host records one: the person's message from the window, or news. Gives its message's id. */
+  const turn = (access: Parameters<typeof callTool>[0], origin: 'person' | 'news', body: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE turn_deliveries SET state = 'completed' WHERE thread_id = ${access.threadId} AND state = 'delivered'`
+      const accepted = yield* (yield* Sessions).send({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId: access.threadId,
+        body,
+        sender: origin === 'person' ? { kind: 'window' } : { kind: 'internal' },
+        origin: origin === 'person' ? 'system' : 'news',
+        note: true,
+      })
+      const turnId = yield* newId(Ids.turnDelivery)
+      yield* sql`INSERT INTO turn_deliveries ${sql.insert({ id: turnId, projectId: access.projectId, threadId: access.threadId, providerSessionId: access.sessionId, controllerGeneration: 1, state: 'delivered', origin, requestedAt: yield* timestamp, deliveredAt: yield* timestamp })}`
+      yield* sql`INSERT INTO turn_delivery_inputs ${sql.insert({ projectId: access.projectId, deliveryId: turnId, userInputId: accepted.inputId, position: 1 })}`
+      return accepted.inputId
+    })
+
+  it.live('pushes the lead’s own tag at once, asking nothing, and never on news alone or over the remote’s', () =>
+    Effect.gen(function* () {
+      const { access, worktree, remote } = yield* leadWithRemote()
+      writeFileSync(join(worktree, 'CHANGELOG.md'), '1.0.0\n')
+      git(worktree, 'add', '.')
+      git(worktree, 'commit', '-q', '-m', 'Release 1.0.0')
+      const head = git(worktree, 'rev-parse', 'HEAD')
+      git(worktree, 'tag', '-a', 'v1.0.0', '-m', 'Release 1.0.0')
+
+      // News is not the person's word: nothing goes up, and nothing is asked either.
+      const heard = yield* turn(access, 'news', 'Checks passed: tag it')
+      assert.include(yield* callTool(access, 'push_tag', { tag: 'v1.0.0', message: heard }), "person's message in this turn")
+      assert.strictEqual(git(remote, 'tag', '--list'), '')
+
+      // Their word in the thread: it goes up as it was made, annotated, with no card for them to press.
+      const message = yield* turn(access, 'person', 'Tag it v1.0.0 and push the tag')
+      assert.strictEqual(
+        yield* callTool(access, 'push_tag', { tag: 'v1.0.0', message }),
+        `Pushed v1.0.0, on ${head.slice(0, 8)}, to origin.`,
+      )
+      assert.strictEqual(git(remote, 'rev-parse', 'v1.0.0^{commit}'), head)
+      assert.strictEqual(git(remote, 'cat-file', '-t', 'v1.0.0'), 'tag')
+      // The very tag object made here, not another made of the same name.
+      assert.strictEqual(git(remote, 'rev-parse', 'refs/tags/v1.0.0'), git(worktree, 'rev-parse', 'refs/tags/v1.0.0'))
+      const sql = yield* SqlClient.SqlClient
+      assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'permission'`, 0)
+      assert.include(
+        (yield* notices(access.threadId)).map((notice) => notice.title),
+        `Pushed v1.0.0, on ${head.slice(0, 8)}, to origin.`,
+      )
+      // Asked again, it is there already.
+      assert.include(yield* callTool(access, 'push_tag', { tag: 'v1.0.0', message }), `on ${head.slice(0, 8)} already`)
+
+      // Made again here on another commit, the remote's stays where it is.
+      git(worktree, 'tag', '-f', 'v1.0.0', 'HEAD~1')
+      const again = yield* turn(access, 'person', 'Push v1.0.0 again')
+      assert.include(yield* callTool(access, 'push_tag', { tag: 'v1.0.0', message: again }), "Althar doesn't move it")
+      assert.strictEqual(git(remote, 'rev-parse', 'v1.0.0^{commit}'), head)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('reads where the remote pushes, not where it fetches from, before saying the tag is there', () =>
+    Effect.gen(function* () {
+      const { access, worktree, remote, root } = yield* leadWithRemote()
+      // origin fetches from one place and pushes to another, as a mirror or a fork set up that way does.
+      const pushed = mkdtempSync(join(tmpdir(), 'althar-push-'))
+      git(pushed, 'init', '-q', '--bare', '-b', 'main')
+      git(root, 'config', 'remote.origin.pushurl', pushed)
+      writeFileSync(join(worktree, 'CHANGELOG.md'), '1.1.0\n')
+      git(worktree, 'add', '.')
+      git(worktree, 'commit', '-q', '-m', 'Release 1.1.0')
+      const head = git(worktree, 'rev-parse', 'HEAD')
+      git(worktree, 'tag', 'v1.1.0')
+      // Where it fetches from has the tag already: where it pushes doesn't.
+      git(root, 'push', '-q', remote, 'refs/tags/v1.1.0')
+      const message = yield* turn(access, 'person', 'Push the v1.1.0 tag')
+      assert.strictEqual(
+        yield* callTool(access, 'push_tag', { tag: 'v1.1.0', message }),
+        `Pushed v1.1.0, on ${head.slice(0, 8)}, to origin.`,
+      )
+      assert.strictEqual(git(pushed, 'rev-parse', 'v1.1.0^{commit}'), head)
+    }).pipe(Effect.provide(runtime())),
+  )
 })

@@ -555,6 +555,9 @@ describe('pointing a running task’s change at another branch', () => {
         yield* callTool(task.lead, 'work_toward', { toward: 'release/0.8.0' }),
         /still works toward main: its commits conflict with release\/0\.8\.0 in change\.txt\.$/,
       )
+      // Nothing moved, it is refused, not done: whoever asked keeps the branch they named, and why.
+      const refused = yield* Effect.flip((yield* Runs).workToward({ taskId: task.taskId, toward: 'release/0.8.0' }))
+      assert.match(String((refused as { message?: unknown }).message), /still works toward main: its commits conflict/)
       const after = (yield* workspacesOf(task.taskId))[0]
       assert.deepStrictEqual([after?.branch, after?.toward], [before.branch, null])
       assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), before.branch)

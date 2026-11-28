@@ -18,12 +18,19 @@ export const errandTaskPull = (projectId: string, reference: string, errand?: st
       SELECT s.target AS url FROM errand_steps s JOIN errands e ON e.id = s.errand_id
       WHERE e.project_id = ${projectId} AND e.id = ${errand} AND s.task_id = ${task.id}
         AND s.tool = 'merge_pull_request' AND s.target NOT LIKE 'task:%' ORDER BY s.position`
-    const links =
+    const following =
       bound.length > 0
         ? bound
         : yield* sql<{ url: string }>`SELECT url FROM external_links
       WHERE project_id = ${projectId} AND task_id = ${task.id} AND kind = 'change'
       AND listening = 1 ORDER BY created_at DESC, rowid DESC`
+    // Merged, a pull request is no longer followed: a step after its merge (a tag) still finds the one that landed.
+    const links =
+      following.length > 0
+        ? following
+        : yield* sql<{ url: string }>`SELECT url FROM external_links
+      WHERE project_id = ${projectId} AND task_id = ${task.id} AND kind = 'change'
+      AND json_extract(snapshot, '$.state') = 'merged' ORDER BY updated_at DESC, rowid DESC LIMIT 1`
     if (links.length === 0) return null
     if (links.length !== 1)
       return yield* new ToolRefused({ message: `${reference} has several pull requests. Keep a step for each PR by its link.` })

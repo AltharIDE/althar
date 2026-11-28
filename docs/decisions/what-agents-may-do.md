@@ -138,8 +138,7 @@ coordinator's judge, not another agent.
 and go back to it. They are starting a workflow, deleting any branch,
 posting any review, commenting on any issue, any write through the gated host
 call, discarding a task, and `create_branch` and `open_pull_request`, which go
-only on the person's word. A lead's `push_tag` also asks every time. See
-[code hosts](code-hosts.md).
+only on the person's word. See [code hosts](code-hosts.md).
 
 ## Speaking for the person
 

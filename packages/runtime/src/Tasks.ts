@@ -525,6 +525,7 @@ export class Tasks extends Context.Service<
               held: true,
               // A quick task's stays on this Mac, as it was started.
               ...(plan.here === true ? { here: true } : {}),
+              ...(plan.homeOnly === undefined ? {} : { homeOnly: plan.homeOnly }),
               ...(plan.reads === true ? { reads: true } : {}),
             })
           }

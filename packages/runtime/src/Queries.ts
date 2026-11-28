@@ -6,7 +6,7 @@ import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
 import { placingOf } from './taskPlaces'
 import { taskWorker } from './workerExecution'
-import { workerRequirementFields } from './workerRequirements'
+import { homeOnlyOf, workerRequirementFields } from './workerRequirements'
 import { HOSTED, newPullRequestLink } from '@althar/connectors'
 import { existsSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, sep } from 'node:path'
@@ -382,6 +382,8 @@ interface ItemRow {
   readonly model?: string | null
   readonly inputState: 'queued' | 'delivered' | 'superseded' | 'withdrawn' | null
   readonly inputClaimed?: number
+  /** A queued message no agent is on its way to read: its thread's last start since it was written failed, none since. */
+  readonly inputUnsent?: number
   readonly disposition: string | null
   /** For a message the person said: some of it was dictated. */
   readonly dictated?: number | null
@@ -619,6 +621,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
                 state: row.inputState,
                 interrupting: row.disposition === 'interrupt_and_continue',
                 ...(row.inputClaimed === 1 ? { claimed: true } : {}),
+                ...(row.inputUnsent === 1 ? { unsent: true } : {}),
                 ...(row.dictated === 1 ? { dictated: true } : {}),
               },
       }
@@ -1299,6 +1302,25 @@ export class Queries extends Context.Service<
               u.state AS input_state, u.disposition, u.dictated, i.created_at,
               EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries td ON td.id = di.delivery_id
                 WHERE di.user_input_id = u.id AND td.state IN ('pending', 'delivered')) AS input_claimed,
+              -- Queued, and the thread's last start since it was written failed, with no session since, live or not, and
+              -- no wait for its worker said since: nothing reads it now.
+              CASE WHEN u.state = 'queued' THEN EXISTS (SELECT 1 FROM thread_items f
+                WHERE f.thread_id = i.thread_id AND f.kind = 'notice' AND json_extract(f.content, '$.startFailed') IS NOT NULL
+                  AND f.created_at >= u.accepted_at
+                  AND NOT EXISTS (SELECT 1 FROM thread_items w WHERE w.thread_id = f.thread_id AND w.kind = 'notice'
+                    AND w.sequence > f.sequence AND json_extract(w.content, '$.waitsForWorker') IS NOT NULL)
+                  AND NOT EXISTS (SELECT 1 FROM provider_sessions ps WHERE ps.thread_id = f.thread_id
+                    AND (ps.started_at > f.created_at OR ps.state IN ('starting', 'active', 'waiting_approval', 'cancelling'))))
+                -- Or, as before starts that failed said so: the thread's last session failed to start after it was written. Not one
+                -- whose worker was taken, which waits for it again; nor one a wait for its worker was said after.
+                OR EXISTS (SELECT 1 FROM provider_sessions ps WHERE ps.id = (SELECT id FROM provider_sessions
+                    WHERE thread_id = i.thread_id ORDER BY started_at DESC, rowid DESC LIMIT 1)
+                  AND ps.state = 'failed' AND ps.ended_at >= u.accepted_at
+                  AND NOT EXISTS (SELECT 1 FROM record_events e WHERE e.aggregate_type = 'provider_session' AND e.aggregate_id = ps.id
+                    AND e.type = 'provider_session.failed' AND json_extract(e.payload, '$.workerTaken') = 1)
+                  AND NOT EXISTS (SELECT 1 FROM thread_items w WHERE w.thread_id = i.thread_id AND w.kind = 'notice'
+                    AND w.created_at >= ps.ended_at AND json_extract(w.content, '$.waitsForWorker') IS NOT NULL)) END
+                AS input_unsent,
               (SELECT d.outcome FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,
@@ -2962,7 +2984,14 @@ export class Queries extends Context.Service<
                     id: task.planId,
                     steps: teamSteps,
                     ...(task.planState === 'proposed' && config.workers !== undefined
-                      ? yield* workerRequirementFields(taskId, field(parameters, 'here') === true, field(parameters, 'reads') === true)
+                      ? yield* workerRequirementFields(
+                          taskId,
+                          homeOnlyOf({
+                            here: field(parameters, 'here') === true,
+                            homeOnly: ((one) => (typeof one === 'boolean' ? one : undefined))(field(parameters, 'homeOnly')),
+                          }),
+                          field(parameters, 'reads') === true,
+                        )
                       : {}),
                     ...(task.planState === 'proposed' ? placedOn(parameters) : {}),
                     startsAt: task.planState === 'proposed' ? task.startsAt : null,

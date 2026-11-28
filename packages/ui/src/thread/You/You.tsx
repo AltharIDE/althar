@@ -21,6 +21,9 @@ export interface YouText {
   queued: string
   /** Sent now, while the agent works: until it has stopped at a safe point to read it. */
   interrupting: string
+  /** No agent is on its way to read it. */
+  notSent: string
+  sendAgain: string
   view: (name: string) => string
   open: (name: string) => string
   showPaste: (name: string) => string
@@ -32,6 +35,8 @@ export const youText: YouText = {
   youQueued: 'You, queued',
   queued: 'Queued',
   interrupting: 'Sent now',
+  notSent: 'Not sent',
+  sendAgain: 'Send again',
   view: (name) => `View ${name}`,
   open: (name) => `Open ${name}`,
   showPaste: (name) => `Show pasted text, ${name}`,
@@ -55,12 +60,24 @@ export type YouProps = RootProps<
     comments?: ReactNode
     /** Restores this turn's files and conversation. Offered only for a delivered, checkpointed message. */
     onUndo?: () => void
+    /** Starts its agent again to read it. Offered only for one not sent. */
+    onSendAgain?: () => void
     text?: Partial<YouText>
   }
 >
 
-function Status({ delivery, at, t }: { delivery: Delivery; at?: string; t: YouText }) {
+function Status({ delivery, at, t, onSendAgain }: { delivery: Delivery; at?: string; t: YouText; onSendAgain?: () => void }) {
   switch (delivery) {
+    case Delivery.NotSent:
+      return (
+        <>
+          <span className={s.notSent}>
+            <Icon name="problem" size={11} />
+            {t.notSent}
+          </span>
+          {onSendAgain !== undefined && <LinkButton onClick={onSendAgain}>{t.sendAgain}</LinkButton>}
+        </>
+      )
     case Delivery.Queued:
       return (
         <>
@@ -95,6 +112,7 @@ export function You({
   unfurl,
   comments,
   onUndo,
+  onSendAgain,
   text,
   className,
   ...rest
@@ -135,7 +153,7 @@ export function You({
             {t.undo}
           </LinkButton>
         )}
-        <Status delivery={delivery} at={at} t={t} />
+        <Status delivery={delivery} at={at} t={t} {...(onSendAgain === undefined ? {} : { onSendAgain })} />
       </span>
     </article>
   )

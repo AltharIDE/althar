@@ -413,6 +413,8 @@ export enum Delivery {
   Queued = 'queued',
   /** Sent now, while the agent works: it is stopping at a safe point to read it. */
   Interrupting = 'interrupting',
+  /** No agent is on its way to read it: the one started for it couldn't start. It waits for you to send it again. */
+  NotSent = 'not-sent',
 }
 
 /** How far a permission reaches when you allow it always. */

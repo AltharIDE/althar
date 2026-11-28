@@ -27,6 +27,7 @@ import { LeftBehind } from './LeftBehind'
 import { Limits, noReportWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
 import { type MoveConsent, type Moved, dropMove } from './local'
+import { carryOnLost } from './lostLead'
 import { type AfterMergeChoice, MergeReviews } from './MergeReviews'
 import { NO_REPORT } from './missedReports'
 import { AutoModels } from './modelMoves'
@@ -1786,6 +1787,17 @@ export class Runs extends Context.Service<
               : outOfUsage(on, turn.agentId, turn.accountId)
           }
           if (on === undefined) {
+            // Gone on its own in the middle of a turn after its plan, the lead is started again as a step's is, apart from the
+            // events, as its start may wait for its worker.
+            if (event._tag === 'SessionEnded' && event.state === 'lost') {
+              yield* Effect.forkIn(
+                carryOnLost(sessions, asking, event.threadId, event.sessionId).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning('Could not start a lost lead again', cause)),
+                ),
+                scope,
+              )
+              return
+            }
             // After its plan, a turn that did nothing at all is told to carry on too, as a step's is (a task is a conversation plus parts).
             const toldAgain =
               event._tag === 'TurnEnded' && event.state === 'completed' && event.errorClass === undefined

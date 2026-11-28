@@ -35,7 +35,7 @@ import { change, fact, timestamp } from './records'
 import { setToward } from './towards'
 import { type PlanStep, Runs, type TaskEnd } from './Runs'
 import { blockedIn } from './waits'
-import { workerRequirementsOf } from './workerRequirements'
+import { homeOnlyOf, workerRequirementsOf } from './workerRequirements'
 
 /*
  * A task's plan before it runs (docs/architecture/04): its steps and who does
@@ -90,6 +90,8 @@ export class Plans extends Context.Service<
       readonly held?: boolean
       /** Nothing of it leaves this Mac when it is done, whatever the project's host (`PlanParameters.here`). */
       readonly here?: boolean
+      /** Whether it runs only on this home, where that isn't as `here` says (`PlanParameters.homeOnly`). */
+      readonly homeOnly?: boolean
       /** A review of someone else's pull request, its one step its lead (`PlanParameters.reads`). */
       readonly reads?: boolean
       /**
@@ -106,6 +108,11 @@ export class Plans extends Context.Service<
       readonly worksInWhy?: string | null
       /** What the proposing call was, as the coordinator made it: kept with the plan through the person's changes, so a repeat of the call is known for one (`Coordinator.propose`). */
       readonly proposal?: string
+      /**
+       * Where it runs once it starts, as `place` chooses it: a worker by its id, or `auto` for any free one; null for the home.
+       * Left out, a plan it replaces keeps where it was placed. One counting down that the place can't take now is held.
+       */
+      readonly runsOn?: string | null
     }): Effect.Effect<string, unknown>
     /**
      * Starts a proposed plan now: its first step is under way (`running`), or
@@ -127,6 +134,8 @@ export class Plans extends Context.Service<
      * so choices that reach it out of order leave the latest.
      */
     place(planId: string, runsOn: string | null, actorId: ActorId, chosenAt?: number): Effect.Effect<boolean, unknown>
+    /** What keeps a plan not yet begun from starting where it is placed, in the words its card says it; undefined where nothing does. */
+    problem(planId: string): Effect.Effect<string | undefined, unknown>
     /**
      * Changes a proposed plan's steps (who does them, or which are skipped),
      * and what happens when the work is done; or a started one's, while its
@@ -222,6 +231,7 @@ export class Plans extends Context.Service<
           end?: TaskEnd | null
           endChosen?: boolean
           here?: boolean
+          homeOnly?: boolean
           aside?: boolean
           reads?: boolean
           worksIn?: WorksIn
@@ -250,11 +260,16 @@ export class Plans extends Context.Service<
             const countdown = input.startsIn ?? testCountdown ?? (yield* countdownNow)
             const countdownEnds = new Date(Date.parse(at) + Duration.toMillis(countdown)).toISOString()
             let startsAt: string | null = null
+            let placed = false
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 // A task has one plan waiting: a new proposal replaces the one before.
-                const earlier = yield* sql<{ id: string; startsAt: string | null }>`
-                  SELECT id, starts_at FROM task_plans WHERE task_id = ${input.taskId} AND state = 'proposed'`
+                const earlier = yield* sql<{ id: string; startsAt: string | null; runsOn: string | null }>`
+                  SELECT id, starts_at, json_extract(parameters, '$.runsOn') AS runs_on FROM task_plans
+                  WHERE task_id = ${input.taskId} AND state = 'proposed'`
+                // Where it runs: as asked now, else where the plan it replaces was placed.
+                const runsOn = input.runsOn === undefined ? (earlier.find((plan) => plan.runsOn !== null)?.runsOn ?? null) : input.runsOn
+                placed = runsOn !== null
                 // A plan the person held stays held when it is re-planned, unless this one is to start at once or says how soon.
                 const keepsHold = input.held === undefined && input.startsIn === undefined && earlier.some((plan) => plan.startsAt === null)
                 startsAt = input.held === true || keepsHold ? null : countdownEnds
@@ -283,6 +298,7 @@ export class Plans extends Context.Service<
                     end: input.end ?? null,
                     ...(input.endChosen === true ? { endChosen: true } : {}),
                     ...(input.here === true ? { here: true } : {}),
+                    ...(input.homeOnly === undefined ? {} : { homeOnly: input.homeOnly }),
                     ...(input.aside === true ? { aside: true } : {}),
                     ...(input.reads === true ? { reads: true } : {}),
                     ...(input.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
@@ -294,6 +310,7 @@ export class Plans extends Context.Service<
                     ...(input.worksIn === undefined ? {} : { worksIn: input.worksIn }),
                     ...(input.worksInWhy == null || input.worksInWhy.trim() === '' ? {} : { worksInWhy: input.worksInWhy.trim() }),
                     ...(input.proposal === undefined ? {} : { proposal: input.proposal }),
+                    ...(runsOn === null ? {} : { runsOn }),
                   }),
                   proposedByActorId: input.actorId,
                   state: 'proposed',
@@ -312,6 +329,8 @@ export class Plans extends Context.Service<
               }),
             )
             if (input.aside !== true) yield* postCard(input.projectId, input.taskId)
+            // Placed where it can't start now, it waits for the person, as a place chosen on its card does.
+            if (placed) yield* holdIfUnfit(planId, input.actorId)
             yield* Queue.offer(wake, undefined)
             return planId
           }),
@@ -364,7 +383,7 @@ export class Plans extends Context.Service<
             return previous === undefined && runsOn === undefined ? {} : { parameters: JSON.stringify(atHome) }
           }
           const requirements = yield* workerRequirementsOf(plan.taskId, {
-            homeOnly: parameters.here === true,
+            homeOnly: homeOnlyOf(parameters),
             readOnly: parameters.reads === true,
           })
           const available = config.workers?.list(plan.projectId) ?? []
@@ -597,6 +616,17 @@ export class Plans extends Context.Service<
         start: (planId, actorId, workerId) => provide(start(planId, actorId, false, workerId)),
         hold: (planId, actorId) => provide(hold(planId, actorId)),
         place: (planId, runsOn, actorId, chosenAt) => provide(place(planId, runsOn, actorId, chosenAt)),
+        problem: (planId) =>
+          provide(
+            Effect.gen(function* () {
+              const plan = yield* load(planId)
+              if (plan.state !== 'proposed') return undefined
+              return yield* placeOn(undefined)(plan).pipe(
+                Effect.as(undefined),
+                Effect.catch((error) => (error instanceof ApiError ? Effect.succeed(error.message) : Effect.fail(error))),
+              )
+            }),
+          ),
         change: (planId, steps, actorId, end, worksIn, toward) =>
           provide(
             Effect.gen(function* () {
@@ -612,6 +642,7 @@ export class Plans extends Context.Service<
                   // A card sends the ending it shows with every change: only another one than the plan had is the person's choice.
                   ...(before.endChosen === true || (end !== undefined && end !== (before.end ?? null)) ? { endChosen: true } : {}),
                   ...(before.here === true ? { here: true } : {}),
+                  ...(before.homeOnly === undefined ? {} : { homeOnly: before.homeOnly }),
                   ...(before.aside === true ? { aside: true } : {}),
                   ...(before.reads === true ? { reads: true } : {}),
                   ...(where === undefined ? {} : { worksIn: where }),
