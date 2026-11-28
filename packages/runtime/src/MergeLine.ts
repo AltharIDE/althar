@@ -946,6 +946,10 @@ export class MergeLine extends Context.Service<
                     Effect.gen(function* () {
                       if (yield* changes.waitsForShip(entry.taskId!, entry.target))
                         return yield* new ActionNotPerformed({ message: 'Commits wait for Ship: ship them before merging.' })
+                      // A press is the person's word only while it stands: Don't merge may have come while this waited on the
+                      // task's lock, so it is read again here, the last moment before the host is written to.
+                      if (entry.pressed && !(yield* pressStands(entry)))
+                        return yield* new ActionNotPerformed({ message: 'Don’t merge was pressed: it isn’t merged.' })
                       return yield* provide(act(projectId, entry, seen.current!, fresh, seen))
                     }),
                   )
@@ -1028,7 +1032,13 @@ export class MergeLine extends Context.Service<
       const pressNote = (
         projectId: string,
         url: string,
-        said: { readonly press: string | null; readonly state: 'asked' | 'sent_back' | 'left'; readonly reason?: string },
+        said: {
+          readonly press: string | null
+          readonly state: 'asked' | 'sent_back' | 'left'
+          readonly reason?: string
+          /** The errand an asked press joined, kept before it by another press or an agent. */
+          readonly errand?: string
+        },
       ) =>
         provide(
           Effect.gen(function* () {
@@ -1041,6 +1051,15 @@ export class MergeLine extends Context.Service<
       /** Whether the press is still the person's last word on the pull request: nothing since, Don't merge included. */
       const stillPressed = (url: string, pressId: string) =>
         Effect.map(lastPress(url), (last) => last?.press === pressId && last.state === 'asked')
+      /** Whether a press's errand still stands as the person's word: open, and no Don't merge since. */
+      const pressStands = (entry: Pick<Entry, 'errandId' | 'target'>) =>
+        Effect.gen(function* () {
+          if (yield* left(entry.target)) return false
+          const [row] = yield* provide(
+            Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ state: string }>`SELECT state FROM errands WHERE id = ${entry.errandId}`),
+          )
+          return row?.state === 'open'
+        })
       /** Whether Don't merge is the person's last word on the pull request, after any press. */
       const left = (url: string) => Effect.map(lastPress(url), (last) => last?.state === 'left')
 
@@ -1096,14 +1115,13 @@ export class MergeLine extends Context.Service<
             if (change.state === 'closed') return yield* refused(`Not merged: ${name} was closed.`)
             if (change.draft) return yield* refused(`Not merged: ${name} is a draft.`)
             if (change.headSha !== input.head) return yield* refused(sentBack.pushed)
-            // Waiting already, however it was asked for: the one errand goes on.
-            if (
-              (yield* provide(entriesOf(input.projectId))).some(
-                (entry) =>
-                  entry.state === 'open' && [change.url, input.url].some((url) => entry.target.toLowerCase() === url.toLowerCase()),
-              )
+            // Waiting already, however it was asked for: the one errand goes on, and this press follows it to its end, which
+            // its card reads under this press (`whenGreen`), whoever kept it.
+            const joined = (yield* provide(entriesOf(input.projectId))).find(
+              (entry) => entry.state === 'open' && [change.url, input.url].some((url) => entry.target.toLowerCase() === url.toLowerCase()),
             )
-              return
+            if (joined !== undefined)
+              return yield* pressNote(input.projectId, input.url, { press: input.pressId, state: 'asked', errand: joined.errandId })
             const [thread] = yield* provide(
               Effect.flatMap(
                 SqlClient.SqlClient,
@@ -1220,8 +1238,16 @@ export class MergeLine extends Context.Service<
                   // Read back: only the host's own word that it no longer has it set to merge says it let go.
                   const after = Option.isNone(out)
                     ? undefined
-                    : yield* host.change(repository, place.number, { queue: true }).pipe(Effect.orElseSucceed(() => out.value))
-                  if (after === undefined || (after.state === 'open' && (after.queued === true || after.autoMerge === true)))
+                    : yield* host.change(repository, place.number, { queue: true }).pipe(Effect.option)
+                  // Its answer said it let go, but nothing read it back: not taken as done, and said so.
+                  if (after !== undefined && Option.isNone(after))
+                    yield* stillSet(
+                      `Althar couldn’t confirm ${hostName(host)} took it out: if it’s still set to merge there, it may still merge.`,
+                    )
+                  else if (
+                    after === undefined ||
+                    (after.value.state === 'open' && (after.value.queued === true || after.value.autoMerge === true))
+                  )
                     yield* stillSet(`${hostName(host)} still has it set to merge: take it out on ${hostName(host)}.`)
                 }),
               )

@@ -2,9 +2,10 @@ import type { CheckState } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { Ids, newId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Deferred, Duration, Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { Instance } from '../src/Instance'
 import { CALLED_OFF } from '../src/Errands'
@@ -379,6 +380,79 @@ describe('Merge when checks pass', () => {
         service.merged.map((one) => [one.how, one.head]),
         [['merge', `head-${number}`]],
       )
+    }).pipe(Effect.provide(layer(service)))
+  })
+  it.live('Don’t merge pressed while a step waits on its task’s lock: nothing is written to the host', () => {
+    const { service, number } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const task = yield* taskOf(working, number)
+      yield* press(task, `head-${number}`)
+      const changes = yield* Changes
+      const release = yield* Deferred.make<void>()
+      const holding = yield* Deferred.make<void>()
+      // Something else of the task's holds its lock, as a push would.
+      const holder = yield* Effect.forkChild(
+        changes.exclusive(task.taskId, Effect.andThen(Deferred.succeed(holding, undefined), Deferred.await(release))),
+      )
+      yield* Deferred.await(holding)
+      const reads = service.calls.filter((one) => one === 'change').length
+      const sweeping = yield* Effect.forkChild(sweep(task))
+      // The sweep has read it, and the step read it again: it waits on the task's lock to merge.
+      yield* until(
+        Effect.sync(() => service.calls.filter((one) => one === 'change').length),
+        (now) => now >= reads + 2,
+      )
+      yield* leave(task)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(holder)
+      yield* Fiber.join(sweeping)
+      assert.deepStrictEqual(service.merged, [])
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('a removal the host answered but that couldn’t be read back is said, not taken as done', () => {
+    const { service, checks, number } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      service.mergeQueue()
+      const task = yield* taskOf(working, number)
+      checks.set(`head-${number}`, 'running')
+      yield* press(task, `head-${number}`)
+      checks.set(`head-${number}`, 'passed')
+      yield* sweep(task)
+      // Its first read goes through; the one after leaving the queue doesn't.
+      service.failNext('change', 'unreachable', undefined, undefined, { after: 1 })
+      yield* leave(task)
+      const said = yield* until(shown(task), (now) => now?.state === 'sent_back')
+      assert.deepStrictEqual(said, {
+        state: 'sent_back',
+        reason: 'Althar couldn’t confirm GitHub took it out: if it’s still set to merge there, it may still merge.',
+        press: 'leave_1',
+      })
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('a press that joined a waiting errand follows it to its end, however that errand ended', () => {
+    const { service, checks, number } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* taskOf(working, number)
+      checks.set(`head-${number}`, 'running')
+      yield* press(task, `head-${number}`)
+      yield* Effect.flatMap(MergeLine, (line) =>
+        line.press({ projectId: task.projectId, taskId: task.taskId, url: task.url, head: `head-${number}`, pressId: 'cmd_2' }),
+      )
+      // Its join noted, behind the press.
+      yield* until(
+        sql<{ n: number }>`SELECT count(*) AS n FROM observations WHERE kind = 'press' AND json_extract(payload, '$.errand') IS NOT NULL`,
+        (rows) => (rows[0]?.n ?? 0) > 0,
+      )
+      yield* sweep(task)
+      // Ended outside the press's own path, as an agent's errand is: no note of the press's says so.
+      yield* sql`UPDATE errands SET state = 'cancelled', reason = 'It was closed on GitHub.' WHERE message_id = 'press:cmd_1'`
+      assert.deepStrictEqual(yield* shown(task), { state: 'sent_back', reason: 'It was closed on GitHub.', press: 'cmd_2' })
     }).pipe(Effect.provide(layer(service)))
   })
 })

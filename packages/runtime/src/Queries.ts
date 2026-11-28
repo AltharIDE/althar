@@ -1,7 +1,7 @@
 import { readGoal } from './threadGoals'
 import { standInOf } from './standIn'
 import { Limits } from './Limits'
-import { errandRecords, PRESSED, pressSubject } from './Errands'
+import { CALLED_OFF, errandRecords, PRESSED, pressSubject } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
 import { placingOf } from './taskPlaces'
@@ -2186,7 +2186,9 @@ export class Queries extends Context.Service<
             SELECT payload, observed_at FROM observations WHERE subject_type = 'merge_line' AND subject_id = ${pressSubject(url)}
               AND kind = 'press' ORDER BY rowid DESC LIMIT 1`
           const last =
-            said === undefined ? undefined : (JSON.parse(said.payload) as { press?: string | null; state?: string; reason?: string })
+            said === undefined
+              ? undefined
+              : (JSON.parse(said.payload) as { press?: string | null; state?: string; reason?: string; errand?: string })
           const press = last?.press == null ? {} : { press: last.press }
           // Waiting, said to the person's latest press of it, which may have joined an errand kept before (its own or an agent's).
           if (open !== undefined)
@@ -2199,9 +2201,20 @@ export class Queries extends Context.Service<
                   ? { press: open.messageId.slice(PRESSED.length) }
                   : {}),
             }
-          // A press on its way to the line, kept only so long: one a restart cut short is no longer said to wait.
-          if (last?.state === 'asked' && (yield* Clock.currentTimeMillis) - Date.parse(said?.observedAt ?? '') < PRESS_ON_ITS_WAY)
-            return { state: 'waiting' as const, ...press }
+          if (last?.state === 'asked') {
+            // The errand the press kept, or joined (another press's, or an agent's): ended, its end is the press's, said to it.
+            const [ended] = yield* sql<{ state: string; reason: string | null }>`
+              SELECT state, reason FROM errands
+              WHERE id = ${last.errand ?? ''} OR (${last.press ?? null} IS NOT NULL AND message_id = ${`${PRESSED}${last.press ?? ''}`})
+              ORDER BY created_at DESC, rowid DESC LIMIT 1`
+            if (ended !== undefined)
+              return (ended.state === 'cancelled' || ended.state === 'paused') && ended.reason !== null && ended.reason !== CALLED_OFF
+                ? { state: 'sent_back' as const, reason: ended.reason, ...press }
+                : undefined
+            // A press on its way to the line, kept only so long: one a restart cut short is no longer said to wait.
+            if ((yield* Clock.currentTimeMillis) - Date.parse(said?.observedAt ?? '') < PRESS_ON_ITS_WAY)
+              return { state: 'waiting' as const, ...press }
+          }
           if (last?.state === 'sent_back' && typeof last.reason === 'string')
             return { state: 'sent_back' as const, reason: last.reason, ...press }
           return undefined
