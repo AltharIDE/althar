@@ -1310,7 +1310,16 @@ export class Queries extends Context.Service<
                   AND NOT EXISTS (SELECT 1 FROM thread_items w WHERE w.thread_id = f.thread_id AND w.kind = 'notice'
                     AND w.sequence > f.sequence AND json_extract(w.content, '$.waitsForWorker') IS NOT NULL)
                   AND NOT EXISTS (SELECT 1 FROM provider_sessions ps WHERE ps.thread_id = f.thread_id
-                    AND (ps.started_at > f.created_at OR ps.state IN ('starting', 'active', 'waiting_approval', 'cancelling')))) END
+                    AND (ps.started_at > f.created_at OR ps.state IN ('starting', 'active', 'waiting_approval', 'cancelling'))))
+                -- Or, as before starts that failed said so: the thread's last session failed to start after it was written. Not one
+                -- whose worker was taken, which waits for it again; nor one a wait for its worker was said after.
+                OR EXISTS (SELECT 1 FROM provider_sessions ps WHERE ps.id = (SELECT id FROM provider_sessions
+                    WHERE thread_id = i.thread_id ORDER BY started_at DESC, rowid DESC LIMIT 1)
+                  AND ps.state = 'failed' AND ps.ended_at >= u.accepted_at
+                  AND NOT EXISTS (SELECT 1 FROM record_events e WHERE e.aggregate_type = 'provider_session' AND e.aggregate_id = ps.id
+                    AND e.type = 'provider_session.failed' AND json_extract(e.payload, '$.workerTaken') = 1)
+                  AND NOT EXISTS (SELECT 1 FROM thread_items w WHERE w.thread_id = i.thread_id AND w.kind = 'notice'
+                    AND w.created_at >= ps.ended_at AND json_extract(w.content, '$.waitsForWorker') IS NOT NULL)) END
                 AS input_unsent,
               (SELECT d.outcome FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id

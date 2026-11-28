@@ -849,7 +849,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           yield* sql.withTransaction(
             Effect.gen(function* () {
               const revision = yield* moveSession(sessionId, 'failed', { endedAt: yield* timestamp })
-              yield* sessionFact(thread, sessionId, revision, 'provider_session.failed', { reason: taken.reason })
+              // Kept apart from a start that failed: what waits for it isn't unsent (Queries.ts).
+              yield* sessionFact(thread, sessionId, revision, 'provider_session.failed', { reason: taken.reason, workerTaken: true })
             }),
           )
           return yield* taken

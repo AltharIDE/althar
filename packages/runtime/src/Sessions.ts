@@ -105,7 +105,7 @@ import { teamLeadOf } from './teamLead'
 import { type OutputSoFar, addItem, keepAltharCall, moveToEnd, toolItem } from './threads'
 import { ToolServer } from './ToolServer'
 import { canUndoTask, recoverTurnUndo, undoConversation, undoTarget } from './turnUndo'
-import { agentSaid, lostWords, startedAfreshWords } from './words'
+import { agentSaid, lostWords, startedAfreshWords, words } from './words'
 import { taskWorker } from './workerExecution'
 import { holdOn, holdWords, WORKER_WAIT, WorkerTaken } from './workerWait'
 
@@ -1707,8 +1707,8 @@ export class Sessions extends Context.Service<
           }),
         )
 
-      /** Starts that wait for their worker, by thread: a stop calls each off (`stop`). */
-      const workerWaits = new Map<string, Deferred.Deferred<void>>()
+      /** Starts that wait for their worker, by thread, however many: a stop calls every one off (`stop`). */
+      const workerWaits = new Map<string, Set<Deferred.Deferred<void>>>()
 
       /** A start another agent's takeover makes, whose worker another run took meanwhile: said as a start that failed. */
       const takenWords = (taken: WorkerTaken) =>
@@ -1739,7 +1739,9 @@ export class Sessions extends Context.Service<
           const { every, away, sayAfter } = runtimeConfig.workerWait ?? WORKER_WAIT
           const since = yield* Clock.currentTimeMillis
           const calledOff = yield* Deferred.make<void>()
-          workerWaits.set(threadId, calledOff)
+          const waits = workerWaits.get(threadId) ?? new Set()
+          waits.add(calledOff)
+          workerWaits.set(threadId, waits)
           return yield* Effect.gen(function* () {
             let said: string | undefined
             for (;;) {
@@ -1800,7 +1802,8 @@ export class Sessions extends Context.Service<
           }).pipe(
             Effect.ensuring(
               Effect.sync(() => {
-                if (workerWaits.get(threadId) === calledOff) workerWaits.delete(threadId)
+                waits.delete(calledOff)
+                if (waits.size === 0 && workerWaits.get(threadId) === waits) workerWaits.delete(threadId)
               }),
             ),
           )
@@ -2524,7 +2527,8 @@ export class Sessions extends Context.Service<
        */
       const unstarted = (asked: Parameters<typeof startOn>[0], created: Deferred.Deferred<string>, error: unknown) =>
         Effect.gen(function* () {
-          if ((yield* Deferred.isDone(created)) || error instanceof SessionRunning || error instanceof NotFound) return
+          // Any refusal of a thread that is there is said, a model or account no longer offered included; one running isn't one.
+          if ((yield* Deferred.isDone(created)) || error instanceof SessionRunning) return
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM threads WHERE id = ${asked.threadId}`
           if (thread === undefined) return
@@ -2532,7 +2536,7 @@ export class Sessions extends Context.Service<
             Effect.map((entry) => entry.definition.name),
             Effect.orElseSucceed(() => asked.agentId),
           )
-          const said = error instanceof SessionFailed ? error.summary : error instanceof Error && error.message !== '' ? error.message : ''
+          const said = error instanceof SessionFailed ? error.summary : words(error, (agentId) => agentId).message
           yield* addItem({ projectId: thread.projectId, threadId: asked.threadId }, 'notice', {
             source: 'runtime',
             severity: 'error',
@@ -3272,9 +3276,10 @@ export class Sessions extends Context.Service<
           }),
         stop: (threadId) =>
           Effect.gen(function* () {
-            // A start waiting for its worker is called off at once, without its thread's lock, which it doesn't hold.
-            const waiting = workerWaits.get(threadId)
-            if (waiting !== undefined) yield* Deferred.succeed(waiting, undefined)
+            // Every start waiting for its worker is called off at once, without its thread's lock, which none holds.
+            const waits = [...(workerWaits.get(threadId) ?? [])]
+            const waiting = waits.length === 0 ? undefined : waits
+            for (const one of waits) yield* Deferred.succeed(one, undefined)
             return yield* exclusive(
               threadId,
               Effect.suspend(() => {

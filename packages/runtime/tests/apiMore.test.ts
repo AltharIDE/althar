@@ -673,14 +673,15 @@ describe('a normal task assigned to a worker', () => {
     ),
   )
 
-  it.live('calls off a start waiting for its worker when the person stops it, and says what waited is unsent', () =>
+  it.live('calls off every start waiting for its worker when the person stops it, and says what waited is unsent', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client, state, placed, holding, says } = yield* oneAtATime()
         const setup = yield* placed('Waits')
         yield* holding('Holds')
         yield* client.Send({ commandId: commandId(), threadId: setup.threadId, body: 'Then this.', disposition: 'after_current' })
-        yield* client.StartSession({ commandId: commandId(), threadId: setup.threadId, agentId: 'codex' })
+        // Started twice, as from two windows: both wait.
+        for (const _ of [1, 2]) yield* client.StartSession({ commandId: commandId(), threadId: setup.threadId, agentId: 'codex' })
         yield* says(setup.threadId, 'Waiting for hermes-box: “Holds” runs there.')
         // Stopped while it waits, without waiting for the worker to be free.
         yield* client.StopSession({ commandId: commandId(), threadId: setup.threadId })
@@ -688,10 +689,16 @@ describe('a normal task assigned to a worker', () => {
           thread.items.some((item) => item.kind === 'user_message' && item.content.text === 'Then this.' && item.input?.unsent === true),
         )
         assert.include(JSON.stringify(stopped.items), 'Stopped while it waited for its worker.')
-        // Free again, nothing starts there by itself.
+        // Free again, neither starts there.
         state.held = undefined
         yield* Effect.sleep(Duration.millis(300))
         assert.lengthOf(state.opened, 2)
+        const after = yield* client.GetThread({ threadId: setup.threadId, fresh: true })
+        assert.isNull(after.session)
+        assert.notInclude(
+          after.items.flatMap((item) => (item.kind === 'user_message' ? [item.input?.state] : [])),
+          'delivered',
+        )
       }),
     ),
   )

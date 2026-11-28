@@ -1363,7 +1363,7 @@ describe('the API', () => {
   it.live('says a message is not sent while no agent is on its way to read it, and sends it again', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { client, grant } = yield* connected()
+        const { client, grant, context } = yield* connected()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Unsent' })
         yield* client.Send({
@@ -1393,6 +1393,13 @@ describe('the API', () => {
         assert.isTrue(early.retryable)
         // Its lead couldn't start: nothing is on its way to read it.
         yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'missing' }))
+        assert.deepInclude(message(yield* client.GetThread({ threadId: task.threadId, fresh: true }))?.input, {
+          state: 'queued',
+          unsent: true,
+        })
+        // Stuck so before starts that failed said what they were started on: its failed session says it all the same.
+        const sql = Context.get(context, SqlClient.SqlClient)
+        yield* sql`UPDATE thread_items SET content = json_remove(content, '$.startFailed') WHERE thread_id = ${task.threadId}`
         assert.deepInclude(message(yield* client.GetThread({ threadId: task.threadId, fresh: true }))?.input, {
           state: 'queued',
           unsent: true,
