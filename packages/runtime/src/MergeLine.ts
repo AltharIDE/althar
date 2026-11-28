@@ -17,7 +17,7 @@ import { Connections } from './Connections'
 import { Coordinator } from './Coordinator'
 import { hostedOf, hostSays, placeOf } from './coordinatorPullRequests'
 import { envelope } from './envelope'
-import { type AskedAction, type AskedResult, type ErrandStep, Errands, type FreshAction } from './Errands'
+import { type AskedAction, type AskedResult, type ErrandStep, Errands, type FreshAction, PRESSED } from './Errands'
 import { contained } from './Failures'
 import { Instance } from './Instance'
 import { errandTaskPull } from './errandTask'
@@ -93,6 +93,8 @@ type MergeRequest = typeof MergeRequest.Type
 interface Holder {
   current?: Look
   refused?: string
+  /** The host's own words for its refusal, as a press's merge says it came back. */
+  hostSaid?: string
 }
 
 /** One merge errand's waiting step, as the store has it. */
@@ -109,6 +111,8 @@ interface Entry {
   readonly request: MergeRequest
   readonly raw: Readonly<Record<string, unknown>>
   readonly waits: string
+  /** Kept from the person's press of Merge when checks pass: Althar takes its steps itself, and sends it back where it can't. */
+  readonly pressed: boolean
 }
 
 /** What a fresh read says of a step: for Errands, and for the line, what comes next and why. */
@@ -200,6 +204,21 @@ const withoutName = (reason: string, name: string) => {
   return rest.replaceAll(name, 'it')
 }
 
+/**
+ * Why a press's merge came back without merging, as the person reads it under the pull request (`whenGreen`): what happened,
+ * in a few words. Pressing Merge when checks pass again puts it back.
+ */
+export const sentBack = {
+  failed: 'Not merged: its checks failed.',
+  cancelled: 'Not merged: its checks were cancelled.',
+  queue: 'Not merged: the merge queue sent it back.',
+  pushed: 'Not merged: new commits were pushed after you pressed.',
+  conflict: (branch: string) => `Not merged: it conflicts with ${branch}.`,
+  stuck: (branch: string) => `Not merged: it can’t be brought up to date with ${branch}.`,
+  held: 'Not merged: commits wait for Ship.',
+  refused: (host: string) => `Not merged: ${host} refused it`,
+} as const
+
 /** Where a pull request stands in the line, and for one that needs someone, what to do: as its row says it. */
 const rowOf = (seen: Look): Pick<CardRow, 'state' | 'reason'> => {
   switch (seen.next) {
@@ -263,8 +282,10 @@ const entriesOf = (projectId: string) =>
       branch: string | null
       request: string
       waits: string
+      messageId: string
     }>`
-      SELECT e.id AS errand_id, s.step_key, e.thread_id, e.state, e.created_at, s.task_id, s.target, s.head, s.target_branch AS branch, s.request, s.waits
+      SELECT e.id AS errand_id, s.step_key, e.thread_id, e.state, e.created_at, s.task_id, s.target, s.head, s.target_branch AS branch, s.request, s.waits,
+        e.message_id
       FROM errands e JOIN errand_steps s ON s.errand_id = e.id
       WHERE e.project_id = ${projectId} AND e.state IN ('open', 'paused') AND s.tool = ${MERGE_TOOL} AND s.state = 'waiting'
         AND NOT EXISTS (SELECT 1 FROM errand_steps earlier WHERE earlier.errand_id = e.id
@@ -273,8 +294,16 @@ const entriesOf = (projectId: string) =>
     const entries = rows.flatMap((row): Array<Entry> => {
       const request = decodeRequest(row.request)
       if (Option.isNone(request) || row.head === null || row.branch === null) return []
+      const { messageId, ...kept } = row
       return [
-        { ...row, head: row.head, branch: row.branch, request: request.value, raw: JSON.parse(row.request) as Record<string, unknown> },
+        {
+          ...kept,
+          head: row.head,
+          branch: row.branch,
+          request: request.value,
+          raw: JSON.parse(row.request) as Record<string, unknown>,
+          pressed: messageId.startsWith(PRESSED),
+        },
       ]
     })
     return [...entries.filter((entry) => entry.request.now), ...entries.filter((entry) => !entry.request.now)]
@@ -358,6 +387,16 @@ export class MergeLine extends Context.Service<
   {
     /** Looks at every merge line of the project, or of every project: brings what holds a slot up to date, and wakes the errand's thread for each step it can take. */
     tick(projectId?: string): Effect.Effect<void>
+    /** The person's Merge when checks pass on a task's pull request, at the head they saw (`press` below). */
+    press(input: {
+      readonly projectId: string
+      readonly taskId: string
+      readonly url: string
+      readonly head: string
+      readonly pressId: string
+    }): Effect.Effect<void, ToolRefused>
+    /** The person's Don't merge on one waiting: out of the line, and out of the host's queue (`unpress` below). */
+    unpress(input: { readonly projectId: string; readonly taskId: string; readonly url: string }): Effect.Effect<void, ToolRefused>
   }
 >()('@althar/runtime/MergeLine') {
   static readonly layer = Layer.effect(
@@ -506,6 +545,11 @@ export class MergeLine extends Context.Service<
               'wait',
               change.autoMerge === true ? 'auto-merge on' : 'merging',
             )
+          }
+          // Pressed, it merges the head the person saw: any push but Althar's own update of it sends it back.
+          if (entry.pressed && (by === 'other' || by === 'lead')) {
+            const reason = sentBack.pushed
+            return said({ state: 'ended', ...at, pushedBy: 'other', reason }, 'settle', reason)
           }
           if (by === 'other') {
             const reason = `Someone else pushed to ${name} (it is at ${short(change.headSha)} now), so it isn’t merged unseen.`
@@ -753,6 +797,7 @@ export class MergeLine extends Context.Service<
               : ''
           }`
           holder.refused = message
+          holder.hostSaid = error.message
           return yield* new ActionNotPerformed({ message })
         })
 
@@ -866,27 +911,137 @@ export class MergeLine extends Context.Service<
           const done = yield* errands.execute(MERGE_TOOL, access, actionOf(access.projectId, entry, seen)).pipe(
             Effect.map((answer) => ({ answer, waiting: false })),
             Effect.catch((error) =>
-              seen.refused !== undefined
-                ? // Refused, it gives the branch's slot up: its errand waits for the person's word.
+              seen.refused !== undefined && entry.pressed
+                ? // A press's merge the host refused comes back to the person, saying so: their next press puts it back.
                   Effect.andThen(
-                    errands.pause(access, entry.errandId, seen.refused),
-                    Effect.fail(
-                      refused(
-                        `${seen.refused} It is out of Althar’s line for ${entry.branch}, so the next goes ahead: say so to the person, and resume_errand puts it back on their word.`,
-                      ),
+                    errands.callOff(
+                      entry.errandId,
+                      `${sentBack.refused(seen.current === undefined ? 'the host' : hostName(seen.current.host))}${seen.hostSaid === undefined || seen.hostSaid === '' ? '' : `: ${seen.hostSaid.replace(/\.$/, '')}`}.`,
                     ),
+                    Effect.fail(refused(seen.refused)),
                   )
-                : seen.current?.fresh.state === 'waiting'
-                  ? Effect.succeed({
-                      answer: `${seen.current.fresh.reason ?? seen.current.why} Althar wakes you for its next step.`,
-                      waiting: true,
-                    })
-                  : Effect.fail(error),
+                : seen.refused !== undefined
+                  ? // Refused, it gives the branch's slot up: its errand waits for the person's word.
+                    Effect.andThen(
+                      errands.pause(access, entry.errandId, seen.refused),
+                      Effect.fail(
+                        refused(
+                          `${seen.refused} It is out of Althar’s line for ${entry.branch}, so the next goes ahead: say so to the person, and resume_errand puts it back on their word.`,
+                        ),
+                      ),
+                    )
+                  : seen.current?.fresh.state === 'waiting'
+                    ? Effect.succeed({
+                        answer: `${seen.current.fresh.reason ?? seen.current.why} Althar wakes you for its next step.`,
+                        waiting: true,
+                      })
+                    : Effect.fail(error),
             ),
           )
           yield* Queue.offer(poke, true)
           return done.answer
         })
+
+      /** Who takes a press's steps: Althar, in the thread the press kept its errand in, in no turn. */
+      const pressAccess = (projectId: string, entry: Pick<Entry, 'threadId' | 'taskId'>): ToolAccess => ({
+        role: 'coordinator',
+        projectId,
+        threadId: entry.threadId,
+        sessionId: '',
+        taskId: entry.taskId,
+      })
+
+      /**
+       * The person's Merge when checks pass, on a task's pull request at the head they saw: an errand of the merge line's,
+       * kept from the press in the task's thread, which the line takes step by step as merge_pull_request's are, through the
+       * host's queue, train or auto-merge where it has one and Althar's own line elsewhere, and merges once green. What would
+       * step it out of line (its checks failing, a push, a conflict) sends it back instead, saying why (`sentBack`).
+       */
+      const press = (input: {
+        readonly projectId: string
+        readonly taskId: string
+        readonly url: string
+        readonly head: string
+        readonly pressId: string
+      }) =>
+        locks
+          .withLock(
+            input.projectId,
+            Effect.gen(function* () {
+              const place = yield* provide(placeOf(input.projectId, input.url))
+              const { host, repository } = place
+              const name = nameOf({ number: place.number, words: host.words })
+              const change = yield* viaHost(host.change(repository, place.number, { queue: true }))
+              if (change.state === 'merged') return
+              if (change.state === 'closed') return yield* refused(`${name} is closed.`)
+              if (change.draft) return yield* refused(`${name} is a draft: mark it ready first.`)
+              if (change.headSha !== input.head) return yield* refused(`${name} moved on since you saw it. Look again before merging.`)
+              // Waiting already, however it was asked for: the one errand goes on.
+              if (
+                (yield* provide(entriesOf(input.projectId))).some(
+                  (entry) => entry.state === 'open' && entry.target.toLowerCase() === change.url.toLowerCase(),
+                )
+              )
+                return
+              const [thread] = yield* provide(
+                Effect.flatMap(
+                  SqlClient.SqlClient,
+                  (sql) => sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${input.taskId} AND kind = 'task' LIMIT 1`,
+                ),
+              )
+              if (thread === undefined) return yield* refused('That task has no thread to keep its merge in.')
+              const way = yield* waysOf(host, repository, change.target)
+              const request: MergeRequest = {
+                repository: `${host.product}:${repository.path.join('/')}`,
+                number: place.number,
+                method: repository.merges[0] ?? 'merge',
+                now: false,
+                title: change.title,
+              }
+              yield* errands.keepPressed(input.projectId, thread.id, input.pressId, 'Merge when checks pass', [
+                {
+                  key: STEP,
+                  tool: MERGE_TOOL,
+                  taskId: input.taskId,
+                  target: change.url,
+                  head: input.head,
+                  branch: change.target,
+                  says: `Merge ${name}`,
+                  request,
+                  waits: [
+                    { kind: way.queue ?? 'merge_line', target: `${repository.path.join('/')} ${change.target}`, says: 'it’s its turn' },
+                    { kind: 'checks', target: input.head, says: 'its checks pass' },
+                  ],
+                },
+              ])
+              yield* touchTask(input.taskId).pipe(provide)
+            }),
+          )
+          .pipe(Effect.mapError(asRefused), Effect.ensuring(Queue.offer(poke, true)))
+
+      /**
+       * The person's Don't merge, on a pull request waiting to merge when its checks pass: every merge errand waiting on it is
+       * called off, by whoever it was kept, and the host's queue, train or auto-merge lets go of it, as leave_queue does.
+       * Pressing Merge when checks pass again puts it back.
+       */
+      const unpress = (input: { readonly projectId: string; readonly taskId: string; readonly url: string }) =>
+        locks
+          .withLock(
+            input.projectId,
+            Effect.gen(function* () {
+              for (const entry of yield* provide(entriesOf(input.projectId)))
+                if (entry.target.toLowerCase() === input.url.toLowerCase()) yield* errands.callOff(entry.errandId, '', true)
+              yield* touchTask(input.taskId).pipe(provide)
+              const place = yield* provide(placeOf(input.projectId, input.url))
+              const { host, repository } = place
+              const change = yield* viaHost(host.change(repository, place.number, { queue: true }))
+              if (change.state !== 'open' || (change.queued !== true && change.autoMerge !== true)) return
+              const out = yield* host.leaveQueue(repository, change).pipe(Effect.option)
+              if (Option.isNone(out) || out.value.queued === true || out.value.autoMerge === true)
+                return yield* refused(`${hostName(host)} still has it set to merge. Take it out on ${change.url}`)
+            }),
+          )
+          .pipe(Effect.mapError(asRefused), Effect.ensuring(Queue.offer(poke, true)))
 
       /* ---- The tools ---- */
 
@@ -1430,6 +1585,12 @@ export class MergeLine extends Context.Service<
               for (const { threadId, body } of taskNews.wakes) wakeOf(threadId).push(body)
               const take = (entry: Entry, why: string) =>
                 Effect.gen(function* () {
+                  // A press is the person's word for each step: Althar takes it now, with no agent's turn.
+                  if (entry.pressed)
+                    return yield* step(pressAccess(projectId, entry), entry).pipe(
+                      Effect.catch((error) => Effect.logInfo(`A pressed merge of #${entry.request.number} didn’t go ahead`, error)),
+                      Effect.asVoid,
+                    )
                   if (
                     yield* note(
                       projectId,
@@ -1532,6 +1693,29 @@ export class MergeLine extends Context.Service<
                     })
                   // Where it stands, as a word its task's card says plainly (errandWords): noted as it changes, so the card reads it.
                   yield* standAt(projectId, entry, standsOf(seen, entry))
+                  // Pressed, what would step it out of line sends it back to the person instead, saying why: their next press
+                  // puts it back. One Althar tries again itself waits on.
+                  const back = !entry.pressed
+                    ? null
+                    : seen.next === 'red'
+                      ? seen.why === 'sent back by the queue'
+                        ? sentBack.queue
+                        : seen.fresh.reason?.includes('cancelled') === true
+                          ? sentBack.cancelled
+                          : sentBack.failed
+                      : seen.next === 'conflict'
+                        ? sentBack.conflict(entry.branch)
+                        : seen.next === 'stuck' && seen.passing !== true
+                          ? sentBack.stuck(entry.branch)
+                          : seen.next === 'held'
+                            ? sentBack.held
+                            : null
+                  if (back !== null) {
+                    yield* errands
+                      .callOff(entry.errandId, back)
+                      .pipe(Effect.catch((error) => Effect.logWarning('Could not send a pressed merge back', error)))
+                    continue
+                  }
                   switch (seen.next) {
                     case 'settle':
                       yield* take(entry, `${seen.fresh.answer ?? seen.fresh.reason ?? seen.why}`)
@@ -1625,7 +1809,7 @@ export class MergeLine extends Context.Service<
           Effect.forever(Effect.andThen(Effect.raceFirst(Queue.take(poke), Effect.as(Effect.sleep(every), true)), tick())),
         )
 
-      return MergeLine.of({ tick })
+      return MergeLine.of({ tick, press, unpress })
     }),
   )
 }

@@ -34,6 +34,7 @@ import {
   LinkButton,
   MenuItem,
   MergeButton,
+  mergeButtonText,
   NextLine,
   NextRow as KitNextRow,
   NextStep,
@@ -69,6 +70,7 @@ import {
   doneHere,
   factsOf,
   labelWords,
+  mergesWhenGreen,
   nextWords,
   ranChecks,
   readyWordOf,
@@ -954,6 +956,18 @@ const shipOf = (
   }
 }
 
+/**
+ * A ready card's errand lines, less the one its strip says already: a merge waiting for its checks, where Merge when checks
+ * pass was pressed, stands in Merge's place, so its line ("Merges once checks pass") would say it twice.
+ */
+const withoutWaitShown = (work: BoardTask, actions: CardActions | undefined) =>
+  work.change != null && actions?.whenGreen?.waiting(work.change) === true
+    ? work.errands?.filter((line) => line !== WAITS_FOR_CHECKS)
+    : work.errands
+
+/** The runtime's line for a merge errand waiting for its pull request's checks (errandWords' `mergeLine`). */
+const WAITS_FOR_CHECKS = 'Merges once checks pass'
+
 /** What a ready card does without opening its task: push, and merge, ship, mark done or keep for later, and how they stand. */
 export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merging' | 'failed'> &
   Partial<
@@ -971,6 +985,7 @@ export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merg
       | 'fixAfterMerge'
       | 'leaveAfterMerge'
       | 'answeringAfterMerge'
+      | 'whenGreen'
     >
   >
 
@@ -1108,42 +1123,68 @@ const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | 
             {several.words}
           </Fact>,
         ]
+  // Its checks still running, all that stands in the way: Merge when checks pass, quiet, and once pressed, where it stands
+  // with Don't merge beside it; one that came back says why, first.
+  const green = actions?.whenGreen
+  const waitsGreen = green?.waiting(change) === true
+  const offersGreen =
+    green !== undefined && !waitsGreen && work.held === undefined && change.unpushed === 0 && mergesWhenGreen(change, standing)
+  const back = green?.back(change) ?? null
+  const label = `${change.prefix}${change.number}`
   // Failing checks its lead brought to the person (ADR-070): not asking it again. Why is in its task, not on the card.
-  const step =
-    next === null || (next.kind === 'fix' && work.checksBack != null) ? null : here === null || actions === undefined ? (
-      <NextStep>{nextWords(next)}</NextStep>
-    ) : here.kind === 'merge' ? (
-      <MergeButton
-        strip
-        busy={actions.merging.has(work.taskId)}
-        aria-label={labelWords(here, `${change.prefix}${change.number}`, failed !== null)}
-        onMerge={() => void actions.merge(work.taskId, change.head ?? '', change.url)}
-        {...(change.canBypassQueue === true
-          ? { onBypassQueue: () => void actions.merge(work.taskId, change.head ?? '', change.url, true) }
-          : {})}
-      >
-        {actions.merging.has(work.taskId) ? doingWords(here) : failed === null ? nextWords(here) : standingText.nextFailed.again}
-      </MergeButton>
-    ) : (
-      <NextStep
-        signal
-        busy={(here.kind === 'push' ? actions.pushing : actions.merging).has(work.taskId)}
-        doing={doingWords(here)}
-        label={labelWords(here, `${change.prefix}${change.number}`, failed !== null)}
-        onPress={() =>
-          void (here.kind === 'push' ? actions.push : actions.merge)(
-            work.taskId,
-            here.kind === 'push' ? (change.localHead ?? '') : (change.head ?? ''),
-            change.url,
-          )
-        }
-      >
-        {failed === null ? nextWords(here) : standingText.nextFailed.again}
-      </NextStep>
-    )
+  const step = waitsGreen ? (
+    <MergeButton
+      strip
+      whenGreen
+      standing={change.queued === true ? 'queued' : 'waiting'}
+      onLeave={() => green?.leave(work.taskId, change.url)}
+    />
+  ) : offersGreen ? (
+    <MergeButton
+      strip
+      whenGreen
+      aria-label={`${mergeButtonText.whenGreen}: ${label}`}
+      onMerge={() => green.press(work.taskId, change.url, change.head ?? '')}
+    />
+  ) : next === null || (next.kind === 'fix' && work.checksBack != null) ? null : here === null || actions === undefined ? (
+    <NextStep>{nextWords(next)}</NextStep>
+  ) : here.kind === 'merge' ? (
+    <MergeButton
+      strip
+      busy={actions.merging.has(work.taskId)}
+      aria-label={labelWords(here, `${change.prefix}${change.number}`, failed !== null)}
+      onMerge={() => void actions.merge(work.taskId, change.head ?? '', change.url)}
+      {...(change.canBypassQueue === true
+        ? { onBypassQueue: () => void actions.merge(work.taskId, change.head ?? '', change.url, true) }
+        : {})}
+    >
+      {actions.merging.has(work.taskId) ? doingWords(here) : failed === null ? nextWords(here) : standingText.nextFailed.again}
+    </MergeButton>
+  ) : (
+    <NextStep
+      signal
+      busy={(here.kind === 'push' ? actions.pushing : actions.merging).has(work.taskId)}
+      doing={doingWords(here)}
+      label={labelWords(here, `${change.prefix}${change.number}`, failed !== null)}
+      onPress={() =>
+        void (here.kind === 'push' ? actions.push : actions.merge)(
+          work.taskId,
+          here.kind === 'push' ? (change.localHead ?? '') : (change.head ?? ''),
+          change.url,
+        )
+      }
+    >
+      {failed === null ? nextWords(here) : standingText.nextFailed.again}
+    </NextStep>
+  )
   return {
     foot: (
       <FactLine>
+        {back !== null && (
+          <Fact key="back" icon="close" tone="danger" role="alert">
+            {back}
+          </Fact>
+        )}
         {failed !== null && here !== null && (
           <Fact key="failed" icon="close" tone="danger" role="alert">
             {standingText.nextFailed[here.kind](failed)}
@@ -1596,7 +1637,7 @@ export function BoardView({
             data-move={work.taskId}
             {...readyCardOf(work, actions)}
             {...parentOf(work, onOpen)}
-            errands={work.errands}
+            errands={withoutWaitShown(work, actions)}
             onOpen={() => onOpen(work.threadId)}
           />
         ))}

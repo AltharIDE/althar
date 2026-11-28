@@ -202,6 +202,7 @@ export function HomeView({
       doing,
       failed: (taskId) => model.failed[taskId],
       ...(onSignIn === undefined ? {} : { onSignIn }),
+      ...(model.whenGreen === undefined ? {} : { whenGreen: model.whenGreen }),
     }),
   }))
 

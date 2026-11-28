@@ -147,7 +147,11 @@ const said = (step: StepRow): SaidStep => ({
 })
 
 /** The reason kept when the person calls an errand off, which the agents read: their line says only that it is. */
-const CALLED_OFF = 'The person called it off.'
+export const CALLED_OFF = 'The person called it off.'
+
+/** What a press's errand's message id starts with: kept from a press in the window, not a message (`keepPressed`). */
+export const PRESSED = 'press:'
+const isPressed = (row: Pick<ErrandRow, 'messageId'>) => row.messageId.startsWith(PRESSED)
 
 type Store = SqlClient.SqlClient | Ledger | Instance | Crypto.Crypto
 const refused = (message: string) => new ToolRefused({ message })
@@ -218,6 +222,23 @@ export class Errands extends Context.Service<
     list(access: ToolAccess): Effect.Effect<string, ToolRefused>
     turn(access: ToolAccess): Effect.Effect<TurnWord, ToolRefused>
     keep(access: ToolAccess, messageId: string, steps: ReadonlyArray<ErrandStep>): Effect.Effect<string, ToolRefused>
+    /**
+     * Keeps an errand from a press of the person's in the window (Merge when checks pass), in `threadId`: the press is their
+     * word, so its steps are taken by Althar itself as they come due, with no agent's turn. `pressId` is the press's own id,
+     * so a press sent again adopts the errand it kept.
+     */
+    keepPressed(
+      projectId: string,
+      threadId: string,
+      pressId: string,
+      words: string,
+      steps: ReadonlyArray<ErrandStep>,
+    ): Effect.Effect<string, ToolRefused>
+    /**
+     * Calls an errand off from the runtime, with why, where it can't go on as asked: a press's merge whose checks failed, say.
+     * `byPerson` where the person's own press called it off (Don't merge), which its line says plainly.
+     */
+    callOff(errandId: string, reason: string, byPerson?: boolean): Effect.Effect<void, ToolRefused>
     pause(access: ToolAccess, id: string, reason: string): Effect.Effect<string, ToolRefused>
     resume(access: ToolAccess, id: string, messageId: string): Effect.Effect<string, ToolRefused>
     cancel(access: ToolAccess, id: string, messageId: string): Effect.Effect<string, ToolRefused>
@@ -401,10 +422,16 @@ export class Errands extends Context.Service<
           }),
         )
       const stepsOf = (id: string) => sql<StepRow>`SELECT * FROM errand_steps WHERE errand_id = ${id} ORDER BY position`
-      const keep = (access: ToolAccess, messageId: string, askedSteps: ReadonlyArray<ErrandStep>) =>
+      const keep = (
+        access: ToolAccess,
+        messageId: string,
+        askedSteps: ReadonlyArray<ErrandStep>,
+        // A press's words, which are its own: the window's press is the person's word, with no message to read it from.
+        pressed?: string,
+      ) =>
         sql.withTransaction(
           Effect.gen(function* () {
-            const words = yield* word(access, messageId)
+            const words = pressed ?? (yield* word(access, messageId))
             const steps: ErrandStep[] = []
             for (const step of askedSteps) {
               if (step.taskId === undefined) {
@@ -493,7 +520,9 @@ export class Errands extends Context.Service<
               actorId: instance.systemId,
               payload: { messageId, steps },
             })
-            yield* say(row, keptNote(words, steps), true)
+            const kept = keptNote(words, steps)
+            // A press says what it keeps, not what the person said: they pressed it.
+            yield* say(row, pressed === undefined ? kept : { title: kept.title, links: kept.links }, true)
             return id
           }),
         )
@@ -537,9 +566,12 @@ export class Errands extends Context.Service<
             const authorize = Effect.gen(function* () {
               if (action.errandId === undefined)
                 return yield* stands(tool, access, { messageId: action.messageId, target: action.target, request: action.request })
-              const current = yield* turn(access)
-              if (current.turnId === null) return yield* refused('An asked-for tool runs only during a live turn.')
               errand = yield* owned(access, action.errandId)
+              // A press's errand is the person's word as it stands: Althar takes its steps itself, in no turn.
+              if (!isPressed(errand)) {
+                const current = yield* turn(access)
+                if (current.turnId === null) return yield* refused('An asked-for tool runs only during a live turn.')
+              }
               const steps = yield* stepsOf(errand.id)
               step = steps.find((s) => s.stepKey === action.step)
               if (
@@ -763,6 +795,16 @@ export class Errands extends Context.Service<
           ),
         turn: (access) => provide(turn(access)),
         keep: (access, message, steps) => provide(keep(access, message, steps)),
+        keepPressed: (projectId, threadId, pressId, words, steps) =>
+          provide(keep({ role: 'coordinator', projectId, threadId, sessionId: '', taskId: null }, `${PRESSED}${pressId}`, steps, words)),
+        callOff: (errandId, reason, byPerson = false) =>
+          provide(
+            Effect.gen(function* () {
+              const [row] = yield* sql<ErrandRow>`SELECT * FROM errands WHERE id = ${errandId}`
+              if (row === undefined || row.state === 'done' || row.state === 'cancelled') return
+              yield* set(row, 'cancelled', byPerson ? CALLED_OFF : reason)
+            }),
+          ),
         retell: (errandId, note) =>
           provide(
             Effect.gen(function* () {

@@ -1922,6 +1922,18 @@ export const ChangeSummary = Schema.Struct({
   needs: Schema.optional(Schema.Array(MergeNeed)),
   /** The host explicitly allows this viewer to merge without its queue; the action rechecks it. */
   canBypassQueue: Schema.optional(Schema.Boolean),
+  /**
+   * Merge when checks pass, for an open one: `waiting` while Althar's merge line has it, to merge at `head` once its checks
+   * pass (through its host's queue, train or auto-merge where it has one), however it was asked for; `sent_back` where the
+   * last press came back without merging, with why, until it is pressed again. Absent where neither.
+   */
+  whenGreen: Schema.optional(
+    Schema.Struct({
+      state: Schema.Literals(['waiting', 'sent_back']),
+      head: Schema.String,
+      reason: Schema.optional(Schema.String),
+    }),
+  ),
 })
 export type ChangeSummary = typeof ChangeSummary.Type
 
@@ -6844,6 +6856,14 @@ const WorkApi = RpcGroup.make(
     },
     Schema.Void,
   ),
+  /**
+   * Merge when checks pass: puts the task's pull request at `url` in Althar's merge line at the head the person saw, to merge
+   * once its checks pass, through its host's merge queue, merge train or auto-merge where it has one. A failed check, a push
+   * or a conflict sends it back, saying why (`whenGreen`). Refused where it moved on since `head`.
+   */
+  command('MergeWhenGreen', { taskId: Schema.String, url: Schema.String, head: Schema.String }, Schema.Void),
+  /** Don't merge: takes the pull request at `url` out of the merge line, and out of its host's queue, train or auto-merge. */
+  command('LeaveMergeLine', { taskId: Schema.String, url: Schema.String }, Schema.Void),
   /**
    * Merges a task without a pull request into each of its repositories'
    * default branches on this Mac, up to the commit the person saw in each:

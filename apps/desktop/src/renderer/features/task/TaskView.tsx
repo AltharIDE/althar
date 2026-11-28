@@ -95,6 +95,7 @@ import { afterMergeText, readyWordOf, shipText } from '../../shared/standing'
 import { taskStatusOf } from '../../shared/taskStatus'
 import { stepNow, stepText, stoppedWords, trackFor } from '../../shared/steps'
 import { MERGE_QUEUE_STEP, queuedToMerge, shownChangeOf } from '../../data/merges'
+import { useWhenGreen } from '../../data/whenGreen'
 import { ago, clock, MINUTE, running, SECOND, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, type OutputSoFar, wholePath } from '../../shared/handed'
@@ -723,6 +724,18 @@ export function TaskView({
   // chat's, beside it in its room.
   const openCanvas = artifact?.onCanvas ?? host.openCanvas
   useCanvasArrivals(model.snapshot?.items, openCanvas)
+  // Merge when checks pass, on its Change card: waiting from the press, wherever it was pressed.
+  const green = useWhenGreen()
+  const greenTask = model.snapshot?.task.id ?? ''
+  const whenGreen = useMemo(
+    () => ({
+      waiting: green.waiting,
+      back: green.back,
+      onPress: (url: string, head: string) => green.press(greenTask, url, head),
+      onLeave: (url: string) => green.leave(greenTask, url),
+    }),
+    [green, greenTask],
+  )
   const shell = useMemo(
     () =>
       artifact === undefined
@@ -2039,6 +2052,7 @@ export function TaskView({
                   mergeRefused={model.mergeRefused}
                   mergeStanding={model.mergeStanding}
                   mergeAwaits={model.mergeAwaits}
+                  whenGreen={whenGreen}
                   onPostScreenshots={model.postScreenshots}
                   onOpenFile={changes.show}
                   conflict={model.conflict}
