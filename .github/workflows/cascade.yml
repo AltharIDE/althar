@@ -1,0 +1,91 @@
+name: cascade
+
+# Fixes cascade from a release branch to the next newer release branch of its line, and from the newest into main
+# (DEVELOPMENT.md, "Release branches"): release/0.9 → release/0.10 → main, release/host-0.2 → main. Each push to a
+# release branch opens, or brings up to date, one pull request from cascade/<source>-into-<target>, which merges by
+# itself once its checks pass: through main's merge queue, and into a release branch, whose rules require nothing, once
+# this job has seen its checks pass. The merge pushes to the target, which cascades on in turn. Run by hand with `cut` and
+# `at`, it cuts a release branch, first disarming the open cascades the new branch reroutes.
+#
+# A cascade that conflicts is committed with its conflict markers, and its pull request stays open as a draft that names
+# the files. Push the fix to its branch and mark it ready for review: once no conflict markers are left in those files,
+# it merges the same way. .github/scripts/cascade.py says how it works.
+#
+# It pushes and opens pull requests with CASCADE_TOKEN, a repository secret: GitHub starts no workflow for what the run's
+# own token does, so with it the pull request's checks, and the cascade from the branch it merges into, would never
+# run. A fine-grained token for this repository alone, with Contents, Pull requests and Workflows read and write (a
+# cascade can carry a change to .github/workflows).
+on:
+  push:
+    branches: ['release/**']
+  pull_request:
+    # A cascade a person made ready, once they fixed its conflicts, and one that merged, for what landed meanwhile.
+    types: [closed, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      from:
+        description: The release branch to cascade on, such as release/0.10
+        type: string
+      cut:
+        description: Or a release branch to cut, such as release/0.11 (with at)
+        type: string
+      at:
+        description: The tag to cut it at, such as v0.11.0
+        type: string
+
+permissions:
+  contents: read
+
+# One at a time from each release branch, so two pushes can't each open a pull request; a newer push waits.
+concurrency:
+  group: cascade-${{ inputs.from || inputs.cut || github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  cascade:
+    # Only a cascade's own pull requests, made ready or merged; any other's job is skipped. A deleted branch is none.
+    if: >-
+      (github.event_name == 'push' && !github.event.deleted) ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
+        startsWith(github.event.pull_request.head.ref, 'cascade/') &&
+        (github.event.action == 'ready_for_review' || github.event.pull_request.merged)) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    # The wait for a release branch's pull request's checks (cascade.py, under two hours), and the merge around it.
+    timeout-minutes: 120
+    steps:
+      - name: CASCADE_TOKEN is set
+        env:
+          TOKEN: ${{ secrets.CASCADE_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::The repository needs a secret CASCADE_TOKEN: a fine-grained token for it alone, with Contents," \
+              "Pull requests and Workflows read and write. DEVELOPMENT.md (\"Release branches\") says why."
+            exit 1
+          fi
+      - uses: actions/checkout@v5
+        with:
+          # Every branch, whole: the cascade reads both ends' history.
+          fetch-depth: 0
+          token: ${{ secrets.CASCADE_TOKEN }}
+      - env:
+          GH_TOKEN: ${{ secrets.CASCADE_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          # Into a release branch, whose rules require nothing, a cascade merges once this has passed on its head: queue's
+          # gate, which passes only once all of the pull request's own checks have (queue.yml runs on every one).
+          CASCADE_CHECKS: merge queue
+          EVENT: ${{ github.event_name }}
+          FROM: ${{ inputs.from }}
+          CUT: ${{ inputs.cut }}
+          AT: ${{ inputs.at }}
+          PULL: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ] && [ -n "$CUT" ]; then
+            python3 .github/scripts/cascade.py --cut "$CUT" --at "$AT"
+          elif [ "$EVENT" = workflow_dispatch ]; then
+            python3 .github/scripts/cascade.py --from "$FROM"
+          elif [ "$EVENT" = pull_request ]; then
+            python3 .github/scripts/cascade.py --pull "$PULL"
+          else
+            python3 .github/scripts/cascade.py --from "$GITHUB_REF_NAME"
+          fi

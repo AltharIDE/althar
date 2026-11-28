@@ -408,12 +408,13 @@ The host and its agents run as the home user and share that user's file access. 
 
 ## Producing a release
 
-The [host release workflow](../../.github/workflows/host-release.yml) builds native Linux x64 and arm64 releases and opens a draft after the exact `main` commit passes host and post-merge validation, waiting up to two hours for runs still going.
+The [host release workflow](../../.github/workflows/host-release.yml) builds native Linux x64 and arm64 releases and opens a draft after the exact commit passes host and post-merge validation, waiting up to two hours for runs still going: on `main`, or for a patch on its version's release branch (`release/host-0.2` for 0.2.3; [Release branches](../../DEVELOPMENT.md#release-branches)).
 
-1. Bump the version in `apps/host/package.json` and add `release-notes/<version>.md`.
-2. Once its validation has started or passed, tag that commit `host-v<version>` or dispatch the workflow on `main`.
+1. On `main`, or for a patch on its release branch, bump the version in `apps/host/package.json` and add `release-notes/<version>.md`.
+2. Once its validation has started or passed, tag that commit `host-v<version>` or dispatch the workflow on that branch.
 3. Use the protected `release` environment with `ALTHAR_HOST_RELEASE_SIGNING_KEY` set to the Ed25519 private PEM. Keep the private key out of Git, logs and release assets. Distribute the public key separately.
 4. Verify a reboot on a personal VPS and actual provider sign-in and refresh on a headless host. Publish the draft after those checks. Give a corrected release a new version and sequence so published signed assets stay immutable.
+5. For a new minor or major, cut its release branch at the tag through the cascade: `gh workflow run cascade.yml -f cut=release/host-0.3 -f at=host-v0.3.0`.
 
 A release is built with the public ids of Althar's own apps, from the repository variables `ALTHAR_GITHUB_CLIENT_ID`, `ALTHAR_GITHUB_APP`, `ALTHAR_GITLAB_CLIENT_ID` and, optionally, `ALTHAR_COPILOT_CLIENT_ID`; `bun run build` reads the same names from the environment or `apps/host/.env`, and the home's own environment overrides each at run time. A window attached to the home then offers GitHub's and GitLab's sign-in by a code: it shows in the window and the person approves in any browser. Linear's sign-in comes back to the computer's own loopback address, so a home doesn't offer it; Linear takes a pasted token there.
 

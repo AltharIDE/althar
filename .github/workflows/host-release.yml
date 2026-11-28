@@ -2,6 +2,10 @@ name: host-release
 
 # A separate tag/feed from the desktop. All assets remain in a draft until a
 # person publishes; this workflow never changes GitHub's desktop latest release.
+# A tag host-v<version> is cut on main, or for a patch on its release branch
+# (release/host-0.2 for 0.2.3) once it has one: DEVELOPMENT.md ("Release
+# branches"). Homes take the newest host version, so an older line's patch
+# never replaces a newer line.
 on:
   push:
     tags: ['host-v*']
@@ -41,11 +45,22 @@ jobs:
             echo '::error::Only stable host versions may be released.'
             exit 1
           fi
+          # A version's patches come from its release branch (release/host-0.2 for 0.2.3) once it has one; until then,
+          # and for a new minor or major, from main.
+          branch="release/host-${version%.*}"
+          from=main
+          if git rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null; then from="$branch"; fi
           if [ "$GITHUB_EVENT_NAME" = push ]; then
             test "$GITHUB_REF_NAME" = "$tag"
-            git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$from"; then
+              echo "::error::$tag is on a commit that isn't on $from. Host $version is cut from $from."
+              exit 1
+            fi
           else
-            test "$GITHUB_REF" = refs/heads/main
+            if [ "$GITHUB_REF" != "refs/heads/$from" ]; then
+              echo "::error::Run this by hand from $from: host $version is cut from there."
+              exit 1
+            fi
             if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
               echo '::error::This version is tagged already. Re-run its tag workflow or raise the version.'
               exit 1
