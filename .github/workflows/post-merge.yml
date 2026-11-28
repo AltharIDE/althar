@@ -6,16 +6,18 @@ name: post-merge
 # and the merge queue what its entries could break together on Linux (queue.yml); this is where
 # the full Windows unit suites run, within the hour of a merge. site and brand are quick, and still run in full on their own.
 # Main may go red for a while; a release can't: release.yml cuts only a commit this workflow passed on, Windows too.
+# It runs on each release branch too (release/0.10, release/host-0.2), for the patches released from there.
 #
 # Merges in quick succession share a run: one runs, the newest waits, and those between are skipped. When main goes
 # red, an issue titled "Main is red" says which run failed and which merges since the last green run could have broken
-# it; it is closed when main is green again.
+# it; it is closed when main is green again. A release branch's run that fails opens no issue: the release it would
+# cut waits for it.
 #
 # Run by hand on any branch or tag (`gh workflow run post-merge.yml --ref <branch>`) to try the heavy suites before
 # merging, or on a release tag whose commit was skipped.
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   workflow_dispatch:
     inputs:
       bun-cache:
