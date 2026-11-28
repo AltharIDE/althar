@@ -24,6 +24,7 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { approvalShort, routeOf, routeOfShip, setShipRoute, shipStopOf, shipUnderWayOf, taskShipRoute } from '../src/shipRoute'
 import { callTool, fakeConnectors, HOST, hosted, items, notices, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * A Ship's route (a task is a conversation plus parts, "Ship"): whether its
@@ -69,8 +70,7 @@ const onGitHub = (more: Omit<Parameters<typeof makeFakeService>[0] & object, 'pu
   const { working, bare } = hosted()
   const github = makeFakeService({ pushUrl: () => bare, ...more })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github }
 }
 

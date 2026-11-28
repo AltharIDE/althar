@@ -1296,6 +1296,15 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
             })
       const moved = plans.filter(({ plan }) => plan.kind === 'move')
       for (const { settle } of moved) yield* settle
+      // A merge commit git would have written as a test's identity was written as Althar's: said, with where it came from.
+      const warnings = new Set(plans.flatMap(({ plan }) => (plan.kind === 'move' && plan.warning !== null ? [plan.warning] : [])))
+      for (const warning of warnings)
+        yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
+          source: 'runtime',
+          severity: 'warning',
+          title: warning,
+          description: null,
+        })
       const merged = moved.map(({ repository }) => ({
         repository: repository.name,
         branch: repository.base,

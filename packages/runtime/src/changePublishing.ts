@@ -29,6 +29,7 @@ import {
 } from './changeRecords'
 import { type Connections, NotConnected } from './Connections'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
+import { type Committer, committerIdentity } from './commitIdentity'
 import { withoutAgentCredit } from './credit'
 import { envelope } from './envelope'
 import {
@@ -51,12 +52,13 @@ import { type Answers, answersOf, followUpBody, followUpWords } from './followUp
 import { baseBranch, forkOf, fromParent, tellOf, workRemotes } from './forks'
 import {
   branchExists,
-  committerIn,
   commitOf,
   commitsAhead,
   fetchInto,
   fetchedInto,
   git,
+  gitOutcomeWith,
+  gitWith,
   gitOutcome,
   namedRemotes,
   onHead,
@@ -385,15 +387,33 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
    * change is there already is left out. The files they conflict in, with
    * nothing picked left half done, or null once all are on it.
    */
-  const pickOnto = (path: string, commits: ReadonlyArray<string>) =>
+  /**
+   * The environment a commit Althar makes is written with: the person, as their own git commits, or Althar for a role
+   * git would write as no one or a test (commitIdentity.ts), which is said in the task's thread, naming the key, the
+   * value and the file it came from.
+   */
+  const committerIn = (path: string, to?: Pick<ChangeRow, 'projectId' | 'threadId'>) =>
     Effect.gen(function* () {
-      const as = yield* committerIn(path)
+      const { as, warning } = yield* committerIdentity(path)
+      if (warning !== null && to !== undefined && to.threadId !== null)
+        yield* addItem({ projectId: to.projectId, threadId: to.threadId }, 'notice', {
+          source: 'runtime',
+          severity: 'warning',
+          title: warning,
+          description: null,
+        })
+      return as
+    })
+
+  /** Cherry-picks `commits` onto the folder's HEAD, written as `as` (committerIn). */
+  const pickOnto = (path: string, commits: ReadonlyArray<string>, as: Committer) =>
+    Effect.gen(function* () {
       for (const commit of commits) {
-        if ((yield* gitOutcome(path, ...as, 'cherry-pick', commit)).code === 0) continue
+        if ((yield* gitOutcomeWith(as, path, 'cherry-pick', commit)).code === 0) continue
         const conflicted = (yield* gitOutcome(path, 'diff', '--name-only', '--diff-filter=U')).stdout
           .split('\n')
           .filter((file) => file !== '')
-        if (conflicted.length === 0 && (yield* gitOutcome(path, ...as, 'cherry-pick', '--skip')).code === 0) continue
+        if (conflicted.length === 0 && (yield* gitOutcomeWith(as, path, 'cherry-pick', '--skip')).code === 0) continue
         yield* gitOutcome(path, 'cherry-pick', '--abort')
         return conflicted
       }
@@ -473,15 +493,18 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
       const tail = start === null || accepted === undefined ? [] : yield* commits(source, accepted)
       if (task.acceptedHead !== undefined)
         yield* sql`UPDATE runs SET parameters = json_set(parameters, ${`$.ships.rebranching."${task.workspaceId}"`}, json(${JSON.stringify({ fromBranch: task.branch, fromHead: source, branch: fresh, recoveryBranch: recovery?.recoveryBranch, onto: start ?? source, copies: [...prefix, ...tail, ...carry], carry })})), revision = revision + 1 WHERE id = ${runId}`
+      // Who the picked commits are written as, resolved, and said, once for the switch.
+      let as: Committer | undefined
       if (start === null) yield* git(task.path, 'checkout', '-q', '-b', fresh)
       else {
         // The commits as the branch has them now, after the fetch: what the lead committed meanwhile goes too.
         const from = source
         // Keep later local commits on the task's new branch, but map the accepted prefix before carrying that tail on.
         yield* git(task.path, 'checkout', '-q', '-b', fresh, start)
-        let conflicted = yield* pickOnto(task.path, prefix)
+        as ??= yield* committerIn(task.path, { projectId, threadId: task.threadId })
+        let conflicted = yield* pickOnto(task.path, prefix, as)
         if (accepted !== undefined && conflicted === null) accepted = yield* commitOf(task.path, 'HEAD')
-        if (conflicted === null) conflicted = yield* pickOnto(task.path, tail)
+        if (conflicted === null) conflicted = yield* pickOnto(task.path, tail, as)
         // One committed as it switched would be left on the old branch alone: it goes back to it, and says the lead is at work.
         const moved = (yield* commitOf(task.path, `refs/heads/${task.branch}`).pipe(Effect.orElseSucceed(() => ''))) !== from
         if (conflicted !== null || moved) {
@@ -493,7 +516,10 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
           )
         }
       }
-      const carriedConflict = yield* pickOnto(task.path, carry)
+      const carriedConflict =
+        carry.length === 0
+          ? null
+          : yield* pickOnto(task.path, carry, (as ??= yield* committerIn(task.path, { projectId, threadId: task.threadId })))
       if (carriedConflict !== null) {
         yield* restore
         return yield* new NoChangeToOpen({ taskId, why: 'conflicts', detail: filesWord(carriedConflict) })
@@ -1287,7 +1313,7 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
         // Kept, so what it was on is never lost.
         yield* git(row.path, 'update-ref', `refs/althar/before-attach/${row.branch}`, before)
         yield* git(row.path, 'checkout', '-q', '-B', row.branch, tip)
-        const conflicted = yield* pickOnto(row.path, mine)
+        const conflicted = yield* pickOnto(row.path, mine, yield* committerIn(row.path, task))
         if (conflicted !== null) {
           yield* git(row.path, 'reset', '-q', '--hard', before)
           if (row.branched === 0) {
@@ -1579,11 +1605,11 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
       message: `${changeWords(one)} is in a folder another tool made, which Althar leaves where it is: its branch stays the task's, and the folder is that tool's to remove.`,
     })
 
-  const commitLeftIn = (path: string, message: string) =>
+  const commitLeftIn = (row: Pick<ChangeRow, 'path' | 'projectId' | 'threadId'>, message: string) =>
     Effect.gen(function* () {
-      if ((yield* uncommittedFiles(path)).length === 0) return false
-      yield* git(path, 'add', '-A')
-      yield* git(path, ...(yield* committerIn(path)), 'commit', '-q', '-m', message)
+      if ((yield* uncommittedFiles(row.path)).length === 0) return false
+      yield* git(row.path, 'add', '-A')
+      yield* gitWith(yield* committerIn(row.path, row), row.path, 'commit', '-q', '-m', message)
       return true
     })
 
@@ -1675,7 +1701,7 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
       const own = (yield* git(from.path, 'rev-list', '--reverse', '--no-merges', `${start}..${head}`))
         .split('\n')
         .filter((line) => line !== '')
-      const conflicted = yield* pickOnto(into.path, own)
+      const conflicted = yield* pickOnto(into.path, own, yield* committerIn(into.path, into))
       if (conflicted !== null)
         return yield* new ToolRefused({
           message: `${changeWords(from)}'s commits conflict with ${changeWords(into)} in ${filesWord(conflicted)}: both stay as they were.`,
@@ -1731,7 +1757,7 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
         return yield* new ToolRefused({
           message: `${changeWords(row)} is the task's only change: its lead needs a folder. Remove the task's worktree instead, which keeps its branch.`,
         })
-      const committed = yield* commitLeftIn(row.path, 'Work in progress, as its change was dropped')
+      const committed = yield* commitLeftIn(row, 'Work in progress, as its change was dropped')
       // Its folder goes, or back to the change that left it, and its row says so with nothing bringing the folder back
       // between (`withFolder`).
       yield* withFolder(
@@ -1793,7 +1819,7 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
       if (all.length > 1) return yield* new ToolRefused({ message: 'The task has several changes: name the one to drop.' })
       if (row.kind === 'checkout') return yield* new ToolRefused({ message: 'The task works Local: move it to a worktree first.' })
       if (row.madeBy !== null) return yield* madeElsewhere(row)
-      const committed = yield* commitLeftIn(row.path, 'Work in progress, as the task’s worktree was removed')
+      const committed = yield* commitLeftIn(row, 'Work in progress, as the task’s worktree was removed')
       const base = row.baseCommit ?? (yield* commitOf(row.path, 'HEAD'))
       yield* git(row.path, 'switch', '--quiet', '--detach', base)
       const sql = yield* SqlClient.SqlClient
@@ -1879,7 +1905,7 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
         if (open === undefined) {
           // Nothing pushed: the branch is rebased onto the new one, its commits written as the person's or Althar's. A conflict
           // stops it there, for the lead to finish; anything else puts it back as it was.
-          const rebased = yield* gitOutcome(row.path, ...(yield* committerIn(row.path)), 'rebase', '--onto', baseCommit, from)
+          const rebased = yield* gitOutcomeWith(yield* committerIn(row.path, row), row.path, 'rebase', '--onto', baseCommit, from)
           if (rebased.code !== 0) {
             stopped = (yield* gitOutcome(row.path, 'diff', '--name-only', '--diff-filter=U')).stdout
               .split('\n')
@@ -1897,7 +1923,7 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
           let fresh = `${row.branch}-2`
           for (let n = 3; yield* branchExists(row.path, fresh); n += 1) fresh = `${row.branch}-${n}`
           yield* git(row.path, 'checkout', '-q', '-b', fresh, baseCommit)
-          const conflicted = yield* pickOnto(row.path, own)
+          const conflicted = yield* pickOnto(row.path, own, yield* committerIn(row.path, row))
           if (conflicted !== null) {
             yield* Effect.ignore(git(row.path, 'checkout', '-q', row.branch))
             yield* Effect.ignore(git(row.path, 'branch', '-D', fresh))

@@ -1,4 +1,4 @@
-import { budget } from '@althar/testing'
+import { budget, identify } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -40,11 +40,6 @@ import { fakeConnectors, HOST, hosted, onTestClock, repository, runtime, until }
 
 /** Windows, where processes carry no mark to be found by. */
 const windows = process.platform === 'win32'
-
-const git = (cwd: string, ...args: Array<string>) =>
-  execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd })
-    .toString()
-    .trim()
 
 /** Every process on this computer marked as the task's work, by pid. */
 const markedFor = (taskId: string) =>
@@ -247,8 +242,7 @@ describe.skipIf(windows)('a task that settles', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const instance = yield* Instance

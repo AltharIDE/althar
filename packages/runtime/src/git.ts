@@ -215,6 +215,26 @@ export const gitOutcome = (
     })),
   )
 
+/** A git command run with `env` over Althar's own: a commit written as someone (commitIdentity.ts). */
+export const gitWith = (
+  env: Readonly<Record<string, string>>,
+  cwd: string,
+  ...args: ReadonlyArray<string>
+): Effect.Effect<string, GitFailed> => run(60_000, cwd, args, env)
+
+/** As `gitOutcome`, with `env` over Althar's own. */
+export const gitOutcomeWith = (
+  env: Readonly<Record<string, string>>,
+  cwd: string,
+  ...args: ReadonlyArray<string>
+): Effect.Effect<{ readonly code: number; readonly stdout: string }> =>
+  runProcess(60_000, cwd, args, env, undefined).pipe(
+    Effect.map(({ error, stdout }) => ({
+      code: error === null ? 0 : typeof error.code === 'number' ? error.code : 128,
+      stdout: stdout.trim(),
+    })),
+  )
+
 /** A git command's output exactly as it wrote it, for output whose spaces and last line matter, such as a diff. */
 export const gitExactly = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(60_000, cwd, args, {}, false)
@@ -222,14 +242,6 @@ export const gitExactly = (cwd: string, ...args: ReadonlyArray<string>): Effect.
 /** A git command with text on stdin, for lists too large to pass in its arguments. */
 export const gitWithInput = (cwd: string, input: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(60_000, cwd, args, {}, false, input)
-
-/** Who git commits as: the person, or Althar where this computer names no one. */
-export const committerIn = (cwd: string) =>
-  Effect.map(gitOutcome(cwd, 'config', 'user.email'), (email) =>
-    email.stdout !== '' || process.env.GIT_COMMITTER_EMAIL !== undefined
-      ? []
-      : ['-c', 'user.name=Althar', '-c', 'user.email=althar@localhost'],
-  )
 
 /** A blob's bytes, as base64, every byte as it was: a picture at a commit, which text would spoil. */
 export const blobBase64 = (cwd: string, object: string): Effect.Effect<string, GitFailed> =>

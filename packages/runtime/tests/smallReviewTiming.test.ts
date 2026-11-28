@@ -23,6 +23,7 @@ import { PlanParameters, Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { smallChangeSteps } from '../src/smallChange'
 import { callTool, fakeConnectors, HOST, hosted, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 const git = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()
 const BRANCH = 'althar/fix-the-run-menu'
@@ -43,8 +44,7 @@ const onHost = () => {
   const { working, bare } = hosted()
   const github = makeFakeService({ pushUrl: () => bare })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   const held = holds()
   const layer = Queries.layer.pipe(
     Layer.provideMerge(runtime(':memory:', { holds: held }, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })),

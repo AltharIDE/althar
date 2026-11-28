@@ -52,6 +52,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { addItem } from '../src/threads'
 import { fakeConnectors, HOST, hosted, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 /* Publication must serialize git and workspace updates with discovery of branches after a lead turn. */
 
@@ -169,8 +170,7 @@ describe('publication and branch discovery share the task git lock', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       const task = yield* fixed(working, bare, github)
       const sql = yield* SqlClient.SqlClient

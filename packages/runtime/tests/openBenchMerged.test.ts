@@ -1,4 +1,4 @@
-import { removeTreeSync } from '@althar/testing'
+import { identify, removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -48,8 +48,7 @@ describe('opening with tasks whose pull requests merged (bench)', () => {
       const { working, bare } = hosted()
       const github = makeFakeService({ pushUrl: () => bare })
       github.addRepository(['meridian', 'api'])
-      git(working, 'config', 'user.name', 'Fake')
-      git(working, 'config', 'user.email', 'fake@althar.test')
+      identify(working, 'Fake', 'fake@althar.test')
       const many = Number(process.env.BENCH_MERGED)
       // Every git the runtime runs, counted: a shim ahead of git on the PATH logs each call, then runs it.
       const shim = mkdtempSync(join(tmpdir(), 'althar-git-shim-'))

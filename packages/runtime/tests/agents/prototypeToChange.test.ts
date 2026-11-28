@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,6 +19,7 @@ import * as Runtime from '../../src/Runtime'
 import { Secrets } from '../../src/Secrets'
 import { Sessions } from '../../src/Sessions'
 import { fakeConnectors, HOST, hosted } from '../support'
+import { identify } from '@althar/testing'
 
 /*
  * A prototype becoming a change on the person's plain word, with a real lead (a task is a conversation plus parts; the
@@ -39,8 +39,7 @@ describe('a prototype made a change on the person’s plain word, on a real lead
     () => {
       const home = mkdtempSync(join(tmpdir(), 'althar-graduate-'))
       const { working, bare } = hosted()
-      execFileSync('git', ['config', 'user.name', 'Try'], { cwd: working })
-      execFileSync('git', ['config', 'user.email', 'try@althar.test'], { cwd: working })
+      identify(working, 'Try', 'try@althar.test')
       const github = makeFakeService({ pushUrl: () => bare })
       github.addRepository(['meridian', 'api'])
       const layer = Queries.layer.pipe(

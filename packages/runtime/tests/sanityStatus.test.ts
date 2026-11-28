@@ -15,6 +15,7 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import { ask, cards, connect, git, pushByHand, tipOf } from './changesSupport'
 import { fakeConnectors, HOST, hosted, repository, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * A sanity pass over what each surface says of a task. Here: how many things
@@ -169,8 +170,7 @@ describe('a ready change the person pushed to, before its host shows the new hea
       checksFor: (_: number, sha: string) => (first === null || sha === first ? [{ name: 'test', state: 'passed' as const }] : []),
     })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const changes = yield* Changes

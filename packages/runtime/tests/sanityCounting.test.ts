@@ -1,5 +1,3 @@
-import { execFileSync } from 'node:child_process'
-
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
@@ -21,6 +19,7 @@ import { shelve } from '../src/scratch'
 import type { ToolAccess } from '../src/ToolServer'
 import { ask, cards as changeCards, connect, runtimeWith as onHosts } from './changesSupport'
 import { callTool, fakeConnectors, HOST, hosted, repository, runtime, turns, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * A sanity pass over what counts, and what is said to count: a review that
@@ -32,8 +31,6 @@ import { callTool, fakeConnectors, HOST, hosted, repository, runtime, turns, unt
  */
 
 const GB = 1024 ** 3
-
-const git = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()
 
 /** The coordinator's thread of a project opened on `path`, and its tools' access. */
 const opened = (path: string) =>
@@ -286,8 +283,7 @@ const onGitHub = () => {
   const { working, bare } = hosted()
   const github = makeFakeService({ pushUrl: () => bare })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github }
 }
 

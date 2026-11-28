@@ -14,6 +14,7 @@ import { Projects } from '../src/Projects'
 import { pathsPushed } from '../src/repositoryGuard'
 import * as Runtime from '../src/Runtime'
 import { repository, runtime } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * The push guard (docs/plans/skills-across-harnesses.md, section 4): skill and OpenSpec files do not leave the
@@ -95,8 +96,7 @@ describe('the paths a push would send', () => {
 /** A project with a task whose origin is a bare repository here, as the localMerge tests make one. */
 const taskWithRemote = Effect.gen(function* () {
   const root = repository()
-  git(root, 'config', 'user.name', 'T')
-  git(root, 'config', 'user.email', 't@t.test')
+  identify(root, 'T', 't@t.test')
   const remote = mkdtempSync(join(tmpdir(), 'althar-remote-'))
   git(remote, 'init', '-q', '--bare', '-b', 'main')
   git(root, 'remote', 'add', 'origin', remote)

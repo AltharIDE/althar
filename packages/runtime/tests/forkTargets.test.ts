@@ -17,6 +17,7 @@ import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ask, cards, connect, git, pushByHand, runtimeWith } from './changesSupport'
 import { HOST, hosted, pushLog, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * Where a fork's tasks' branches go (ADR-085): the fork, until the project
@@ -56,8 +57,7 @@ const forkClone = (
 ) => {
   const { working, bare: fork } = hosted(FORK)
   git(working, 'remote', 'add', options.parent ?? 'upstream', `${HOST}/${UPSTREAM.join('/')}.git`)
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   const upstream = mkdtempSync(join(tmpdir(), 'althar-remote-'))
   git(upstream, 'init', '-q', '--bare', '-b', 'main')
   git(working, 'push', '-q', upstream, 'main')
@@ -469,8 +469,7 @@ describe('a pull request whose host doesn’t say where its branch is', () => {
 
   it.live('still takes them in a normal project, whose branch is on its own repository', () => {
     const { working, bare } = hosted(FORK)
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     const github = makeFakeService({
       saysHead: false,
       headOf: () => (hasBranch(bare) ? git(bare, 'rev-parse', BRANCH) : null),

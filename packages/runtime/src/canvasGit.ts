@@ -9,7 +9,8 @@ import { Effect } from 'effect'
 import { type CopyFile, writeCopy } from './canvasFiles'
 import type { Connections } from './Connections'
 import { GitFailed } from './errors'
-import { addDetachedWorktree, committerIn, defaultBranch, git, gitOutcome, gitWithInput } from './git'
+import { committerIdentity } from './commitIdentity'
+import { addDetachedWorktree, defaultBranch, git, gitOutcome, gitWith, gitWithInput } from './git'
 import { ToolRefused } from './ToolServer'
 
 export const refuse = (message: string) => new ToolRefused({ message })
@@ -231,6 +232,6 @@ export const stageCanvas = (
 
 export const commitCanvas = (worktree: string, message: string) =>
   Effect.gen(function* () {
-    yield* git(worktree, ...(yield* committerIn(worktree)), 'commit', '--allow-empty', '-q', '-m', message)
+    yield* gitWith((yield* committerIdentity(worktree)).as, worktree, 'commit', '--allow-empty', '-q', '-m', message)
     return yield* git(worktree, 'rev-parse', 'HEAD')
   })

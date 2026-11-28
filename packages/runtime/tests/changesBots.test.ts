@@ -6,7 +6,8 @@ import { SqlClient } from 'effect/sql'
 import { Changes } from '../src/Changes'
 import { HOST, hosted, until } from './support'
 
-import { arrivals, ask, cards, connect, git, runtimeWith, tipOf } from './changesSupport'
+import { arrivals, ask, cards, connect, runtimeWith, tipOf } from './changesSupport'
+import { identify } from '@althar/testing'
 
 /*
  * The review and triage bots a project trusts (code-hosts § Review and triage bots): what a trusted one
@@ -21,8 +22,7 @@ describe('the bots a project trusts', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:pass]', {

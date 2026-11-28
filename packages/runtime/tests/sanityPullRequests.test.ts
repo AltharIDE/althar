@@ -17,6 +17,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { callTool, fakeConnectors, HOST, hosted, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * A sanity pass over what each surface says of a task's pull request: here, what the coordinator is told of commits that
@@ -37,8 +38,7 @@ const onGitHub = () => {
   const { working, bare } = hosted()
   const github = makeFakeService({ pushUrl: () => bare })
   github.addRepository(['meridian', 'api'])
-  git(working, 'config', 'user.name', 'Fake')
-  git(working, 'config', 'user.email', 'fake@althar.test')
+  identify(working, 'Fake', 'fake@althar.test')
   return { working, bare, github }
 }
 

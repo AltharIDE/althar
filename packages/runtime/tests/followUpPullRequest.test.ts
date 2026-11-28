@@ -20,6 +20,7 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { addItem } from '../src/threads'
 import { fakeConnectors, HOST, hosted, runtime, until } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * A task whose first pull request merged, and whose review after the merge found something the person had its lead fix: the fix
@@ -134,8 +135,7 @@ describe('a task whose first pull request merged and whose follow-up is open wit
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       const task = yield* fixed(working, bare, github)
       const changes = yield* Changes
@@ -191,8 +191,7 @@ describe('a task whose first pull request merged and whose follow-up is open wit
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       const task = yield* fixed(working, bare, github)
       const sql = yield* SqlClient.SqlClient
@@ -221,8 +220,7 @@ describe('a task whose first pull request merged and whose follow-up is open wit
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
-    git(working, 'config', 'user.name', 'Fake')
-    git(working, 'config', 'user.email', 'fake@althar.test')
+    identify(working, 'Fake', 'fake@althar.test')
     return Effect.gen(function* () {
       const task = yield* fixed(working, bare, github)
       const sql = yield* SqlClient.SqlClient

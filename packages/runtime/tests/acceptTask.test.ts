@@ -24,6 +24,7 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, callToolAtOnce, fakeConnectors, HOST, hosted, notices, repository as bare, runtime, until, withWork } from './support'
+import { identify } from '@althar/testing'
 
 /*
  * The coordinator accepting a task as the person's Accept on its card does
@@ -45,8 +46,7 @@ const git = (cwd: string, ...args: Array<string>) =>
  */
 const repository = () => {
   const root = bare()
-  git(root, 'config', 'user.name', 'T')
-  git(root, 'config', 'user.email', 't@t.test')
+  identify(root, 'T', 't@t.test')
   return root
 }
 
