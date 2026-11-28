@@ -13,11 +13,12 @@ mkdir -m 0755 -- "$output"
   cargo build --locked --release -p althar-worker --bin althar-worker
 )
 # The host's release carries node-pty built for this machine. Linux has no prebuild of it, and an install that skipped
-# its script (as CI's does) left it uncompiled, so compile it here.
+# its script (as CI's does) left it uncompiled, so compile it here, with the host's own locked node-gyp.
 pty=$(cd "$repo/apps/host" && node -p 'require("path").dirname(require.resolve("node-pty/package.json"))')
+gyp=$(cd "$repo/apps/host" && node -p 'require.resolve("node-gyp/bin/node-gyp.js")')
 own=$(node -p 'process.platform + "-" + process.arch')
 if [[ ! -e "$pty/build/Release/pty.node" && ! -e "$pty/prebuilds/$own/pty.node" ]]; then
-  (cd "$pty" && npx --yes node-gyp@12.4.0 rebuild)
+  (cd "$pty" && node "$gyp" rebuild)
 fi
 target=$(cd "$repo" && cargo metadata --no-deps --format-version 1 | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).target_directory')
 (
