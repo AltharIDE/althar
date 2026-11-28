@@ -1,4 +1,29 @@
+/** The most a worker that doesn't keep history (one set up before it did) takes in one send: its whole bundle. */
 export const MAX_WORKER_BUNDLE_BYTES = 128 * 1024 * 1024
+/**
+ * The most a worker that keeps each project's history takes in one send, as the protocol's 32-bit size allows. Only its
+ * first send for a project carries the history; later ones carry what its copy lacks.
+ */
+export const MAX_WORKER_HISTORY_BYTES = 2 ** 32 - 1
+/** The most commits of one project's history a worker says it holds, newest first. */
+export const MAX_WORKER_HISTORY_COMMITS = 32
+/** The most projects whose history a worker says it holds. */
+export const MAX_WORKER_HISTORIES = 64
+/** A size for the person: 12 KB, 3.4 MB, 81 MB, 1.2 GB. */
+export const sendSizeWords = (bytes: number): string => {
+  const units = [
+    [1024 ** 3, 'GB'],
+    [1024 ** 2, 'MB'],
+    [1024, 'KB'],
+  ] as const
+  for (const [size, unit] of units) {
+    if (bytes < size) continue
+    const value = bytes / size
+    return `${value < 10 ? Number(value.toFixed(1)) : Math.round(value)} ${unit}`
+  }
+  return `${bytes} bytes`
+}
+
 export const gitObjectId = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/
 
 export interface WorkerCheckout {
@@ -8,10 +33,16 @@ export interface WorkerCheckout {
   readonly contents: (signal: AbortSignal) => AsyncIterable<Uint8Array>
 }
 
-export const validCheckout = (checkout: WorkerCheckout): boolean =>
+/** What one send to a worker may be: whole and small for one that doesn't keep history, up to 4 GiB for one that does. */
+export const sendLimitOf = (keepsHistory: boolean): number => (keepsHistory ? MAX_WORKER_HISTORY_BYTES : MAX_WORKER_BUNDLE_BYTES)
+
+/** How much longer a send of `bytes` may take than a small one: as at 256 KiB a second, a slow link's pace. */
+export const transferMsOf = (bytes: number): number => Math.ceil(bytes / (256 * 1024)) * 1_000
+
+export const validCheckout = (checkout: WorkerCheckout, maxBytes = MAX_WORKER_BUNDLE_BYTES): boolean =>
   Number.isSafeInteger(checkout.size) &&
   checkout.size > 0 &&
-  checkout.size <= MAX_WORKER_BUNDLE_BYTES &&
+  checkout.size <= maxBytes &&
   checkout.sha256.byteLength === 32 &&
   gitObjectId.test(checkout.head)
 

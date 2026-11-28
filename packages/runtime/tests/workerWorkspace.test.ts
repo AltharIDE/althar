@@ -1,11 +1,13 @@
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Exit } from 'effect'
 import { git, treeOf } from '../src/git'
-import { acceptWorkerPatch, prepareWorkerWorkspace, verifyWorkerIndex } from '../src/workerWorkspace'
+import { acceptWorkerPatch, prepareWorkerWorkspace, sendSizeWords, sentWords, verifyWorkerIndex } from '../src/workerWorkspace'
 import { repository } from './support'
 
 it.live('transfers a task checkout, imports the worker’s original commit and keeps later uncommitted files', () =>
@@ -13,7 +15,7 @@ it.live('transfers a task checkout, imports the worker’s original commit and k
     Effect.gen(function* () {
       const home = repository()
       const worker = repository()
-      const source = yield* prepareWorkerWorkspace(home, 128 * 1024 * 1024)
+      const source = yield* prepareWorkerWorkspace(home, { maxBytes: 128 * 1024 * 1024 })
       const exported = join(worker, '.git', 'input.bundle')
       const archive = yield* Effect.promise(async (signal) => {
         const chunks = []
@@ -47,8 +49,8 @@ it.live('transfers a task checkout, imports the worker’s original commit and k
       assert.include(wrongCommit.reason, 'sent a different commit')
       const notOwned = yield* Effect.flip(acceptWorkerPatch(home, source, changes, () => false))
       assert.include(notOwned.reason, 'no longer owns')
-      const tooSmall = yield* Effect.flip(prepareWorkerWorkspace(home, 7))
-      assert.include(tooSmall.reason, 'exceed the worker bundle size')
+      const tooSmall = yield* Effect.flip(prepareWorkerWorkspace(home, { maxBytes: 7 }))
+      assert.include(tooSmall.reason, 'the worker takes at most 7 bytes in one send')
       const mismatch = yield* Effect.flip(acceptWorkerPatch(home, source, { ...changes, tree: source.tree }))
       assert.include(mismatch.reason, 'does not match its reported checkout')
       assert.strictEqual(yield* git(home, 'rev-parse', 'HEAD'), source.head)
@@ -58,7 +60,8 @@ it.live('transfers a task checkout, imports the worker’s original commit and k
       assert.include(revoked.reason, 'no longer owns this run')
       assert.strictEqual(yield* git(home, 'rev-parse', 'HEAD'), source.head)
       assert.strictEqual(yield* treeOf(home), source.tree)
-      yield* acceptWorkerPatch(home, source, changes)
+      // Its commits as the worker pool hands them over: in the file they were received into.
+      yield* acceptWorkerPatch(home, source, { ...changes, commits: { file: received, size: changes.commits.byteLength } })
       assert.strictEqual(yield* git(home, 'rev-parse', 'HEAD'), head)
       assert.strictEqual(readFileSync(join(home, 'draft.txt'), 'utf8'), 'Uncommitted work\n')
       assert.strictEqual(yield* git(home, 'status', '--porcelain'), '?? draft.txt')
@@ -89,11 +92,180 @@ it.live('reconstructs a worker index in private Git objects and leaves the home�
       assert.strictEqual(index, staged)
       assert.strictEqual(yield* git(home, 'write-tree'), base)
       assert.strictEqual(readFileSync(join(home, 'README.md'), 'utf8'), '# Meridian\n')
-      const archive = yield* prepareWorkerWorkspace(home, 128 * 1024 * 1024, true, index)
+      const archive = yield* prepareWorkerWorkspace(home, { maxBytes: 128 * 1024 * 1024 }, true, index)
       assert.strictEqual(archive.index, index)
       assert.strictEqual(archive.head, head)
       assert.include((yield* Effect.flip(verifyWorkerIndex(home, base, { tree: staged, patch: Buffer.alloc(0) }))).reason, 'do not match')
       assert.include((yield* Effect.flip(verifyWorkerIndex(home, base, { tree: base, patch }))).reason, 'do not match')
+    }),
+  ),
+)
+
+/** A send's bytes, as the worker receives them. */
+const bytesOf = (source: { readonly contents: (signal: AbortSignal) => AsyncIterable<Uint8Array> }) =>
+  Effect.promise(async (signal) => {
+    const chunks = []
+    for await (const chunk of source.contents(signal)) chunks.push(chunk)
+    return Buffer.concat(chunks)
+  })
+
+const commitAll = (cwd: string, message: string) => {
+  execFileSync('git', ['add', '-A'], { cwd })
+  execFileSync('git', ['-c', 'user.name=Home', '-c', 'user.email=home@althar.test', 'commit', '-qm', message], { cwd })
+}
+
+it.live('sends a worker that keeps the history only what its copy lacks, and it builds the checkout from both', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const home = repository()
+      // History the worker will hold: a large file that later sends must not carry again.
+      writeFileSync(join(home, 'assets.bin'), randomBytes(2 * 1024 * 1024))
+      commitAll(home, 'Large history')
+      const first = yield* prepareWorkerWorkspace(home, { maxBytes: 2 ** 32 - 1, keeps: true, known: [] })
+      assert.isFalse(first.thin)
+      assert.isAbove(first.size, 2 * 1024 * 1024)
+      // The worker's copy of the history, as it keeps it after its first send.
+      const copy = mkdtempSync(join(tmpdir(), 'althar-worker-history-'))
+      execFileSync('git', ['init', '-q', '--bare', copy])
+      const firstBundle = join(copy, 'first.bundle')
+      writeFileSync(firstBundle, yield* bytesOf(first))
+      yield* git(copy, 'fetch', '--no-tags', firstBundle, `refs/althar/worker-snapshot:refs/althar/known/${first.head}`)
+      yield* git(copy, 'update-ref', `refs/althar/known/${first.head}`, first.head)
+
+      writeFileSync(join(home, 'README.md'), '# Meridian, again\n')
+      commitAll(home, 'A new commit on the task')
+      writeFileSync(join(home, 'draft.txt'), 'Not committed yet\n')
+      // A commit the home doesn't have is left alone; one it does is left out.
+      const second = yield* prepareWorkerWorkspace(home, { maxBytes: 2 ** 32 - 1, keeps: true, known: ['b'.repeat(40), first.head] })
+      assert.isTrue(second.thin)
+      assert.isBelow(second.size, 64 * 1024)
+      assert.isBelow(second.size * 20, first.size)
+      const secondBundle = join(copy, 'second.bundle')
+      writeFileSync(secondBundle, yield* bytesOf(second))
+      assert.include(yield* git(copy, 'bundle', 'verify', secondBundle), first.head)
+      yield* git(copy, 'fetch', '--no-tags', secondBundle, 'refs/althar/worker-snapshot:refs/althar/incoming')
+      assert.strictEqual(yield* git(copy, 'rev-parse', 'refs/althar/incoming^'), second.head)
+      assert.strictEqual(yield* git(copy, 'rev-parse', 'refs/althar/incoming^{tree}'), second.tree)
+      assert.strictEqual(yield* git(copy, 'show', 'refs/althar/incoming:draft.txt'), 'Not committed yet')
+
+      // A worker that hasn't the history can't take the thin send.
+      const fresh = mkdtempSync(join(tmpdir(), 'althar-worker-fresh-'))
+      execFileSync('git', ['init', '-q', '--bare', fresh])
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(git(fresh, 'fetch', '--no-tags', secondBundle, 'refs/althar/worker-snapshot'))))
+    }),
+  ),
+)
+
+it.live('says what makes a send too large for the worker, and what to do', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const home = repository()
+      writeFileSync(join(home, 'history.bin'), randomBytes(256 * 1024))
+      commitAll(home, 'History')
+      // Too large for a worker that doesn't keep history: updating it is the way.
+      const older = yield* Effect.flip(prepareWorkerWorkspace(home, { maxBytes: 64 * 1024 }))
+      assert.match(
+        older.reason ?? '',
+        /^The task’s Git history and changes come to \d+ KB; the worker takes at most 64 KB in one send\. Update the worker/,
+      )
+      // Too large for one that does: its history is, so it runs on the home.
+      const keeping = yield* Effect.flip(prepareWorkerWorkspace(home, { maxBytes: 64 * 1024, keeps: true }))
+      assert.include(keeping.reason, 'Run this task on the home instead.')
+      // A large file nobody committed or ignored is most of it: named, with what to do.
+      writeFileSync(join(home, 'dump.sql'), randomBytes(1024 * 1024))
+      const stray = yield* Effect.flip(prepareWorkerWorkspace(home, { maxBytes: 512 * 1024, keeps: true }))
+      assert.include(stray.reason, 'Most of it is dump.sql (1 MB), which isn’t committed or ignored: add it to .gitignore')
+    }),
+  ),
+)
+
+it('says how much a send was and what it carried', () => {
+  assert.strictEqual(sendSizeWords(512), '512 bytes')
+  assert.strictEqual(sendSizeWords(12 * 1024 + 300), '12 KB')
+  assert.strictEqual(sendSizeWords(3.42 * 1024 ** 2), '3.4 MB')
+  assert.strictEqual(sendSizeWords(81 * 1024 ** 2), '81 MB')
+  assert.strictEqual(sendSizeWords(1.25 * 1024 ** 3), '1.3 GB')
+  assert.strictEqual(
+    sentWords({ bytes: 12 * 1024, thin: true, keeps: true }, 'Niko’s box'),
+    'Sent 12 KB to Niko’s box: only what’s new to the history it keeps.',
+  )
+  assert.include(
+    sentWords({ bytes: 81 * 1024 ** 2, thin: false, keeps: true }, 'Niko’s box'),
+    'Sent 81 MB to Niko’s box: the project’s history',
+  )
+  assert.include(sentWords({ bytes: 81 * 1024 ** 2, thin: false, keeps: false }, 'Niko’s box'), 'Update the worker')
+})
+
+it.live('leaves out a large uncommitted file the worker was sent before, as its last send’s commit holds it', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const home = repository()
+      const head = yield* git(home, 'rev-parse', 'HEAD')
+      // A large file the task made and hasn't committed, and a large change to one Git tracks.
+      writeFileSync(join(home, 'model.bin'), randomBytes(2 * 1024 * 1024))
+      writeFileSync(join(home, 'README.md'), randomBytes(1024 * 1024).toString('base64'))
+      const limits = { maxBytes: 2 ** 32 - 1, keeps: true }
+      const first = yield* prepareWorkerWorkspace(home, { ...limits, known: [head] })
+      assert.isAbove(first.size, 2 * 1024 * 1024)
+      // It leaves out the history the worker holds, and its commit's first parent is still HEAD.
+      assert.isTrue(first.thin)
+      const whole = yield* prepareWorkerWorkspace(home, limits)
+      assert.isAbove(whole.size, first.size)
+      // Unchanged since, and a small edit beside it: the worker holds the first send's commit, so only the edit goes.
+      writeFileSync(join(home, 'notes.txt'), 'A small edit\n')
+      const second = yield* prepareWorkerWorkspace(home, { ...limits, known: [first.basis, head] })
+      assert.isTrue(second.thin)
+      assert.isBelow(second.size, 16 * 1024)
+      // The worker's copy, holding the first send, takes the second.
+      const copy = mkdtempSync(join(tmpdir(), 'althar-worker-history-'))
+      execFileSync('git', ['init', '-q', '--bare', copy])
+      // It holds the history already, from an earlier send.
+      const wholeBundle = join(copy, 'whole.bundle')
+      writeFileSync(wholeBundle, yield* bytesOf(whole))
+      yield* git(copy, 'fetch', '--no-tags', wholeBundle, `refs/althar/worker-snapshot:refs/althar/known/${head}`)
+      yield* git(copy, 'update-ref', `refs/althar/known/${head}`, head)
+      const firstBundle = join(copy, 'first.bundle')
+      writeFileSync(firstBundle, yield* bytesOf(first))
+      yield* git(copy, 'fetch', '--no-tags', firstBundle, 'refs/althar/worker-snapshot:refs/althar/incoming')
+      // The worker keeps the first send's files as the same commit the home made of them.
+      const kept = execFileSync(
+        'git',
+        ['commit-tree', yield* git(copy, 'rev-parse', 'refs/althar/incoming^{tree}'), '-m', 'Althar worker basis'],
+        {
+          cwd: copy,
+          env: {
+            ...process.env,
+            GIT_AUTHOR_NAME: 'Althar',
+            GIT_AUTHOR_EMAIL: 'althar@localhost',
+            GIT_COMMITTER_NAME: 'Althar',
+            GIT_COMMITTER_EMAIL: 'althar@localhost',
+            GIT_AUTHOR_DATE: '1700000000 +0000',
+            GIT_COMMITTER_DATE: '1700000000 +0000',
+          },
+        },
+      )
+        .toString()
+        .trim()
+      assert.strictEqual(kept, first.basis)
+      yield* git(copy, 'update-ref', `refs/althar/known/${kept}`, kept)
+      yield* git(copy, 'update-ref', '-d', 'refs/althar/incoming')
+      const secondBundle = join(copy, 'second.bundle')
+      writeFileSync(secondBundle, yield* bytesOf(second))
+      yield* git(copy, 'fetch', '--no-tags', secondBundle, 'refs/althar/worker-snapshot:refs/althar/incoming')
+      assert.strictEqual(yield* git(copy, 'rev-parse', 'refs/althar/incoming:model.bin'), yield* git(home, 'hash-object', 'model.bin'))
+    }),
+  ),
+)
+
+it.live('tells a large change to a file Git tracks from a new one: ignoring it would change nothing', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const home = repository()
+      writeFileSync(join(home, 'README.md'), randomBytes(1024 * 1024).toString('base64'))
+      const tracked = yield* Effect.flip(prepareWorkerWorkspace(home, { maxBytes: 256 * 1024, keeps: true }))
+      assert.include(tracked.reason, 'Most of it is an uncommitted change to README.md')
+      assert.include(tracked.reason, 'undo it with git restore README.md')
+      assert.notInclude(tracked.reason ?? '', '.gitignore')
     }),
   ),
 )

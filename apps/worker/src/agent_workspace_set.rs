@@ -7,13 +7,12 @@ use std::{
 use rustix::fs::{CWD, RenameFlags, renameat_with};
 
 use crate::{
-    agent_workspace::{MAX_BUNDLE_BYTES, WorkspaceTransfer, private_directory},
+    agent_workspace::{WorkspaceTransfer, private_directory},
     valid_id,
     wire::{AgentWorkspaceRepository, AgentWorkspaceSource},
 };
 
 const MAX_REPOSITORIES: usize = 8;
-const MAX_SET_BYTES: u64 = 2 * MAX_BUNDLE_BYTES as u64;
 
 fn invalid() -> io::Error {
     io::Error::new(
@@ -53,6 +52,8 @@ impl AgentWorkspace {
 
 pub(crate) struct WorkspaceSet {
     staging: PathBuf,
+    /// The project's folder, where its copy of the history is kept: each repository's send goes through it.
+    project: PathBuf,
     destination: PathBuf,
     installed: AgentWorkspace,
 }
@@ -67,7 +68,6 @@ impl WorkspaceSet {
         if !(2..=MAX_REPOSITORIES).contains(&repos.len()) {
             return Err(invalid());
         }
-        let mut sizes = 0_u64;
         let mut names = HashSet::new();
         let mut repositories = BTreeMap::new();
         for entry in repos {
@@ -86,10 +86,10 @@ impl WorkspaceSet {
             {
                 return Err(invalid());
             }
-            sizes += u64::from(entry.source.as_ref().ok_or_else(invalid)?.size);
-        }
-        if sizes > MAX_SET_BYTES {
-            return Err(invalid());
+            // Each repository's send is bounded by its own size; after the first, it carries only what the copy lacks.
+            if entry.source.is_none() {
+                return Err(invalid());
+            }
         }
         if !repositories.contains_key(primary) {
             return Err(invalid());
@@ -114,6 +114,7 @@ impl WorkspaceSet {
         };
         Ok(Self {
             staging,
+            project: project.to_owned(),
             destination,
             installed,
         })
@@ -131,6 +132,7 @@ impl WorkspaceSet {
                     self.staging.join(&entry.directory),
                     &entry.workspace_id,
                     source,
+                    &self.project,
                 )?;
                 Ok((transfer, source))
             })

@@ -36,6 +36,8 @@ const hello = (workerId: string, release: string, updatesOnRequest = true): Agen
   release,
   updatesOnRequest,
   reserveBeforeTransfer: false,
+  keepsHistory: false,
+  histories: [],
   version: 1,
   workerId,
   journalId,
@@ -163,6 +165,7 @@ it.live('asks a worker at work once its run ends, on its next stream, and says w
         case: 'exit',
         value: {
           $typeName: 'althar.worker.v1.AgentRunExit',
+          problem: '',
           workerBusy: false,
           runId: started.value.runId,
           outcome: AgentRunOutcome.STOPPED,

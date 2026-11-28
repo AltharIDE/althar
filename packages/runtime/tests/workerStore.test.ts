@@ -113,6 +113,7 @@ describe('the private worker ledger', () => {
       expect(reopened.agents.begin(other, replaced)).toBe(false)
       const stopped: AgentRunExit = {
         $typeName: 'althar.worker.v1.AgentRunExit',
+        problem: '',
         workerBusy: false,
         runId: run.runId,
         outcome: AgentRunOutcome.STOPPED,

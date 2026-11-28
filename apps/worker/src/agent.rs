@@ -26,9 +26,11 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Streaming, transport::Channel};
 
 use crate::{
-    PROTOCOL_VERSION,
+    MAX_HELLO_BYTES, PROTOCOL_VERSION,
     agent_capacity::worker_capacity,
+    agent_checkpoint::{CheckpointLimits, Written},
     agent_files::send_file,
+    agent_history,
     agent_managed::ManagedCommands,
     agent_readiness::readiness_from,
     agent_reservation::{agent_service, reserve},
@@ -505,6 +507,10 @@ struct Slot {
     until: Instant,
     workspace_root: PathBuf,
     reserve_before_transfer: bool,
+    /// How much of a checkpoint its home takes at once, as its hello said.
+    checkpoint_limits: CheckpointLimits,
+    /// Why its last start failed, in words for the home, where it knows them.
+    problem: Option<String>,
     /// Where it keeps which agents are signed in, and the agents it has: said again with its capacity.
     sign_ins: Option<(PathBuf, Vec<String>)>,
 }
@@ -878,7 +884,7 @@ async fn serve_agent(
                 Some(HomeMessage::Snapshot(request)) if request.run_id == run.run_id && checkpoints.is_empty() => {
                     let path = workspace.checkout(&request.workspace_id)
                         .or_else(|| managed.checkout(&request.workspace_id)).map(Path::to_owned);
-                    checkpoints.spawn(send_snapshot(slot.outgoing.clone(), path, request));
+                    checkpoints.spawn(send_snapshot(slot.outgoing.clone(), path, request, slot.checkpoint_limits));
                 }
                 Some(HomeMessage::FileRequest(request)) if files.len() < 2 => {
                     let file = request.file.as_ref().ok_or_else(|| invalid("No worker file identity"))?;
@@ -919,105 +925,123 @@ async fn serve_agent(
     }
 }
 
+/// How a checkpoint part's bytes go to the home: as a patch, a staged patch or commits.
+type PartFrame = fn(AgentRunBytes) -> WorkerMessage;
+
 async fn send_snapshot(
     outgoing: Sender,
     cwd: Option<PathBuf>,
     request: AgentSnapshotRequest,
+    limits: CheckpointLimits,
 ) -> io::Result<()> {
     let run_id = request.run_id;
     let workspace_id = request.workspace_id;
-    let result = match cwd {
-        Some(cwd) => {
-            workspace_patch(
-                &cwd,
-                &run_id,
-                &request.base_tree,
-                &request.base_head,
-                request.capture_index,
-            )
-            .await
-        }
-        None => Err(invalid(
-            "The requested repository is outside this worker workspace",
-        )),
+    let made = async {
+        let checkpoint = match cwd {
+            Some(cwd) => {
+                workspace_patch(
+                    &cwd,
+                    &run_id,
+                    &request.base_tree,
+                    &request.base_head,
+                    request.capture_index,
+                    limits,
+                )
+                .await?
+            }
+            None => {
+                return Err(invalid(
+                    "The requested repository is outside this worker workspace",
+                ));
+            }
+        };
+        let described = |part: &Written| -> io::Result<(u32, Vec<u8>)> {
+            let mut context = ring::digest::Context::new(&ring::digest::SHA256);
+            part.digest(&mut |bytes| context.update(bytes))?;
+            let size = u32::try_from(part.size)
+                .map_err(|_| invalid("A checkpoint part is larger than the protocol carries"))?;
+            Ok((size, context.finish().as_ref().to_vec()))
+        };
+        let (size, sha256) = described(&checkpoint.patch)?;
+        let (commits_size, commits_sha256) = described(&checkpoint.commits)?;
+        let index = match &checkpoint.index {
+            Some((tree, part)) => {
+                let (size, sha256) = described(part)?;
+                Some(AgentSnapshotIndex {
+                    tree: tree.clone(),
+                    size,
+                    sha256,
+                })
+            }
+            None => None,
+        };
+        Ok::<_, io::Error>((
+            checkpoint,
+            size,
+            sha256,
+            commits_size,
+            commits_sha256,
+            index,
+        ))
     };
-    let checkpoint = match result {
-        Ok(checkpoint) => checkpoint,
+    let (checkpoint, size, sha256, commits_size, commits_sha256, index) = match made.await {
+        Ok(made) => made,
         Err(error) => {
             eprintln!("Could not checkpoint agent files: {error}");
+            // What is too large, and what to do, the home shows; anything else it says in its own words.
+            let problem = if error.kind() == io::ErrorKind::FileTooLarge {
+                error.to_string()
+            } else {
+                String::new()
+            };
             return send(
                 &outgoing,
                 WorkerMessage::Snapshot(AgentSnapshotResult {
                     run_id,
                     workspace_id,
                     unavailable: true,
+                    problem,
                     ..Default::default()
                 }),
             )
             .await;
         }
     };
-    let sha256 = |bytes: &[u8]| {
-        ring::digest::digest(&ring::digest::SHA256, bytes)
-            .as_ref()
-            .to_vec()
-    };
     send(
         &outgoing,
         WorkerMessage::Snapshot(AgentSnapshotResult {
             run_id: run_id.clone(),
             workspace_id,
-            tree: checkpoint.tree,
-            size: checkpoint.patch.len() as u32,
-            sha256: sha256(&checkpoint.patch),
-            head: checkpoint.head,
-            commits_size: checkpoint.commits.len() as u32,
-            commits_sha256: sha256(&checkpoint.commits),
-            index: checkpoint
-                .index
-                .as_ref()
-                .map(|(tree, bytes)| AgentSnapshotIndex {
-                    tree: tree.clone(),
-                    size: bytes.len() as u32,
-                    sha256: sha256(bytes),
-                }),
+            tree: checkpoint.tree.clone(),
+            size,
+            sha256,
+            head: checkpoint.head.clone(),
+            commits_size,
+            commits_sha256,
+            index,
             unavailable: false,
+            problem: String::new(),
         }),
     )
     .await?;
-    for chunk in checkpoint.patch.chunks(CHUNK_BYTES) {
-        send(
-            &outgoing,
-            WorkerMessage::Patch(AgentRunBytes {
-                run_id: run_id.clone(),
-                data: chunk.to_vec(),
-            }),
-        )
-        .await?;
+    // Each part from its file, a frame at a time: none is read whole into memory.
+    let mut parts: Vec<(&Written, PartFrame)> = vec![(&checkpoint.patch, WorkerMessage::Patch)];
+    if let Some((_, staged)) = &checkpoint.index {
+        parts.push((staged, WorkerMessage::IndexPatch));
     }
-    for chunk in checkpoint
-        .index
-        .iter()
-        .flat_map(|(_, bytes)| bytes.chunks(CHUNK_BYTES))
-    {
-        send(
-            &outgoing,
-            WorkerMessage::IndexPatch(AgentRunBytes {
-                run_id: run_id.clone(),
-                data: chunk.to_vec(),
-            }),
-        )
-        .await?;
-    }
-    for chunk in checkpoint.commits.chunks(CHUNK_BYTES) {
-        send(
-            &outgoing,
-            WorkerMessage::Commits(AgentRunBytes {
-                run_id: run_id.clone(),
-                data: chunk.to_vec(),
-            }),
-        )
-        .await?;
+    parts.push((&checkpoint.commits, WorkerMessage::Commits));
+    for (part, frame) in parts {
+        let mut chunks = part.chunks(CHUNK_BYTES)?;
+        while let Some(data) = chunks.next_chunk()? {
+            send(
+                &outgoing,
+                frame(AgentRunBytes {
+                    run_id: run_id.clone(),
+                    data,
+                }),
+            )
+            .await?;
+        }
     }
     Ok(())
 }
@@ -1084,28 +1108,34 @@ pub async fn watch_agent_slot(
             None => endpoint.connect().await?,
         };
         let (outgoing, receiver) = mpsc::channel(4);
-        send(
-            &outgoing,
-            WorkerMessage::Hello(AgentWorkerHello {
-                worker_id: enrollment.worker_id.into(),
-                version: PROTOCOL_VERSION,
-                journal_id,
-                capacity: worker_capacity(&config.root),
-                reserve_before_transfer: true,
-                capabilities: config
-                    .providers
-                    .iter()
-                    .map(|provider| provider.capability.clone())
-                    .collect(),
-                any_project: config.any_project(),
-                reports_sign_in: config.signed_in.is_some(),
-                signed_in: config.signed_in(),
-                release: config.release.clone(),
-                readiness: config.readiness(),
-                updates_on_request: update::available(),
-            }),
-        )
-        .await?;
+        let mut hello = AgentWorkerHello {
+            worker_id: enrollment.worker_id.into(),
+            version: PROTOCOL_VERSION,
+            journal_id,
+            capacity: worker_capacity(&config.root),
+            reserve_before_transfer: true,
+            capabilities: config
+                .providers
+                .iter()
+                .map(|provider| provider.capability.clone())
+                .collect(),
+            any_project: config.any_project(),
+            reports_sign_in: config.signed_in.is_some(),
+            signed_in: config.signed_in(),
+            release: config.release.clone(),
+            readiness: config.readiness(),
+            updates_on_request: update::available(),
+            // It keeps each project's history, so the home sends only what that copy lacks.
+            keeps_history: true,
+            histories: Vec::new(),
+        };
+        // What it holds, as much as its hello has room for once framed.
+        agent_history::tell(
+            &mut hello,
+            &agent_history::known(&config.root).await,
+            MAX_HELLO_BYTES - 256,
+        );
+        send(&outgoing, WorkerMessage::Hello(hello)).await?;
         let mut incoming = control_client(channel.clone())
             .run_agent(ReceiverStream::new(receiver))
             .await?
@@ -1148,6 +1178,8 @@ pub async fn watch_agent_slot(
                 )
             }),
             reserve_before_transfer: hello.reserve_before_transfer,
+            checkpoint_limits: CheckpointLimits::of(hello.takes_large_checkpoints),
+            problem: None,
         }))
     })
     .await??
@@ -1176,6 +1208,7 @@ pub async fn watch_agent_slot(
                     outcome: outcome.into(),
                     exit_code,
                     worker_busy,
+                    problem: slot.problem.take().unwrap_or_default(),
                 }
             }
             HomeMessage::Reconcile(run) => {
@@ -1200,6 +1233,7 @@ pub async fn watch_agent_slot(
                     .into(),
                     exit_code: None,
                     worker_busy: false,
+                    problem: String::new(),
                 }
             }
             // Only ever sent between runs: the home refuses to remove a worker at work.
@@ -1342,6 +1376,16 @@ async fn execute(
         Ok(None) => return Ok((AgentRunOutcome::Stopped, None)),
         Err(error) => {
             eprintln!("Could not stage the agent checkout: {error}");
+            // What the home shows: a disk without room, or a send too large, in words that say what to do.
+            slot.problem = error
+                .downcast_ref::<io::Error>()
+                .filter(|error| {
+                    matches!(
+                        error.kind(),
+                        io::ErrorKind::StorageFull | io::ErrorKind::FileTooLarge
+                    )
+                })
+                .map(ToString::to_string);
             return Ok((AgentRunOutcome::StartFailed, None));
         }
     };
@@ -1467,7 +1511,11 @@ async fn stage_workspace(
         }
         return Ok(Some(AgentWorkspace::single(path)));
     };
-    let mut transfer = WorkspaceTransfer::create(path, &run.run_id, source)?;
+    let project = path
+        .parent()
+        .ok_or_else(|| invalid("The assigned worker workspace is unavailable"))?
+        .to_owned();
+    let mut transfer = WorkspaceTransfer::create(path, &run.run_id, source, &project)?;
     while !transfer.complete() {
         match slot.message().await? {
             HomeMessage::Checkout(frame)

@@ -72,6 +72,7 @@ import { taskWorker, type WorkerExecution } from './workerExecution'
 import { WorkerTaken } from './workerWait'
 import { workerSkillFiles } from './workerSkills'
 import { workerStdioMcp } from './workerMcp'
+import { sentWords } from './workerWorkspace'
 import { startsAgain } from './startAgain'
 import { needsAcross, needsOn, toolsToInstall } from './toolNeeds'
 import { folderGoneWords, modelGoneWords, modelMissingWords, signInEndedWords, summarize } from './words'
@@ -998,6 +999,15 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           osStartedAt: connection.process.osStartedAt ?? null,
           environmentDigest: connection.process.environmentDigest,
           state: 'running',
+        })
+      }
+      // What went to the worker, and how much: only what's new to the history it keeps, or the history too.
+      const sent = remote?.sent
+      if (selectedWorker !== null && sent !== undefined) {
+        yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
+          source: 'runtime',
+          severity: 'info',
+          title: sentWords(sent, placedOn === undefined ? workerNameOf(selectedWorker) : workerName(placedOn)),
         })
       }
       // Skills it should have had and didn't get are said in the thread, as the other things a start couldn't do are.

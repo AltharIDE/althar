@@ -33,6 +33,8 @@ const hello = (workerId: string): AgentWorkerHello => ({
   signedIn: [],
   release: '',
   reserveBeforeTransfer: false,
+  keepsHistory: false,
+  histories: [],
   updatesOnRequest: false,
   version: 1,
   workerId,
@@ -122,7 +124,7 @@ it.live('keeps a worker that dropped mid-run until it says that run stopped, the
       assert.strictEqual(yield* Effect.flip(home.revoke!(workerId)), 'It runs a task. Remove it once that finishes.')
       back.send({
         case: 'exit',
-        value: { $typeName: 'althar.worker.v1.AgentRunExit', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
+        value: { $typeName: 'althar.worker.v1.AgentRunExit', problem: '', workerBusy: false, runId, outcome: AgentRunOutcome.STOPPED },
       })
       // The home ends that stream once the run is settled: the workspace is free, and so is the worker.
       assert.isUndefined(yield* Effect.promise(() => back.read()))
@@ -198,6 +200,7 @@ it.live('tells a worker connected at Remove that it was removed, and one at work
         case: 'exit',
         value: {
           $typeName: 'althar.worker.v1.AgentRunExit',
+          problem: '',
           workerBusy: false,
           runId: started.value.runId,
           outcome: AgentRunOutcome.STOPPED,

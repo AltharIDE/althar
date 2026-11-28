@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto'
 import { posix } from 'node:path'
 import { PassThrough, Readable } from 'node:stream'
 import { AgentRequestFailed, AgentStartFailed } from '@althar/provider-adapters'
-import { acceptWorkerPatch, prepareWorkerWorkspace, verifyWorkerIndex } from '../workerWorkspace'
+import { acceptWorkerPatch, prepareWorkerWorkspace, sendSizeWords, verifyWorkerIndex, type WorkerSendLimits } from '../workerWorkspace'
 import type { CapturedWorkerCheckout, WorkerAdmin, WorkerExecution, WorkerExecutionPlatform, WorkerSetupOutcome } from '../workerExecution'
 import { AgentRunOutcome } from '@althar/worker-protocol'
 import {
   isWorkerBusy,
   MAX_WORKER_BUNDLE_BYTES,
+  MAX_WORKER_SET_BYTES,
   type AgentWorkerPool,
   type WorkerAgentProcess,
   type WorkerManagedProcess,
@@ -15,6 +16,7 @@ import {
 } from '@althar/worker-protocol/agent-runs'
 import { Effect, Scope, Semaphore } from 'effect'
 
+import type { GitFailed } from '../errors'
 import { WorkerTaken } from '../workerWait'
 import { WorkerHomeError } from './errors'
 import type { WorkerEnrollment } from './network'
@@ -24,6 +26,9 @@ const unavailable = (error: unknown): string => {
   if (error instanceof Error) return error.message
   return typeof error === 'string' ? error : 'The worker connection was lost.'
 }
+
+/** A send that couldn't be made, in the words it gives where it gives any (what is too large, and what to do), not git's. */
+const saidPlainly = (error: GitFailed): Error | GitFailed => (error.reason === undefined ? error : new Error(error.reason))
 
 const setupOutcome = (report: { exitCode: number; timedOut: boolean; outputTail: Uint8Array }): WorkerSetupOutcome => ({
   code: report.exitCode,
@@ -67,8 +72,16 @@ export const workerExecution = (
       readonly writes: Semaphore.Semaphore
       readonly toolPort: number
       readonly homeToolPort: number
+      /** What a helper's copy sent to the worker may leave out: what its copy of the history held, and what this run sent it. */
+      readonly limits: WorkerSendLimits
     }
   >()
+  /** What a send to a worker for a project may leave out and how large it may be, as the worker said it on its stream. */
+  const limitsOf = (workerId: string, projectId: string): WorkerSendLimits => {
+    const history = active()?.history(workerId, projectId)
+    if (history === undefined) return { maxBytes: MAX_WORKER_BUNDLE_BYTES }
+    return { maxBytes: history.maxBytes, keeps: history.keeps, known: history.commits }
+  }
   /** The workers being readied for a task, each by the workspace it is readied for: it holds the worker as a run does. */
   const preparing = new Map<string, string>()
   /** The workers held for a start that hasn't opened there yet, each by its workspace (`reserve`): used once, by its open. */
@@ -277,8 +290,8 @@ export const workerExecution = (
             const checkout =
               input.copy === undefined
                 ? undefined
-                : yield* prepareWorkerWorkspace(input.copy, MAX_WORKER_BUNDLE_BYTES).pipe(
-                    Effect.mapError((error) => failed(unavailable(error))),
+                : yield* prepareWorkerWorkspace(input.copy, workspace.limits).pipe(
+                    Effect.mapError((error) => failed(unavailable(saidPlainly(error)))),
                   )
             const child = yield* Effect.tryPromise({
               try: () =>
@@ -336,7 +349,7 @@ export const workerExecution = (
                     try: () => workspace.agent.readPatch(previous.tree, previous.head, commandId),
                     catch: unavailable,
                   })
-                  yield* acceptWorkerPatch(copy, previous, changed, owns)
+                  yield* acceptWorkerPatch(copy, previous, changed, owns).pipe(Effect.ensuring(Effect.sync(() => changed.release?.())))
                   baseline = { head: changed.head, tree: changed.tree }
                 }).pipe(
                   Effect.mapError(
@@ -394,14 +407,35 @@ export const workerExecution = (
                   if (readying(workerId) === undefined) active()?.retryUpdate(workerId)
                 }),
             )
+            const limits = limitsOf(workerId, projectId)
             const entries = yield* Effect.forEach(
               repositories ?? [{ workspaceId, directory: '', worktree }],
               (entry) =>
-                Effect.map(prepareWorkerWorkspace(entry.worktree, MAX_WORKER_BUNDLE_BYTES), (checkout) => ({ ...entry, checkout })),
+                prepareWorkerWorkspace(entry.worktree, limits).pipe(
+                  Effect.map((checkout) => ({ ...entry, checkout })),
+                  Effect.mapError(saidPlainly),
+                ),
               { concurrency: 2 },
             )
             const [primary] = entries
             if (primary === undefined) return yield* failed('There are no task repositories to send to this worker.')
+            const bytes = entries.reduce((sum, entry) => sum + entry.checkout.size, 0)
+            // A worker on an older release takes a repository set's sends together only up to its own limit.
+            if (limits.keeps !== true && repositories !== undefined && bytes > MAX_WORKER_SET_BYTES)
+              return yield* failed(
+                new Error(
+                  `The task’s repositories come to ${sendSizeWords(bytes)} together; the worker takes at most ${sendSizeWords(MAX_WORKER_SET_BYTES)} at once. Update the worker: it then keeps each project’s history, and later sends carry only what’s new. Or run this task on the home.`,
+                ),
+              )
+            // What the home knows it needs there: the send staged, then taken into the worker's copy of the history, or, on an
+            // older worker, into its checkout. The checkout a copy makes the worker checks itself, as it knows its copy's size.
+            const free = pool.list(projectId).find((one) => one.workerId === workerId)?.capacity?.freeDiskMib
+            if (free !== undefined && bytes * 2 > free * 1024 ** 2)
+              return yield* failed(
+                new Error(
+                  `The worker has ${sendSizeWords(free * 1024 ** 2)} free; this task’s send of ${sendSizeWords(bytes)} needs about ${sendSizeWords(bytes * 2)} there. Free space on the worker, or run this task on the home.`,
+                ),
+              )
             const agent = yield* Effect.tryPromise({
               try: (signal) =>
                 pool.start(
@@ -421,11 +455,14 @@ export const workerExecution = (
             })
             return {
               agent,
+              limits,
+              sent: { bytes, thin: entries.every((entry) => entry.checkout.thin), keeps: limits.keeps === true },
               entries: entries.map(({ worktree, workspaceId, directory, checkout }) => ({
                 worktree,
                 workspaceId: repositories === undefined ? undefined : workspaceId,
                 directory,
                 base: { head: checkout.head, tree: checkout.tree },
+                sent: [checkout.basis, checkout.head],
               })),
             }
           }),
@@ -437,7 +474,7 @@ export const workerExecution = (
               () => undefined,
             ),
           )
-        const { agent, entries } = yield* Effect.acquireRelease(made, ({ agent }) => stop(agent))
+        const { agent, entries, limits, sent } = yield* Effect.acquireRelease(made, ({ agent }) => stop(agent))
         if (agent.toolPort === undefined) return yield* failed(new Error('The worker did not open the Althar tools connection.'))
         const scope = yield* Effect.scope
         yield* Scope.addFinalizer(
@@ -463,12 +500,15 @@ export const workerExecution = (
                   try: () => agent.readPatch(entry.base.tree, entry.base.head, entry.workspaceId, captureIndex),
                   catch: unavailable,
                 })
-                if (captureIndex) {
-                  if (changed.index === undefined) return yield* Effect.fail('The worker did not return its staged files.')
-                  const index = yield* verifyWorkerIndex(entry.worktree, entry.base.tree, changed.index)
-                  captured.set(entry.worktree, { head: changed.head, tree: changed.tree, index })
-                }
-                yield* acceptWorkerPatch(entry.worktree, entry.base, changed, agent.ownsRun)
+                // What came back is in files of its own until it is taken in, or refused.
+                yield* Effect.gen(function* () {
+                  if (captureIndex) {
+                    if (changed.index === undefined) return yield* Effect.fail('The worker did not return its staged files.')
+                    const index = yield* verifyWorkerIndex(entry.worktree, entry.base.tree, changed.index)
+                    captured.set(entry.worktree, { head: changed.head, tree: changed.tree, index })
+                  }
+                  yield* acceptWorkerPatch(entry.worktree, entry.base, changed, agent.ownsRun)
+                }).pipe(Effect.ensuring(Effect.sync(() => changed.release?.())))
                 entry.base = { head: changed.head, tree: changed.tree }
                 if (!agent.ownsRun()) return yield* Effect.fail('The worker no longer owns this run.')
               }
@@ -493,6 +533,9 @@ export const workerExecution = (
             writes,
             toolPort: agent.toolPort,
             homeToolPort: toolPort,
+            // The worker added what it was sent to its copy of the history: a helper's copy needn't carry it again.
+            limits:
+              limits.keeps === true ? { ...limits, known: [...(limits.known ?? []), ...entries.flatMap(({ sent }) => sent)] } : limits,
           })
         return {
           transport: {
@@ -522,6 +565,7 @@ export const workerExecution = (
                   repositorySetup: Object.fromEntries(agent.setup.repositories.map((report) => [report.workspaceId, setupOutcome(report)])),
                 }),
           checkpoint,
+          sent,
         }
       }),
   }
