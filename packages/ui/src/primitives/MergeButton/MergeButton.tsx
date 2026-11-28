@@ -37,7 +37,7 @@ export const mergeButtonText: MergeButtonText = {
   queued: 'In the queue',
   merged: 'Merged',
   whenGreen: 'Merge when checks pass',
-  waiting: 'Merges when checks pass',
+  waiting: 'Merges after checks',
   leave: 'Don’t merge',
 }
 

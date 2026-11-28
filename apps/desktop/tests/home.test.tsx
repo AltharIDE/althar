@@ -315,9 +315,13 @@ describe('the home', () => {
     await userEvent.click(line('A check failed').getByRole('button', { name: 'Ask the lead to fix it' }))
     expect(onTask).toHaveBeenLastCalledWith('thr24')
     expect(client.send).not.toHaveBeenCalled()
-    // While checks run there's nothing to do but wait: its button opens it.
-    await userEvent.click(line('Checks still running').getByRole('button', { name: 'Review' }))
-    expect(onTask).toHaveBeenLastCalledWith('thr25')
+    // While checks run, Merge when checks pass, at the head seen: it says at once that it waits, and Don't merge undoes it.
+    await userEvent.click(line('Checks still running').getByRole('button', { name: 'Merge when checks pass: #25' }))
+    expect(client.mergeWhenGreen).toHaveBeenCalledWith('r25', 'https://github.com/meridian/api/pull/12', 'abc123')
+    expect(await line('Checks still running').findByText('Merges after checks')).toBeTruthy()
+    await userEvent.click(line('Checks still running').getByRole('button', { name: 'Don’t merge' }))
+    expect(client.leaveMergeLine).toHaveBeenCalledWith('r25', 'https://github.com/meridian/api/pull/12')
+    expect(await line('Checks still running').findByRole('button', { name: 'Merge when checks pass: #25' })).toBeTruthy()
     // A cancelled check is in the way, not a pass, and it is run again on the host: its button opens it.
     expect(line('A check cancelled').getByText('api #26 · e2e cancelled · +12 −3')).toBeTruthy()
     await userEvent.click(line('A check cancelled').getByRole('button', { name: 'Review' }))
