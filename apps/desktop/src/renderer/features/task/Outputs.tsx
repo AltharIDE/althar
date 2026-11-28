@@ -699,6 +699,8 @@ export function Outputs({
           // Its one repository only on this computer: merged here, unless it's put on a host first, which the card offers quietly.
           const onlyHere = hostless && task.here.length === 1 && task.here[0]?.remote == null && putOnHost !== undefined
           if (onlyHere && putOnHost.putting !== null) return putOnHost.putting
+          // Ship, opening its pull request or connecting its host leads the card: merging here is then the quieter choice under it.
+          const led = (first === undefined && shipAction !== null) || opens || connects !== null
           const actions: ReactNode[] = [
             ...(onlyHere && putOnHost.hosts.length > 0
               ? [
@@ -736,12 +738,7 @@ export function Outputs({
                   : []),
             ...(merging
               ? [
-                  <Button
-                    key="here"
-                    variant={opens || connects !== null ? 'default' : 'signal'}
-                    {...pressed(doing.mergeHere)}
-                    onClick={onMergeHere}
-                  >
+                  <Button key="here" variant={led ? 'default' : 'signal'} {...pressed(doing.mergeHere)} onClick={onMergeHere}>
                     {text.mergeHere(mergeHereLabel(task.here, first !== undefined))}
                   </Button>,
                 ]

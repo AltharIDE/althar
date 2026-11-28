@@ -16,10 +16,11 @@ import {
   PR_416,
 } from '../../fixtures/outputs'
 import { States, statesParameters } from '../../storybook/States'
-import { ChangeState, CheckState } from '../../foundations/vocabulary'
+import { ChangeState, CheckState, ShipFar } from '../../foundations/vocabulary'
 import { Button } from '../../primitives/Button/Button'
 import { MergeButton } from '../../primitives/MergeButton/MergeButton'
 import { visiblePath } from '../../primitives/Path/Path'
+import { ShipButton } from '../ShipButton/ShipButton'
 import { ChangeSet, foldersOf, groupsOf } from './ChangeSet'
 
 const accept = fn()
@@ -218,6 +219,25 @@ export const OnItsBranch: Story = {
     ),
   },
   parameters: { width: ALONE },
+}
+
+/** Commits held for Ship, on a branch that can merge here too: Ship leads, and merging here is the quieter choice under it. */
+export const ShipOrMergeHere: Story = {
+  args: {
+    ...CHANGE_BRANCH,
+    remote: { name: 'origin', pushed: false, ahead: 3 },
+    actions: (
+      <>
+        <ShipButton
+          route={{ review: true, far: ShipFar.Merge }}
+          onRoute={fn()}
+          onShip={fn()}
+          about={{ commits: '3 commits', to: 'a new pull request', reviewer: 'GPT-6.1 Sol', theirs: false }}
+        />
+        <Button>Merge into main on this Mac</Button>
+      </>
+    ),
+  },
 }
 
 /**
@@ -548,6 +568,7 @@ export const AllStates: Story = {
         { state: 'in the merge queue', node: <ChangeSet {...args} {...Queued.args} /> },
         { state: 'one repository', node: <ChangeSet {...args} {...ONE_REPO} /> },
         { state: 'on its branch', node: <ChangeSet {...args} {...OnItsBranch.args} /> },
+        { state: 'on its branch, Ship or merge here', node: <ChangeSet {...args} {...ShipOrMergeHere.args} /> },
         { state: 'on its branch, commits not pushed', node: <ChangeSet {...args} {...NightlyCheck.args} /> },
         { state: 'on its branch, not connected', node: <ChangeSet {...args} {...NotConnected.args} /> },
         { state: 'on its branch, pushed', node: <ChangeSet {...args} {...NightlyCheckPushed.args} /> },
