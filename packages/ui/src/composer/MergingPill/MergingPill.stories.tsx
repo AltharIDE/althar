@@ -146,7 +146,16 @@ const SAID = [
 ] as const
 
 /** A conversation long enough to scroll, on the kit's own face: the pill stays on the composer's edge while the thread scrolls on. With `allIn`, they merge, the pill shows them so for a moment, and goes. */
-function Conversation({ rows, allIn = false }: { readonly rows: ReadonlyArray<MergingRow>; readonly allIn?: boolean }) {
+function Conversation({
+  rows,
+  allIn = false,
+  draft = '',
+}: {
+  readonly rows: ReadonlyArray<MergingRow>
+  readonly allIn?: boolean
+  /** What the person has written and not sent: a long one makes the composer tall. */
+  readonly draft?: string
+}) {
   const [open, setOpen] = useState<'merging' | 'runs' | null>(null)
   const opens = (which: 'merging' | 'runs') => (next: boolean) => setOpen((was) => (next ? which : was === which ? null : was))
   const [phase, setPhase] = useState<'moving' | 'in' | 'going' | 'gone'>('moving')
@@ -166,7 +175,7 @@ function Conversation({ rows, allIn = false }: { readonly rows: ReadonlyArray<Me
       <TaskFace
         composer={
           <Composer
-            value=""
+            value={draft}
             onChange={() => {}}
             onSubmit={() => {}}
             placeholder="Tell the lead"
@@ -241,6 +250,27 @@ export const ManyInAShortWindow: Story = {
   parameters: { layout: 'fullscreen' },
   args: { rows: [...QUEUE, ...QUEUE.map((row) => ({ ...row, key: `${row.key}b`, label: `#${Number(row.label.slice(1)) + 10}` }))] },
   render: (args) => <Conversation rows={args.rows} />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /^Merging:/ }))
+  },
+}
+
+const LONG_DRAFT = [
+  'Before the next batch goes in, a few things:',
+  '',
+  '1. Hold #1233 until the board refresh fix is on main.',
+  '2. #1234 can go as it is.',
+  '3. For #1235, ask its lead whether the usage line still reads per account on Windows.',
+  '4. Once they are all in, cut 0.10.1 from the release branch.',
+  '',
+  'And tell me when the cascade into main has run.',
+].join('\n')
+
+/** A tall composer, a long draft in it, and a long queue opened: the card keeps its head in view, its rows scrolling in what is left. */
+export const ManyWithATallComposer: Story = {
+  parameters: { layout: 'fullscreen' },
+  args: { rows: [...QUEUE, ...QUEUE.map((row) => ({ ...row, key: `${row.key}b`, label: `#${Number(row.label.slice(1)) + 10}` }))] },
+  render: (args) => <Conversation rows={args.rows} draft={LONG_DRAFT} />,
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: /^Merging:/ }))
   },

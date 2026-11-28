@@ -195,6 +195,36 @@ describe('two pills on one edge, and a narrow one', () => {
   })
 })
 
+describe('the card’s room', () => {
+  it('gives its rows only the room between its foot and the top of the conversation it floats over, at least a row', () => {
+    const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this.hasAttribute('data-floats-host')) return new DOMRect(0, 100, 600, 500)
+      if (this.tagName === 'SECTION') return new DOMRect(0, 200, 600, 300)
+      return new DOMRect()
+    })
+    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(34)
+    render(
+      <div data-floats-host="">
+        <MergingPill rows={ROWS} defaultOpen />
+      </div>,
+    )
+    const card = screen.getByRole('region', { name: 'Merging' })
+    // Its foot at 500, the conversation's top at 100: less 12 over it, its head's 34 and its foot's 4.
+    expect(card.style.getPropertyValue('--rows-room')).toBe('350px')
+    rect.mockImplementation(function (this: Element) {
+      if (this.hasAttribute('data-floats-host')) return new DOMRect(0, 100, 600, 500)
+      if (this.tagName === 'SECTION') return new DOMRect(0, 90, 600, 40)
+      return new DOMRect()
+    })
+    // A composer grown nearly to the top: one row, which scrolls to the rest.
+    fireEvent.click(within(card).getByRole('button', { name: 'Merging' }))
+    fireEvent.click(pill())
+    expect(screen.getByRole('region', { name: 'Merging' }).style.getPropertyValue('--rows-room')).toBe('30px')
+    rect.mockRestore()
+    height.mockRestore()
+  })
+})
+
 describe('MergingBack', () => {
   it('says why the first one came back, and nothing where none did', () => {
     const { container, rerender } = render(<MergingBack rows={ROWS} />)

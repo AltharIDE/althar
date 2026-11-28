@@ -198,8 +198,9 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-  /* however many, its head stays in view: the rows scroll within what the conversation has room for */
-  max-height: max(96px, min(44vh, calc(100dvh - 300px)));
+  /* however many, its head stays in view: the rows scroll within the room between the composer's edge and the top of the
+     conversation (--rows-room, measured as the composer and the window change), and never take more than about half the window */
+  max-height: min(44vh, var(--rows-room, 44vh));
   margin: 0;
   padding: 0;
   overflow-y: auto;

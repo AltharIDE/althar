@@ -75,6 +75,13 @@ export interface MergingPillProps {
   className?: string
 }
 
+/** Kept clear over the opened card, under the top of the conversation it floats over. */
+const ROOM_ABOVE = 12
+/** The card's padding under its rows (MergingPill.module.css, .card). */
+const CARD_FOOT = 4
+/** The least its rows ever get: one, which scrolls to the others. */
+const ONE_ROW = 30
+
 const trouble = (row: MergingRow) => row.state === 'sent_back' || row.state === 'conflict'
 const later = (row: MergingRow) => row.url === null || row.once !== undefined
 const tone = (row: MergingRow) =>
@@ -143,11 +150,31 @@ export function MergingPill({
   const [open, setOpen] = useControlled(given, defaultOpen, onOpenChange)
   const pill = useRef<HTMLButtonElement>(null)
   const head = useRef<HTMLButtonElement>(null)
+  const card = useRef<HTMLElement>(null)
   const listId = useId()
   // Its pieces' names on the edge, its own, so two pills' never meet in a morph.
   const own = useId()
   // Folded, the tokens keep to one line inside the pill: those that don't fit wait in the card, and "…" says there are more.
   const tokens = useRef<HTMLSpanElement>(null)
+  // Opened, it grows up from the composer's edge: its rows take only the room between there and the top of the conversation
+  // it floats over (or the window), so its head stays in view however tall the composer grows with a draft or what is queued.
+  useLayoutEffect(() => {
+    const shown = card.current
+    if (!open || shown === null) return
+    const over = shown.closest('[data-floats-host]')
+    const fit = () => {
+      const top = over?.getBoundingClientRect().top ?? 0
+      const heading = head.current?.offsetHeight ?? 0
+      const room = shown.getBoundingClientRect().bottom - top - ROOM_ABOVE - heading - CARD_FOOT
+      shown.style.setProperty('--rows-room', `${Math.max(room, ONE_ROW)}px`)
+    }
+    fit()
+    if (typeof ResizeObserver === 'undefined') return
+    // The composer growing moves the card's foot; the window or the conversation, its top.
+    const observer = new ResizeObserver(fit)
+    for (const one of [over, shown.closest('[data-tray-host]')]) if (one != null) observer.observe(one)
+    return () => observer.disconnect()
+  }, [open])
   useLayoutEffect(() => {
     const line = tokens.current
     if (line === null) return
@@ -205,7 +232,7 @@ export function MergingPill({
   return (
     <EdgeMorph step={String(open)}>
       {open ? (
-        <section className={cx(s.card, leaving && s.going, className)} aria-label={named} data-m-ghost="">
+        <section ref={card} className={cx(s.card, leaving && s.going, className)} aria-label={named} data-m-ghost="">
           <span className={s.surface} data-m-box={own} aria-hidden="true" />
           <button ref={head} type="button" className={s.head} aria-expanded aria-controls={listId} onClick={() => toggle(false)}>
             <span className={s.name} data-m={`${own}name`}>
