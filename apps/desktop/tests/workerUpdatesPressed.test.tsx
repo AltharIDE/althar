@@ -8,6 +8,7 @@ import type { HomeWorker, HomeWorkers } from '@althar/contracts'
 import { keys } from '../src/renderer/data/reads'
 import { useServices } from '../src/renderer/data/services'
 import {
+  confirmTiming,
   forgetPressed,
   updateText,
   updatingWorkersOf,
@@ -58,6 +59,7 @@ function Probe() {
   const updates = useWorkerUpdates()
   return (
     <div>
+      <p data-testid="held">{pressed.intents.size}</p>
       {updatingWorkersOf(read.data ?? null, '0.3.0', pressed).map((one) => (
         <p key={one.id} data-testid={one.id}>
           {one.update?.state ?? 'none'}
@@ -79,7 +81,10 @@ function Probe() {
 
 const state = (id: string) => screen.getByTestId(id).textContent
 
-beforeEach(() => act(() => forgetPressed()))
+beforeEach(() => {
+  act(() => forgetPressed())
+  Object.assign(confirmTiming, { firstMs: 5, maxMs: 20 })
+})
 
 describe('what was pressed, over the reads', () => {
   it('lays an update asked over a read that doesn’t say it yet, and a Cancel over one that still does', () => {
@@ -143,5 +148,61 @@ describe('what was pressed, over the reads', () => {
     await waitFor(() => expect(state('a')).toBe('afterTask'))
     await userEvent.click(screen.getByRole('button', { name: 'Cancel a' }))
     await waitFor(() => expect(state('a')).toBe(`running: ${updateText.cancelRefused}`))
+  })
+
+  it('holds a press the home took through a confirming read that failed, until one comes in', async () => {
+    const asked = worker('a', {
+      busy: true,
+      task: { taskId: 't', threadId: 'th', title: 'Payout export', project: 'P' },
+      update: { state: 'asked' },
+    })
+    // The home's own record, and whether its reads get through, as the test says.
+    let record: HomeWorkers = home(worker('a'), worker('b'))
+    let down = false
+    const { client } = fakeClient({
+      getWorkers: vi.fn(async () => {
+        if (down) throw new Error('The connection dropped.')
+        return record
+      }),
+      updateWorker: vi.fn(async () => {
+        record = home(worker('a', { update: { state: 'started' } }), worker('b', { update: { state: 'started' } }))
+        down = true
+      }),
+      cancelWorkerUpdate: vi.fn(async () => {
+        const { update: _, ...gone } = asked
+        record = home(gone, worker('b'))
+        down = true
+      }),
+    })
+    withServices(<Probe />, client)
+    await waitFor(() => expect(state('a')).toBe('offer'))
+
+    // Update: taken, then its read fails; it stays asked, never Update again, until a read comes in.
+    await userEvent.click(screen.getByRole('button', { name: 'Update both' }))
+    await waitFor(() => expect(vi.mocked(client.getWorkers).mock.calls.length).toBeGreaterThan(3))
+    expect([state('a'), state('b')]).toEqual(['running', 'running'])
+    expect(screen.getByTestId('held').textContent).toBe('2')
+    act(() => {
+      down = false
+    })
+    await waitFor(() => expect(screen.getByTestId('held').textContent).toBe('0'))
+    expect([state('a'), state('b')]).toEqual(['running', 'running'])
+
+    // Cancel: taken, then its read fails; Cancel doesn't come back, until a read says it's gone.
+    act(() => {
+      record = home(asked, worker('b'))
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Read' }))
+    await waitFor(() => expect(state('a')).toBe('afterTask'))
+    const before = vi.mocked(client.getWorkers).mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel a' }))
+    await waitFor(() => expect(vi.mocked(client.getWorkers).mock.calls.length).toBeGreaterThan(before + 1))
+    expect(state('a')).toBe('offer')
+    expect(screen.getByTestId('held').textContent).toBe('1')
+    act(() => {
+      down = false
+    })
+    await waitFor(() => expect(screen.getByTestId('held').textContent).toBe('0'))
+    expect(state('a')).toBe('offer')
   })
 })

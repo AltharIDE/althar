@@ -76,6 +76,17 @@ const without = <V>(map: ReadonlyMap<string, V>, id: string) => {
   next.delete(id)
   return next
 }
+/** Each worker's last press, by a number of its own: a confirmation for an earlier one lets nothing go. */
+const presses = new Map<string, number>()
+let pressCount = 0
+const press = (workerId: string): number => {
+  pressCount += 1
+  presses.set(workerId, pressCount)
+  return pressCount
+}
+/** How soon a confirming read that failed is tried again, doubling up to the last. */
+export const confirmTiming = { firstMs: 1_000, maxMs: 30_000 }
+
 /** What was pressed and not yet confirmed, and what the home refused, by worker. */
 export const usePressed = (): Pressed => useSyncExternalStore(subscribe, () => pressed)
 
@@ -177,14 +188,24 @@ export const useWorkerUpdates = (): WorkerUpdatesModel => {
    * what was pressed is let go too.
    */
   const settle = useCallback(
-    (workerId: string, intent: Intent) =>
+    (workerId: string, press: number, attempt = 0): void => {
+      // Pressed again since: that press settles itself.
+      if (presses.get(workerId) !== press) return
+      // A read of its own, sent now (any read still out is let go): only its answer, in the cache, lets the press go.
       void cache
-        .refetchQueries({ queryKey: keys.workers }, { cancelRefetch: true })
-        .catch(() => undefined)
-        .finally(() => {
-          if (pressed.intents.get(workerId) === intent) change((was) => ({ intents: without(was.intents, workerId) }))
-        }),
-    [cache],
+        .cancelQueries({ queryKey: keys.workers })
+        .then(() => cache.fetchQuery({ queryKey: keys.workers, queryFn: () => client.getWorkers(), staleTime: 0, retry: false }))
+        .then(
+          () => {
+            if (presses.get(workerId) === press) change((was) => ({ intents: without(was.intents, workerId) }))
+          },
+          () => {
+            // Not read: the press holds, and it's read again before long, more slowly each time.
+            setTimeout(() => settle(workerId, press, attempt + 1), Math.min(confirmTiming.maxMs, confirmTiming.firstMs * 2 ** attempt))
+          },
+        )
+    },
+    [cache, client],
   )
   const update = useCallback(
     (workerIds: readonly string[]) => {
@@ -201,14 +222,16 @@ export const useWorkerUpdates = (): WorkerUpdatesModel => {
         }
         return { intents, refused, cancelRefused }
       })
-      for (const workerId of workerIds)
+      for (const workerId of workerIds) {
+        const pressed = press(workerId)
         client.updateWorker(workerId).then(
-          () => settle(workerId, 'update'),
+          () => settle(workerId, pressed),
           (error: unknown) => {
             change((was) => ({ refused: new Map(was.refused).set(workerId, error instanceof Error ? error.message : updateText.refused) }))
-            settle(workerId, 'update')
+            settle(workerId, pressed)
           },
         )
+      }
     },
     [cache, client, settle],
   )
@@ -216,15 +239,16 @@ export const useWorkerUpdates = (): WorkerUpdatesModel => {
     (workerId: string) => {
       void cache.cancelQueries({ queryKey: keys.workers })
       change((was) => ({ intents: new Map(was.intents).set(workerId, 'cancel'), cancelRefused: without(was.cancelRefused, workerId) }))
+      const pressed = press(workerId)
       client.cancelWorkerUpdate(workerId).then(
-        () => settle(workerId, 'cancel'),
+        () => settle(workerId, pressed),
         () => {
           // Told already: it goes on, and says so where Cancel was pressed.
           change((was) => ({
             intents: without(was.intents, workerId),
             cancelRefused: new Map(was.cancelRefused).set(workerId, updateText.cancelRefused),
           }))
-          settle(workerId, 'cancel')
+          settle(workerId, pressed)
         },
       )
     },
@@ -234,4 +258,7 @@ export const useWorkerUpdates = (): WorkerUpdatesModel => {
 }
 
 /** For tests: forgets what was pressed. */
-export const forgetPressed = () => change(() => ({ intents: new Map(), refused: new Map(), cancelRefused: new Map() }))
+export const forgetPressed = () => {
+  presses.clear()
+  change(() => ({ intents: new Map(), refused: new Map(), cancelRefused: new Map() }))
+}
