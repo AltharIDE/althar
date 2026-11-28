@@ -899,12 +899,11 @@ export const blocksOf = (
             item.input?.state === 'queued' &&
             !item.input.interrupting &&
             item.input.claimed !== true &&
-            item.input.unsent !== true &&
             !(source.readingLocally === true && locallyReading(item)))
         )
           continue
         // Being read now, it is the agent's already, in the store's word a moment later. One no agent is on its way to read
-        // says so, with Send again, unless the person just sent it again.
+        // says so, with Send again, unless the person just sent it again: one in the composer's queue stays there, to edit.
         const delivery =
           item.input?.state === 'queued' && item.input.unsent === true && source.resending !== true
             ? Delivery.NotSent

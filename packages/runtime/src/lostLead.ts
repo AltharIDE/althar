@@ -18,8 +18,9 @@ export const lostLeadKey = (threadId: string) => `lead:${threadId}`
  * A task's lead whose agent went on its own in the middle of a turn, with no step of a plan under way (the person talking
  * to it after its plan, as a prototype's lead does): started again by itself, as a step's lead is (DEV-173) and as leads
  * are after Althar restarts. What the person said in that turn goes to it again (`tryAgain`), and its start waits for its
- * worker where one holds it still (sessionConnections.ts), as a lost run there is said to have stopped. Not where it went
- * between turns (no work was lost), the task isn't open, another session is on the thread already, it asked the person
+ * worker where one holds it still (Sessions.ts), as a lost run there is said to have stopped. Only a turn on the person's own
+ * words: what Althar tells a lead, as a check to fix, carries on its own way. Not where it went between turns (no work was
+ * lost), the task isn't open, another session is on the thread already, it asked the person
  * something, or it went soon after Althar last started it again so: then it needs the person, as its notice says.
  */
 export const carryOnLost = (
@@ -35,10 +36,16 @@ export const carryOnLost = (
       WHERE t.id = ${threadId} AND t.kind = 'task' AND k.state = 'open'`
     if (thread === undefined) return false
     // Only a turn it was in the middle of: its last turn, of this session, failed as its agent went.
-    const [last] = yield* sql<{ sessionId: string | null; state: string; errorClass: string | null }>`
-      SELECT provider_session_id AS session_id, state, error_class FROM turn_deliveries
+    const [last] = yield* sql<{ id: string; sessionId: string | null; state: string; errorClass: string | null }>`
+      SELECT id, provider_session_id AS session_id, state, error_class FROM turn_deliveries
       WHERE thread_id = ${threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
     if (last?.sessionId !== sessionId || last.state !== 'failed' || last.errorClass !== 'agent_exited') return false
+    // A turn on the person's own words: what Althar told it (a check to fix, say) has its own way of carrying on.
+    const [theirs] = yield* sql<{ id: string }>`
+      SELECT i.id FROM turn_delivery_inputs di JOIN user_inputs i ON i.id = di.user_input_id
+      JOIN actors a ON a.id = i.author_actor_id AND a.kind = 'person'
+      WHERE di.delivery_id = ${last.id} LIMIT 1`
+    if (theirs === undefined) return false
     if (Option.isSome(yield* sessions.running(threadId))) return false
     if (yield* asking(threadId)) return false
     const key = lostLeadKey(threadId)

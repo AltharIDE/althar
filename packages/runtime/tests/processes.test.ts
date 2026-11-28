@@ -119,8 +119,16 @@ describe('agents as processes', () => {
         SELECT s.state AS session, p.state AS process, p.pid FROM provider_sessions s JOIN processes p ON p.provider_session_id = s.id`
       assert.deepStrictEqual(row, { session: 'failed', process: 'unknown', pid: null })
       assert.strictEqual(error.summary, `althar-no-such-agent isn't installed, or isn't on ${thisDevice()}'s PATH.`)
-      assert.deepStrictEqual(yield* notices(created.threadId), [
-        { source: 'runtime', severity: 'error', title: "Fake missing couldn't start.", description: error.summary },
+      // Its start, an object, beside the words.
+      assert.deepStrictEqual((yield* notices(created.threadId)) as ReadonlyArray<unknown>, [
+        {
+          source: 'runtime',
+          severity: 'error',
+          title: "Fake missing couldn't start.",
+          description: error.summary,
+          // What it was started on, for Try again and for what waited for it to show as unsent.
+          startFailed: { agentId: 'missing', model: null, effort: null },
+        },
       ])
     }).pipe(Effect.provide(runtime())),
   )

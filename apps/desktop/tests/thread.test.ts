@@ -372,21 +372,27 @@ describe('the wait for a reply', () => {
     expect(blocksOf({ ...source(now), reading: true }, new Map(), at)[2]).toMatchObject({ delivery: Delivery.Interrupting })
   })
 
-  it('says not sent of what no agent is on its way to read, in the thread and never waited on, until it is sent again', () => {
-    // Its lead couldn't start: an interrupting message as a queued one, neither with a wait after it nor in the composer.
+  it('says not sent of what no agent is on its way to read in the thread, never waited on, until it is sent again', () => {
+    // Its lead couldn't start: an interrupting message as a queued one shown in the thread, neither with a wait after it.
     for (const interrupting of [false, true]) {
       const thread = [
         items.you('Go'),
         items.says('Done.'),
         items.you('my message not sending', { state: 'queued', interrupting, unsent: true }),
       ]
-      const shown = blocksOf({ ...source(thread), reading: false, queue: true }, new Map(), at)
+      const shown = blocksOf({ ...source(thread), reading: false, queue: false }, new Map(), at)
       expect(kinds(shown)).toEqual(['you', 'turn', 'you'])
       expect(shown[2]).toMatchObject({ delivery: Delivery.NotSent })
       // Sent again, it is on its way at once.
       const again = blocksOf({ ...source(thread), reading: true, resending: true }, new Map(), at)
       expect(again[2]).toMatchObject({ delivery: interrupting ? Delivery.Interrupting : Delivery.Delivered })
     }
+    // One the composer's queue shows stays there, where it can be edited, as before.
+    const queued = [items.you('Go'), items.says('Done.'), items.you('Edit me', { state: 'queued', interrupting: false, unsent: true })]
+    expect(kinds(blocksOf({ ...source(queued), reading: false, queue: true }, new Map(), at))).toEqual(['you', 'turn'])
+    // An interrupting one is in the thread even then, not sent, never with a spinner.
+    const now = [items.you('Go'), items.says('Done.'), items.you('Sent now', { state: 'queued', interrupting: true, unsent: true })]
+    expect(blocksOf({ ...source(now), reading: false, queue: true }, new Map(), at)[2]).toMatchObject({ delivery: Delivery.NotSent })
   })
 
   it('waits on what the coordinator passed on, and on what opens the thread from outside it, but not on what waits behind a turn', () => {
