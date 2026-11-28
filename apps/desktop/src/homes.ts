@@ -181,7 +181,8 @@ export const LAST_WITHOUT_SETTING_UP = '0.2.0'
  */
 export const LAST_WITHOUT_HOME_SETTINGS = '0.2.1'
 
-const newer = (left: string, right: string) => {
+/** Whether release `left` is newer than `right`, by their major, minor and patch. */
+export const newer = (left: string, right: string) => {
   const a = left.split('.').map(Number)
   const b = right.split('.').map(Number)
   for (let index = 0; index < 3; index++) if ((a[index] ?? 0) !== (b[index] ?? 0)) return (a[index] ?? 0) > (b[index] ?? 0)

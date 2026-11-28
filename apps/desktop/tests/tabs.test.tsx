@@ -393,7 +393,7 @@ describe('the window’s tabs', () => {
     expect(tab('Northwind').getAttribute('aria-current')).toBe('page')
   })
 
-  it('say in the bar that a newer Althar is ready, with Restart only while no work runs', async () => {
+  it('gather Althar’s update under one glyph left of CPU and MEM, with Restart only while no work runs', async () => {
     let tell: (glance: unknown) => void = () => undefined
     const restart = vi.fn(async () => true)
     const host = fakeHost({
@@ -407,19 +407,75 @@ describe('the window’s tabs', () => {
       },
     })
     windowAt('/', [project], host)
-    const line = (await screen.findByText('Althar 0.1.1 is ready')).parentElement
-    if (line === null) throw new Error('The line has no parent')
-    expect(within(line).getByText('Installs when you quit')).toBeTruthy()
-    expect(within(line).queryByRole('button')).toBeNull()
+    const glyph = await screen.findByRole('button', { name: 'Updates: Althar 0.1.1' })
+    await userEvent.click(glyph)
+    const row = () => within(screen.getByRole('dialog', { name: 'Updates' })).getByRole('listitem')
+    expect(row().textContent).toContain('Althar 0.1.1 is ready')
+    expect(row().textContent).toContain('Installs when you quit, as tasks are running here.')
+    expect(within(row()).queryByRole('button', { name: 'Restart' })).toBeNull()
 
     act(() => tell({ ready: '0.1.1', working: false, restarting: false, failed: null }))
-    await userEvent.click(within(line).getByRole('button', { name: 'Restart' }))
+    await userEvent.click(within(row()).getByRole('button', { name: 'Restart' }))
     expect(restart).toHaveBeenCalledOnce()
     act(() => tell({ ready: '0.1.1', working: false, restarting: true, failed: null }))
-    expect(within(line).getByText('Restarting…')).toBeTruthy()
-    // Nothing ready, nothing said.
+    expect(row().textContent).toContain('Restarting into Althar 0.1.1')
+    // Nothing ready, nothing there at all.
     act(() => tell({ ready: null, working: false, restarting: false, failed: null }))
-    expect(screen.queryByText(/is ready/)).toBeNull()
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Updates:/ })).toBeNull())
+  })
+
+  const hermes = {
+    workerId: 'wrk_hermes',
+    name: 'hermes-box',
+    connected: true,
+    busy: false,
+    providers: ['codex'],
+    projects: [],
+    task: null,
+    release: '0.2.2',
+    updatesOnRequest: true,
+  }
+  /** A window whose home has hermes-box on 0.2.2, with 0.3.0 out for workers. */
+  const withWorkers = () => {
+    const host = fakeHost({
+      workers: {
+        release: vi.fn(async () => ({ kind: 'ready' as const, version: '0.3.0', base: 'https://x' })),
+      } as unknown as Host['workers'],
+    })
+    return windowAt('/', [project], host, homeOf, {
+      getWorkers: vi.fn(async () => ({ enabled: true, workers: [hermes] })),
+      updateWorker: vi.fn(async () => undefined),
+    })
+  }
+
+  it('offer the workers’ update beside it, and ask it from there at once', async () => {
+    const { client } = withWorkers()
+    await userEvent.click(await screen.findByRole('button', { name: 'Updates: hermes-box' }))
+    const row = () => {
+      const found = within(screen.getByRole('dialog', { name: 'Updates' }))
+        .getAllByRole('listitem')
+        .find((item) => item.textContent?.includes('hermes-box'))
+      if (found === undefined) throw new Error('No row for hermes-box')
+      return found
+    }
+    expect(row().textContent).toContain('hermes-box can update to 0.3.0')
+    await userEvent.click(within(row()).getByRole('button', { name: 'Update' }))
+    expect(client.updateWorker).toHaveBeenCalledWith('wrk_hermes')
+    // Asked, it shows at once, before the home says.
+    expect(row().textContent).toContain('Updating hermes-box')
+  })
+
+  it('put an update aside until its next release, saying where it still is', async () => {
+    window.localStorage.removeItem('althar.updates.hidden')
+    withWorkers()
+    await userEvent.click(await screen.findByRole('button', { name: 'Updates: hermes-box' }))
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'Updates' })).getByRole('button', { name: 'Hide until its next release' }),
+    )
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Updates:/ })).toBeNull())
+    expect(screen.getByRole('button', { name: 'Still in Settings › Computers' })).toBeTruthy()
+    expect(JSON.parse(window.localStorage.getItem('althar.updates.hidden') ?? '{}')).toEqual({ workers: '0.3.0' })
+    window.localStorage.removeItem('althar.updates.hidden')
   })
 })
 

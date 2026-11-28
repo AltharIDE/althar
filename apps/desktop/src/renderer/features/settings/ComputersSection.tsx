@@ -20,6 +20,7 @@ import { useServices } from '../../data/services'
 import { useNow } from '../../shared/time'
 import { usePlaces } from '../../shared/usePlaces'
 import { computerWorkerOf, useRemoveWorker, useWorkerProjects, useWorkersRead, useWorkerSignIn } from '../../shared/useWorkers'
+import { useNewestWorkerRelease, useRefusals, useWorkerUpdates, workerUpdateOf } from '../../shared/workerUpdates'
 import { useAddWorker } from './useAddWorker'
 import { homesUi, useHomesUi } from '../homes/useHomes'
 import { useWindowHome } from '../homes/windowHome'
@@ -83,6 +84,10 @@ export function ComputersSection({
   const removing = useRemoveWorker()
   const picking = useWorkerProjects()
   const signing = useWorkerSignIn()
+  // Each worker's update, against the newest worker release: asked from here, or from the bar's Updates.
+  const newest = useNewestWorkerRelease()
+  const updates = useWorkerUpdates()
+  const refusals = useRefusals()
   const atOnce = useAgentsAtOnce()
   const [adding, setAdding] = useState(false)
   // Add a worker…, from the Computers menu: open here as the section shows.
@@ -123,13 +128,18 @@ export function ComputersSection({
             ? null
             : {
                 enabled: workers.enabled,
-                list: workers.workers.map((one) =>
-                  computerWorkerOf(
-                    signing.held.has(one.workerId) ? { ...one, signedIn: signing.held.get(one.workerId) ?? [] } : one,
-                    (id) => names.get(id) ?? id,
-                    signsIn,
-                  ),
-                ),
+                list: workers.workers.map((one) => {
+                  const update = workerUpdateOf(one, newest, refusals.get(one.workerId))
+                  return {
+                    ...computerWorkerOf(
+                      signing.held.has(one.workerId) ? { ...one, signedIn: signing.held.get(one.workerId) ?? [] } : one,
+                      (id) => names.get(id) ?? id,
+                      signsIn,
+                    ),
+                    ...(one.release === undefined ? {} : { release: one.release }),
+                    ...(update === undefined ? {} : { update }),
+                  }
+                }),
               }
         }
         opened={opened}
@@ -142,6 +152,9 @@ export function ComputersSection({
         canRemove={here.canManageWorkers}
         {...(here.olderHome ? { text: { removeElsewhere: text.olderHome } } : {})}
         onTask={onTask}
+        onUpdate={updates.update}
+        onCancelUpdate={updates.cancel}
+        {...(newest === null ? {} : { newest })}
         allProjects={allProjects}
         {...(here.canManageWorkers
           ? {

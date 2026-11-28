@@ -485,6 +485,7 @@ it.live('lists the home’s enrolled workers, connected or not, and takes one ou
           ],
         },
       ],
+      updateOf: () => undefined,
     } as unknown as AgentWorkerPool
     let enrolled = [
       { workerId: online, projectIds: ['proj_a', 'proj_b'] },
